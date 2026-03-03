@@ -36,7 +36,7 @@ func rootCmd() *cobra.Command {
 	var cfgPath string
 
 	root := &cobra.Command{
-		Use:   "agent",
+		Use:   "v100",
 		Short: "Modular CLI/TUI agent harness",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return nil
@@ -633,7 +633,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			if _, err := os.Stat(cfgFile); err == nil {
 				fmt.Printf("✓ Config: %s\n", cfgFile)
 			} else {
-				fmt.Printf("✗ Config not found at %s (run: agent config init)\n", cfgFile)
+				fmt.Printf("✗ Config not found at %s (run: v100 config init)\n", cfgFile)
 				ok = false
 			}
 
@@ -651,7 +651,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					if _, err := os.Stat(tokenPath); err == nil {
 						fmt.Printf("✓ Provider %s: auth token found at %s\n", name, tokenPath)
 					} else {
-						fmt.Printf("✗ Provider %s: auth token not found at %s — run 'agent login'\n", name, tokenPath)
+						fmt.Printf("✗ Provider %s: auth token not found at %s — run 'v100 login'\n", name, tokenPath)
 						ok = false
 					}
 				default:

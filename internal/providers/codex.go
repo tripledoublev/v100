@@ -46,7 +46,7 @@ func NewCodexProvider(tokenPath, defaultModel string) (*CodexProvider, error) {
 	}
 	t, err := auth.Load(tokenPath)
 	if err != nil {
-		return nil, fmt.Errorf("codex: %w\n  → run 'agent login' to authenticate", err)
+		return nil, fmt.Errorf("codex: %w\n  → run 'v100 login' to authenticate", err)
 	}
 	p.token = *t
 	return p, nil
@@ -66,7 +66,7 @@ func (p *CodexProvider) accessToken(ctx context.Context) (access, accountID stri
 	if !p.token.Valid() {
 		refreshed, err := auth.Refresh(ctx, p.token.Refresh)
 		if err != nil {
-			return "", "", fmt.Errorf("codex: token refresh failed: %w\n  → run 'agent login' to re-authenticate", err)
+			return "", "", fmt.Errorf("codex: token refresh failed: %w\n  → run 'v100 login' to re-authenticate", err)
 		}
 		if saveErr := auth.Save(p.tokenPath, refreshed); saveErr != nil {
 			// Non-fatal: continue with the refreshed token even if save fails

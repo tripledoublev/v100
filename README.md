@@ -16,10 +16,10 @@ A modular CLI/TUI agent harness built in Go. Pluggable state machine + append-on
 
 ### ChatGPT subscription (default)
 
-Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate directly with `agent login` (opens browser for PKCE OAuth):
+Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate directly with `v100 login` (opens browser for PKCE OAuth):
 
 ```bash
-agent login   # opens browser → completes OAuth → saves token to ~/.config/v100/auth.json
+v100 login   # opens browser → completes OAuth → saves token to ~/.config/v100/auth.json
 ```
 
 Model: `gpt-5.3-codex`
@@ -30,7 +30,7 @@ Standard pay-as-you-go API access.
 
 ```bash
 export OPENAI_API_KEY=sk-...
-agent run --provider openai --model gpt-4o
+v100 run --provider openai --model gpt-4o
 ```
 
 ## Install
@@ -38,7 +38,7 @@ agent run --provider openai --model gpt-4o
 ```bash
 git clone https://github.com/tripledoublev/v100
 cd v100
-go build -o agent ./cmd/agent/
+go build -o v100 ./cmd/v100/
 ```
 
 Requires Go 1.21+. Optional: `rg` (ripgrep) for `project.search`, `patch` for `patch.apply`.
@@ -47,42 +47,42 @@ Requires Go 1.21+. Optional: `rg` (ripgrep) for `project.search`, `patch` for `p
 
 ```bash
 # Initialize config
-agent config init
+v100 config init
 
 # Authenticate with ChatGPT subscription
-agent login
+v100 login
 
 # Verify setup
-agent doctor
+v100 doctor
 
 # Start a run (uses ChatGPT subscription by default)
-agent run
+v100 run
 
 # With a step budget
-agent run --budget-steps 10
+v100 run --budget-steps 10
 
 # Use OpenAI API instead
-agent run --provider openai
+v100 run --provider openai
 
 # Enable TUI
-agent run --tui
+v100 run --tui
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `agent run` | Start interactive agent run |
-| `agent resume <run_id>` | Continue a run from its trace |
-| `agent replay <run_id>` | Pretty-print run transcript |
-| `agent tools` | List registered tools |
-| `agent providers` | List configured providers |
-| `agent config init` | Write default config to `~/.config/v100/config.toml` |
-| `agent doctor` | Check provider auth, tools, run dir |
-| `agent login` | Authenticate via browser OAuth (ChatGPT Plus/Pro) |
-| `agent logout` | Remove stored OAuth token |
+| `v100 run` | Start interactive agent run |
+| `v100 resume <run_id>` | Continue a run from its trace |
+| `v100 replay <run_id>` | Pretty-print run transcript |
+| `v100 tools` | List registered tools |
+| `v100 providers` | List configured providers |
+| `v100 config init` | Write default config to `~/.config/v100/config.toml` |
+| `v100 doctor` | Check provider auth, tools, run dir |
+| `v100 login` | Authenticate via browser OAuth (ChatGPT Plus/Pro) |
+| `v100 logout` | Remove stored OAuth token |
 
-### `agent run` flags
+### `v100 run` flags
 
 ```
 --provider string       Provider name (codex, openai)
