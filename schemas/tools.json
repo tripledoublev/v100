@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Tool I/O Schemas",
+  "description": "Input and output schemas for all built-in tools",
+  "type": "object",
+  "properties": {
+    "fs.read": {
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
+      "output": { "properties": { "content": { "type": "string" } } }
+    },
+    "fs.write": {
+      "input":  { "required": ["path","content"], "properties": { "path": { "type": "string" }, "content": { "type": "string" }, "append": { "type": "boolean" } } },
+      "output": { "properties": { "bytes_written": { "type": "integer" } } }
+    },
+    "fs.list": {
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
+      "output": { "properties": { "entries": { "type": "array", "items": { "type": "string" } } } }
+    },
+    "fs.mkdir": {
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
+      "output": { "properties": { "created": { "type": "string" } } }
+    },
+    "sh": {
+      "input":  { "required": ["cmd"], "properties": { "cmd": { "type": "string" }, "timeout": { "type": "integer" } } },
+      "output": { "properties": { "stdout": { "type": "string" }, "stderr": { "type": "string" }, "exit_code": { "type": "integer" } } }
+    },
+    "git.status": {
+      "input":  {},
+      "output": { "properties": { "output": { "type": "string" } } }
+    },
+    "git.diff": {
+      "input":  { "properties": { "staged": { "type": "boolean" } } },
+      "output": { "properties": { "output": { "type": "string" } } }
+    },
+    "git.commit": {
+      "input":  { "required": ["message"], "properties": { "message": { "type": "string" }, "add_all": { "type": "boolean" } } },
+      "output": { "properties": { "output": { "type": "string" } } }
+    },
+    "patch.apply": {
+      "input":  { "required": ["diff"], "properties": { "diff": { "type": "string" }, "strip": { "type": "integer" } } },
+      "output": { "properties": { "output": { "type": "string" } } }
+    },
+    "project.search": {
+      "input":  { "required": ["pattern"], "properties": { "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string" }, "case_sensitive": { "type": "boolean" }, "max_results": { "type": "integer" } } },
+      "output": { "properties": { "matches": { "type": "string" } } }
+    }
+  }
+}

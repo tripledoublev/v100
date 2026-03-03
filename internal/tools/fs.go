@@ -1,0 +1,268 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// ─────────────────────────────────────────
+// fs.read
+// ─────────────────────────────────────────
+
+type fsReadTool struct{}
+
+func FSRead() Tool { return &fsReadTool{} }
+
+func (t *fsReadTool) Name() string        { return "fs.read" }
+func (t *fsReadTool) Description() string { return "Read the contents of a file." }
+func (t *fsReadTool) DangerLevel() DangerLevel { return Safe }
+
+func (t *fsReadTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["path"],
+		"properties": {
+			"path": {"type": "string", "description": "Absolute or relative file path to read."}
+		}
+	}`)
+}
+
+func (t *fsReadTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"content": {"type": "string"}}}`)
+}
+
+func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+	path := resolvePath(call.WorkspaceDir, a.Path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return failResult(start, err.Error()), nil
+	}
+	return ToolResult{
+		OK:         true,
+		Output:     string(data),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// ─────────────────────────────────────────
+// fs.write
+// ─────────────────────────────────────────
+
+type fsWriteTool struct{}
+
+func FSWrite() Tool { return &fsWriteTool{} }
+
+func (t *fsWriteTool) Name() string        { return "fs.write" }
+func (t *fsWriteTool) Description() string { return "Write or append content to a file." }
+func (t *fsWriteTool) DangerLevel() DangerLevel { return Dangerous }
+
+func (t *fsWriteTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["path", "content"],
+		"properties": {
+			"path":    {"type": "string", "description": "File path to write."},
+			"content": {"type": "string", "description": "Content to write."},
+			"append":  {"type": "boolean", "description": "If true, append instead of overwrite.", "default": false}
+		}
+	}`)
+}
+
+func (t *fsWriteTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"bytes_written": {"type": "integer"}}}`)
+}
+
+func (t *fsWriteTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		Append  bool   `json:"append"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+
+	path := resolvePath(call.WorkspaceDir, a.Path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return failResult(start, err.Error()), nil
+	}
+
+	flag := os.O_CREATE | os.O_WRONLY
+	if a.Append {
+		flag |= os.O_APPEND
+	} else {
+		flag |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flag, 0o644)
+	if err != nil {
+		return failResult(start, err.Error()), nil
+	}
+	defer f.Close()
+
+	n, err := f.WriteString(a.Content)
+	if err != nil {
+		return failResult(start, err.Error()), nil
+	}
+	return ToolResult{
+		OK:         true,
+		Output:     fmt.Sprintf(`{"bytes_written":%d}`, n),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// ─────────────────────────────────────────
+// fs.list
+// ─────────────────────────────────────────
+
+type fsListTool struct{}
+
+func FSList() Tool { return &fsListTool{} }
+
+func (t *fsListTool) Name() string        { return "fs.list" }
+func (t *fsListTool) Description() string { return "List files and directories in a path." }
+func (t *fsListTool) DangerLevel() DangerLevel { return Safe }
+
+func (t *fsListTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["path"],
+		"properties": {
+			"path": {"type": "string", "description": "Directory path to list."}
+		}
+	}`)
+}
+
+func (t *fsListTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"entries": {"type": "array", "items": {"type": "string"}}}}`)
+}
+
+func (t *fsListTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+	path := resolvePath(call.WorkspaceDir, a.Path)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return failResult(start, err.Error()), nil
+	}
+	var names []string
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() {
+			n += "/"
+		}
+		names = append(names, n)
+	}
+	b, _ := json.Marshal(map[string]interface{}{"entries": names})
+	return ToolResult{
+		OK:         true,
+		Output:     string(b),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// ─────────────────────────────────────────
+// fs.mkdir
+// ─────────────────────────────────────────
+
+type fsMkdirTool struct{}
+
+func FSMkdir() Tool { return &fsMkdirTool{} }
+
+func (t *fsMkdirTool) Name() string        { return "fs.mkdir" }
+func (t *fsMkdirTool) Description() string { return "Create a directory (and parents)." }
+func (t *fsMkdirTool) DangerLevel() DangerLevel { return Safe }
+
+func (t *fsMkdirTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["path"],
+		"properties": {
+			"path": {"type": "string", "description": "Directory path to create."}
+		}
+	}`)
+}
+
+func (t *fsMkdirTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"created": {"type": "string"}}}`)
+}
+
+func (t *fsMkdirTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+	path := resolvePath(call.WorkspaceDir, a.Path)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return failResult(start, err.Error()), nil
+	}
+	b, _ := json.Marshal(map[string]string{"created": path})
+	return ToolResult{
+		OK:         true,
+		Output:     string(b),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// ─────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────
+
+func resolvePath(workspaceDir, path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	if workspaceDir != "" {
+		return filepath.Clean(filepath.Join(workspaceDir, path))
+	}
+	return filepath.Clean(path)
+}
+
+func failResult(start time.Time, msg string) ToolResult {
+	return ToolResult{
+		OK:         false,
+		Output:     msg,
+		DurationMS: time.Since(start).Milliseconds(),
+	}
+}
+
+// safeInWorkspace returns true if path is inside any of the allowed dirs.
+func safeInWorkspace(path string, allowedDirs []string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	for _, dir := range allowedDirs {
+		adir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(abs, adir+string(filepath.Separator)) || abs == adir {
+			return true
+		}
+	}
+	return false
+}
+
+// suppress unused warning — safeInWorkspace is available for callers.
+var _ = safeInWorkspace

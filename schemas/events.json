@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Trace Event",
+  "description": "Schema for events written to trace.jsonl",
+  "type": "object",
+  "required": ["ts", "run_id", "event_id", "type", "payload"],
+  "properties": {
+    "ts":       { "type": "string", "format": "date-time" },
+    "run_id":   { "type": "string" },
+    "step_id":  { "type": "string" },
+    "event_id": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": [
+        "run.start",
+        "user.message",
+        "model.response",
+        "tool.call",
+        "tool.result",
+        "run.error",
+        "run.end"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific payload — see individual definitions below"
+    }
+  },
+  "definitions": {
+    "run.start":      { "properties": { "policy": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" } } },
+    "user.message":   { "properties": { "content": { "type": "string" } } },
+    "model.response": { "properties": { "text": { "type": "string" }, "tool_calls": { "type": "array" }, "usage": { "type": "object" } } },
+    "tool.call":      { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "args": { "type": "string" } } },
+    "tool.result":    { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "ok": { "type": "boolean" }, "output": { "type": "string" }, "duration_ms": { "type": "integer" } } },
+    "run.error":      { "properties": { "error": { "type": "string" } } },
+    "run.end":        { "properties": { "reason": { "type": "string" }, "used_steps": { "type": "integer" }, "used_tokens": { "type": "integer" } } }
+  }
+}
