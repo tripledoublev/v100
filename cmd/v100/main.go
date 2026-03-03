@@ -239,16 +239,15 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		return err
 	}
 
-	fmt.Printf("Agent run started. ID: %s\n", run.ID)
-	fmt.Printf("Trace: %s\n", run.TraceFile)
-	fmt.Printf("Budget: %s\n", budget.Summary())
-	fmt.Println("Type your message and press Enter. Ctrl+C to quit.")
+	fmt.Println(ui.Info(ui.Dim("trace: ") + run.TraceFile))
+	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
+	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
 	ctx := context.Background()
 	reason := "user_exit"
 
 	for {
-		input, err := ui.Prompt("> ")
+		input, err := ui.Prompt("")
 		if err != nil {
 			reason = "user_exit"
 			break
@@ -264,16 +263,16 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		if err := loop.Step(ctx, input); err != nil {
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
-				fmt.Fprintf(os.Stderr, "\nBudget exceeded: %s\n", budgetErr.Reason)
+				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
 				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
 				break
 			}
-			fmt.Fprintf(os.Stderr, "Step error: %v\n", err)
+			fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
 		}
 	}
 
 	_ = loop.EmitRunEnd(reason)
-	fmt.Printf("\nRun ended. Budget: %s\n", budget.Summary())
+	fmt.Println(ui.Dim("budget: " + budget.Summary()))
 	return nil
 }
 
@@ -413,14 +412,14 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			renderer := ui.NewCLIRenderer()
 			loop.OutputFn = renderer.RenderEvent
 
-			fmt.Printf("Resuming run %s (%d events loaded)\n", runID, len(events))
+			fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", runID, len(events))))
 			_ = model
 			_ = tuiFlag
 
 			ctx := context.Background()
 			reason := "user_exit"
 			for {
-				input, err := ui.Prompt("> ")
+				input, err := ui.Prompt("")
 				if err != nil {
 					break
 				}
@@ -534,8 +533,8 @@ func configInitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := config.XDGConfigPath()
 			if _, err := os.Stat(path); err == nil {
-				fmt.Printf("Config already exists at %s\n", path)
-				fmt.Print("Overwrite? [y/N] ")
+				fmt.Println(ui.Warn("Config already exists at " + path))
+				fmt.Print(ui.Dim("Overwrite? [y/N] "))
 				var ans string
 				fmt.Scanln(&ans)
 				if strings.ToLower(strings.TrimSpace(ans)) != "y" {
@@ -548,14 +547,14 @@ func configInitCmd() *cobra.Command {
 			if err := os.WriteFile(path, []byte(config.DefaultTOML()), 0o644); err != nil {
 				return err
 			}
-			fmt.Printf("Config written to %s\n", path)
+			fmt.Println(ui.OK("Config written to " + path))
 
 			// Also write default policy prompt
 			if err := policy.WriteDefaultPrompt(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write default policy: %v\n", err)
+				fmt.Fprintln(os.Stderr, ui.Warn("could not write default policy: "+err.Error()))
 			} else {
 				home, _ := os.UserHomeDir()
-				fmt.Printf("Default policy written to %s/.config/v100/policies/default.md\n", home)
+				fmt.Println(ui.OK("Policy written to " + home + "/.config/v100/policies/default.md"))
 			}
 			return nil
 		},
@@ -572,7 +571,7 @@ func loginCmd() *cobra.Command {
 		Short: "Authenticate via browser OAuth (ChatGPT Plus/Pro)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			fmt.Println("Starting OAuth login flow...")
+			fmt.Println(ui.Info("Starting OAuth login flow…"))
 			t, err := auth.Login(ctx)
 			if err != nil {
 				return fmt.Errorf("login: %w", err)
@@ -581,11 +580,11 @@ func loginCmd() *cobra.Command {
 			if err := auth.Save(path, t); err != nil {
 				return fmt.Errorf("login: save token: %w", err)
 			}
-			fmt.Printf("Logged in successfully.\n")
+			fmt.Println(ui.OK("Logged in successfully"))
 			if t.AccountID != "" {
-				fmt.Printf("Account ID: %s\n", t.AccountID)
+				fmt.Println(ui.Dim("Account ID: ") + t.AccountID)
 			}
-			fmt.Printf("Token saved to: %s\n", path)
+			fmt.Println(ui.Dim("Token saved to: ") + path)
 			return nil
 		},
 	}
@@ -603,12 +602,12 @@ func logoutCmd() *cobra.Command {
 			path := auth.DefaultTokenPath()
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
-					fmt.Println("Already logged out (no token found).")
+					fmt.Println(ui.Dim("Already logged out (no token found)"))
 					return nil
 				}
 				return fmt.Errorf("logout: %w", err)
 			}
-			fmt.Printf("Logged out. Token removed from %s\n", path)
+			fmt.Println(ui.OK("Logged out — token removed from " + path))
 			return nil
 		},
 	}
@@ -623,6 +622,8 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 		Use:   "doctor",
 		Short: "Check provider auth, tool availability, and run dir",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			fmt.Println(ui.Header("v100 doctor"))
+			fmt.Println()
 			ok := true
 
 			// 1. Config
@@ -631,15 +632,15 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				cfgFile = config.XDGConfigPath()
 			}
 			if _, err := os.Stat(cfgFile); err == nil {
-				fmt.Printf("✓ Config: %s\n", cfgFile)
+				fmt.Println(ui.OK("Config: " + cfgFile))
 			} else {
-				fmt.Printf("✗ Config not found at %s (run: v100 config init)\n", cfgFile)
+				fmt.Println(ui.Fail("Config not found at " + cfgFile + " — run: v100 config init"))
 				ok = false
 			}
 
 			cfg, err := loadConfig(*cfgPath)
 			if err != nil {
-				fmt.Printf("✗ Config parse error: %v\n", err)
+				fmt.Println(ui.Fail("Config parse error: " + err.Error()))
 				return nil
 			}
 
@@ -649,18 +650,18 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				case "codex":
 					tokenPath := auth.DefaultTokenPath()
 					if _, err := os.Stat(tokenPath); err == nil {
-						fmt.Printf("✓ Provider %s: auth token found at %s\n", name, tokenPath)
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
-						fmt.Printf("✗ Provider %s: auth token not found at %s — run 'v100 login'\n", name, tokenPath)
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login'", name, tokenPath)))
 						ok = false
 					}
 				default:
 					key := os.Getenv(pc.Auth.Env)
 					if key == "" {
-						fmt.Printf("✗ Provider %s: env var %s not set\n", name, pc.Auth.Env)
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: env var %s not set", name, pc.Auth.Env)))
 						ok = false
 					} else {
-						fmt.Printf("✓ Provider %s: auth env %s set (%d chars)\n", name, pc.Auth.Env, len(key))
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, pc.Auth.Env, len(key))))
 					}
 				}
 			}
@@ -669,26 +670,26 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			{
 				p, err := findInPath("rg")
 				if err != nil || p == "" {
-					fmt.Println("✗ rg (ripgrep) not found in PATH — project.search will fail")
+					fmt.Println(ui.Fail("rg (ripgrep) not found — project.search will fail"))
 					ok = false
 				} else {
-					fmt.Printf("✓ rg: %s\n", p)
+					fmt.Println(ui.OK("rg: " + p))
 				}
 			}
 
 			// 4. patch
 			if p, _ := findInPath("patch"); p != "" {
-				fmt.Printf("✓ patch: %s\n", p)
+				fmt.Println(ui.OK("patch: " + p))
 			} else {
-				fmt.Println("✗ patch not found — patch.apply will fail")
+				fmt.Println(ui.Fail("patch not found — patch.apply will fail"))
 				ok = false
 			}
 
 			// 5. git
 			if p, _ := findInPath("git"); p != "" {
-				fmt.Printf("✓ git: %s\n", p)
+				fmt.Println(ui.OK("git: " + p))
 			} else {
-				fmt.Println("✗ git not found — git tools will fail")
+				fmt.Println(ui.Fail("git not found — git tools will fail"))
 				ok = false
 			}
 
@@ -699,17 +700,18 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				if f, err := os.Create(testFile); err == nil {
 					f.Close()
 					os.Remove(testFile)
-					fmt.Printf("✓ runs/ dir writable\n")
+					fmt.Println(ui.OK("runs/ dir writable"))
 				} else {
-					fmt.Printf("✗ runs/ dir not writable: %v\n", err)
+					fmt.Println(ui.Fail("runs/ dir not writable: " + err.Error()))
 					ok = false
 				}
 			}
 
+			fmt.Println()
 			if ok {
-				fmt.Println("\nAll checks passed.")
+				fmt.Println(ui.OK(ui.Bold("All checks passed")))
 			} else {
-				fmt.Println("\nSome checks failed. Fix issues above before running.")
+				fmt.Println(ui.Fail(ui.Bold("Some checks failed — fix issues above before running")))
 			}
 			return nil
 		},

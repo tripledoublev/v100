@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/tripledoublev/v100/internal/core"
 )
 
-// CLIRenderer prints events to stdout line by line.
+// CLIRenderer prints events to stdout line by line with colors.
 type CLIRenderer struct{}
 
 // NewCLIRenderer creates a CLI renderer.
@@ -19,68 +20,106 @@ func NewCLIRenderer() *CLIRenderer {
 	return &CLIRenderer{}
 }
 
-// RenderEvent prints a human-readable representation of an event.
+// RenderEvent prints a human-readable, colorized representation of an event.
 func (r *CLIRenderer) RenderEvent(ev core.Event) {
-	ts := ev.TS.Format(time.TimeOnly)
+	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
+
 	switch ev.Type {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("[%s] run.start  run=%s provider=%s model=%s policy=%s\n",
-			ts, ev.RunID[:8], p.Provider, p.Model, p.Policy)
+		fmt.Println(RunBanner(ev.RunID, p.Provider, p.Model))
 
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("[%s] user       %s\n", ts, p.Content)
+		fmt.Printf("\n%s  %s  %s\n",
+			ts,
+			styleUser.Render("you"),
+			p.Content,
+		)
 
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if p.Text != "" {
-			fmt.Printf("[%s] assistant  %s\n", ts, p.Text)
+			// Indent wrapped lines to align under the label
+			indented := indentLines(p.Text, "              ")
+			fmt.Printf("\n%s  %s  %s\n",
+				ts,
+				styleAssistant.Render("v100"),
+				indented,
+			)
 		}
 		for _, tc := range p.ToolCalls {
-			fmt.Printf("[%s] tool_call  %s(%s)\n", ts, tc.Name, tc.ArgsJSON)
+			fmt.Printf("           %s %s%s\n",
+				styleTool.Render("⚙"),
+				styleTool.Render(tc.Name),
+				styleMuted.Render("("+tc.ArgsJSON+")"),
+			)
 		}
 
 	case core.EventToolCall:
-		var p core.ToolCallPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("[%s] tool.call  %s  args=%s\n", ts, p.Name, p.Args)
+		// Shown inline in EventModelResp above; skip duplicate output.
 
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		status := "ok"
-		if !p.OK {
-			status = "FAIL"
+		var icon, statusStyle string
+		if p.OK {
+			icon = styleOK.Render("✓")
+			statusStyle = styleOK.Render(p.Name)
+		} else {
+			icon = styleFail.Render("✗")
+			statusStyle = styleFail.Render(p.Name)
 		}
 		out := p.Output
 		if len(out) > 200 {
-			out = out[:200] + "..."
+			out = out[:200] + "…"
 		}
-		fmt.Printf("[%s] tool.result %s [%s] %dms  %s\n", ts, p.Name, status, p.DurationMS, out)
+		out = strings.ReplaceAll(out, "\n", " ↵ ")
+		fmt.Printf("           %s %s  %s  %s\n",
+			icon,
+			statusStyle,
+			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
+			out,
+		)
 
 	case core.EventRunError:
 		var p core.RunErrorPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Fprintf(os.Stderr, "[%s] ERROR  %s\n", ts, p.Error)
+		fmt.Fprintf(os.Stderr, "\n%s  %s  %s\n",
+			ts,
+			styleFail.Render("error"),
+			styleFail.Render(p.Error),
+		)
 
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("[%s] run.end  reason=%s steps=%d tokens=%d\n",
-			ts, p.Reason, p.UsedSteps, p.UsedTokens)
+		fmt.Printf("\n%s\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
 
 	default:
-		fmt.Printf("[%s] %s\n", ts, ev.Type)
+		fmt.Printf("%s  %s\n", ts, styleMuted.Render(string(ev.Type)))
 	}
 }
 
 // ConfirmTool prompts the user on stdin to approve a dangerous tool call.
 func ConfirmTool(toolName, args string) bool {
-	fmt.Printf("\n  DANGEROUS TOOL: %s\n  Args: %s\n  Approve? [y/N] ", toolName, args)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrDanger).
+		Padding(0, 2).
+		Render(
+			styleDanger.Render("⚠  DANGEROUS TOOL: "+toolName) + "\n" +
+				styleMuted.Render("Args: ") + args + "\n\n" +
+				styleWarn.Render("Approve?") + "  " +
+				styleOK.Render("[y]") + " yes   " +
+				styleFail.Render("[N]") + " no",
+		)
+	fmt.Printf("\n%s\n\n", box)
+	fmt.Print(styleWarn.Render("▸ "))
+
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
 		return false
@@ -89,9 +128,9 @@ func ConfirmTool(toolName, args string) bool {
 	return ans == "y" || ans == "yes"
 }
 
-// Prompt prints a prompt and reads a line from stdin.
+// Prompt prints a styled prompt and reads a line from stdin.
 func Prompt(prompt string) (string, error) {
-	fmt.Print(prompt)
+	fmt.Print(stylePrimary.Render("▸") + " ")
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
@@ -102,62 +141,98 @@ func Prompt(prompt string) (string, error) {
 	return scanner.Text(), nil
 }
 
-// PrintReplayEvent prints a replay-friendly view of a trace event.
+// PrintReplayEvent prints a styled replay view of a trace event.
 func PrintReplayEvent(ev core.Event) {
-	ts := ev.TS.Format("2006-01-02 15:04:05")
+	ts := ev.TS.Format("15:04:05")
+
 	switch ev.Type {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("━━━ RUN START [%s] run=%s provider=%s model=%s\n",
-			ts, ev.RunID, p.Provider, p.Model)
+		fmt.Printf("\n%s\n\n", RunBanner(ev.RunID, p.Provider, p.Model))
 
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n┌─ USER [%s]\n│  %s\n└─\n", ts, strings.ReplaceAll(p.Content, "\n", "\n│  "))
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(clrUser).
+			Padding(0, 1).
+			Render(
+				styleUser.Render("you") + styleMuted.Render("  "+ts) + "\n" +
+					p.Content,
+			)
+		fmt.Printf("\n%s\n", box)
 
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if p.Text != "" {
-			fmt.Printf("\n┌─ ASSISTANT [%s] tokens=%d+%d cost=$%.4f\n│  %s\n└─\n",
-				ts, p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.CostUSD,
-				strings.ReplaceAll(p.Text, "\n", "\n│  "))
+			meta := styleMuted.Render(fmt.Sprintf("  %s  in=%d out=%d cost=$%.4f",
+				ts, p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.CostUSD))
+			box := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(clrAssistant).
+				Padding(0, 1).
+				Render(
+					styleAssistant.Render("v100") + meta + "\n" +
+						p.Text,
+				)
+			fmt.Printf("\n%s\n", box)
 		}
 		for _, tc := range p.ToolCalls {
-			fmt.Printf("  → TOOL CALL: %s(%s)\n", tc.Name, tc.ArgsJSON)
+			fmt.Printf("  %s %s%s\n",
+				styleTool.Render("⚙"),
+				styleTool.Render(tc.Name),
+				styleMuted.Render("("+tc.ArgsJSON+")"),
+			)
 		}
 
 	case core.EventToolCall:
-		// covered by model response
+		// Covered inline in EventModelResp above.
 
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		status := "✓"
+		icon := styleOK.Render("✓")
+		nameStyle := styleOK.Render(p.Name)
 		if !p.OK {
-			status = "✗"
+			icon = styleFail.Render("✗")
+			nameStyle = styleFail.Render(p.Name)
 		}
 		out := p.Output
 		if len(out) > 500 {
-			out = out[:500] + "\n  ... (truncated)"
+			out = out[:500] + "\n  … (truncated)"
 		}
-		fmt.Printf("  %s RESULT %s [%dms]\n    %s\n", status, p.Name, p.DurationMS,
-			strings.ReplaceAll(out, "\n", "\n    "))
+		fmt.Printf("  %s %s %s\n    %s\n",
+			icon, nameStyle,
+			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
+			strings.ReplaceAll(out, "\n", "\n    "),
+		)
 
 	case core.EventRunError:
 		var p core.RunErrorPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n  ✗ ERROR: %s\n", p.Error)
+		fmt.Printf("\n  %s %s\n", styleFail.Render("✗ error:"), styleFail.Render(p.Error))
 
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n━━━ RUN END [%s] reason=%s steps=%d tokens=%d\n",
-			ts, p.Reason, p.UsedSteps, p.UsedTokens)
+		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
 
 	default:
-		fmt.Printf("[%s] %s %s\n", ts, ev.Type, string(ev.Payload))
+		fmt.Printf("%s  %s\n", styleMuted.Render(ts), styleMuted.Render(string(ev.Type)))
 	}
+}
+
+// indentLines adds a prefix to every line after the first.
+func indentLines(s, prefix string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= 1 {
+		return s
+	}
+	for i := 1; i < len(lines); i++ {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }

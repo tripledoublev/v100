@@ -41,7 +41,6 @@ type TUIModel struct {
 
 	transcriptBuf strings.Builder
 	traceBuf      strings.Builder
-	planBuf       string
 
 	focus       focus
 	showTrace   bool
@@ -51,40 +50,51 @@ type TUIModel struct {
 	SubmitFn func(string)
 }
 
-// Styles
+// ── TUI styles ────────────────────────────────────────────────────────────────
+
 var (
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("212")).
+	tuiHeaderStyle = lipgloss.NewStyle().
+			Foreground(clrPrimary).
+			Bold(true)
+
+	tuiHeaderDimStyle = lipgloss.NewStyle().
+				Foreground(clrMuted)
+
+	tuiPaneStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#374151"))
+
+	tuiActivePaneStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(clrPrimary)
+
+	tuiInputStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#374151")).
 			PaddingLeft(1)
 
-	paneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
+	tuiInputActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(clrPrimary).
+				PaddingLeft(1)
 
-	activePaneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("212"))
-
-	inputStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			PaddingLeft(1)
-
-	confirmStyle = lipgloss.NewStyle().
+	tuiConfirmStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("196")).
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("196")).
-			Padding(1, 2)
+			BorderForeground(clrDanger).
+			Padding(1, 3)
 
-	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tuiTraceLabelStyle = lipgloss.NewStyle().
+				Foreground(clrMuted).
+				Italic(true)
 )
 
 // NewTUIModel creates a fresh TUI model.
 func NewTUIModel() TUIModel {
 	ti := textinput.New()
-	ti.Placeholder = "Enter message… (Ctrl+C to quit)"
+	ti.Placeholder = "message…"
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F9FAFB"))
 	ti.Focus()
 	ti.CharLimit = 4096
 
@@ -127,7 +137,6 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m = m.recalcLayout()
 
 	case EventMsg:
 		m.appendEvent(core.Event(msg))
@@ -147,26 +156,24 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendConfirm = nil
 
 	case tea.KeyMsg:
-		// Global keys
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 
 		case "ctrl+t":
 			m.showTrace = !m.showTrace
-			m = m.recalcLayout()
 
 		case "tab":
 			m.cycleFocus()
 
 		case "ctrl+y":
-			if m.pendConfirm != nil && m.pendConfirm.active {
+			if m.pendConfirm.isActive() {
 				confirm := m.pendConfirm
 				return m, func() tea.Msg { return ConfirmMsg{Approved: true, confirm: confirm} }
 			}
 
 		case "ctrl+n":
-			if m.pendConfirm != nil && m.pendConfirm.active {
+			if m.pendConfirm.isActive() {
 				confirm := m.pendConfirm
 				return m, func() tea.Msg { return ConfirmMsg{Approved: false, confirm: confirm} }
 			}
@@ -216,33 +223,42 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m TUIModel) View() string {
 	if m.width == 0 {
-		return "Initializing…"
+		return tuiHeaderDimStyle.Render("Initializing…")
 	}
 
-	// Confirmation overlay
 	if m.pendConfirm.isActive() {
 		return m.confirmView()
 	}
 
-	header := headerStyle.Render("agent v0.0.1") + dimStyle.Render("  Tab:focus  Ctrl+T:trace  Ctrl+C:quit")
+	// Header bar
+	header := tuiHeaderStyle.Render("v100") +
+		tuiHeaderDimStyle.Render("  Tab:focus  Ctrl+T:trace  Ctrl+C:quit")
 
-	inputBox := inputStyle.Width(m.width - 4).Render(m.input.View())
+	// Input box
+	inputSt := tuiInputStyle
+	if m.focus == focusInput {
+		inputSt = tuiInputActiveStyle
+	}
+	inputBox := inputSt.Width(m.width - 4).Render(m.input.View())
 
 	inputHeight := 3
 	headerHeight := 1
 	remaining := m.height - headerHeight - inputHeight - 4
+	if remaining < 4 {
+		remaining = 4
+	}
 
 	if m.showTrace {
 		leftW := (m.width - 3) * 2 / 3
 		rightW := m.width - leftW - 3
 
-		leftStyle := paneStyle
-		rightStyle := paneStyle
+		leftSt := tuiPaneStyle
+		rightSt := tuiPaneStyle
 		if m.focus == focusTranscript {
-			leftStyle = activePaneStyle
+			leftSt = tuiActivePaneStyle
 		}
 		if m.focus == focusTrace {
-			rightStyle = activePaneStyle
+			rightSt = tuiActivePaneStyle
 		}
 
 		m.transcript.Width = leftW - 2
@@ -250,62 +266,107 @@ func (m TUIModel) View() string {
 		m.traceView.Width = rightW - 2
 		m.traceView.Height = remaining - 2
 
-		left := leftStyle.Width(leftW).Height(remaining).Render(m.transcript.View())
-		right := rightStyle.Width(rightW).Height(remaining).Render(m.traceView.View())
+		left := leftSt.Width(leftW).Height(remaining).Render(m.transcript.View())
+		right := rightSt.Width(rightW).Height(remaining).Render(
+			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
+		)
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 		return lipgloss.JoinVertical(lipgloss.Left, header, panes, inputBox)
 	}
 
 	// Single pane
-	tStyle := paneStyle
+	tSt := tuiPaneStyle
 	if m.focus == focusTranscript {
-		tStyle = activePaneStyle
+		tSt = tuiActivePaneStyle
 	}
 	m.transcript.Width = m.width - 4
 	m.transcript.Height = remaining - 2
-	pane := tStyle.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
+	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
 	return lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 }
 
 func (m *TUIModel) appendEvent(ev core.Event) {
-	ts := ev.TS.Format(time.TimeOnly)
+	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
 
-	// Transcript pane (user-facing)
 	switch ev.Type {
+	case core.EventRunStart:
+		var p core.RunStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.transcriptBuf.WriteString(
+			stylePrimary.Render("v100") +
+				styleMuted.Render("  run "+ev.RunID[:8]+"  "+p.Provider+" · "+p.Model) +
+				"\n\n",
+		)
+
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		m.transcriptBuf.WriteString(fmt.Sprintf("\n[%s] YOU: %s\n", ts, p.Content))
+		m.transcriptBuf.WriteString(fmt.Sprintf(
+			"\n%s  %s  %s\n",
+			ts, styleUser.Render("you"), p.Content,
+		))
+
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if p.Text != "" {
-			m.transcriptBuf.WriteString(fmt.Sprintf("\n[%s] AGENT: %s\n", ts, p.Text))
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"\n%s  %s  %s\n",
+				ts, styleAssistant.Render("v100"), p.Text,
+			))
 		}
 		for _, tc := range p.ToolCalls {
-			m.transcriptBuf.WriteString(fmt.Sprintf("[%s]   → %s(%s)\n", ts, tc.Name, tc.ArgsJSON))
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"           %s %s%s\n",
+				styleTool.Render("⚙"),
+				styleTool.Render(tc.Name),
+				styleMuted.Render("("+tc.ArgsJSON+")"),
+			))
 		}
+
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		status := "✓"
+		icon, nameStr := styleOK.Render("✓"), styleOK.Render(p.Name)
 		if !p.OK {
-			status = "✗"
+			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
 		}
 		out := p.Output
 		if len(out) > 200 {
 			out = out[:200] + "…"
 		}
-		m.transcriptBuf.WriteString(fmt.Sprintf("[%s]   %s %s: %s\n", ts, status, p.Name, out))
+		out = strings.ReplaceAll(out, "\n", " ↵ ")
+		m.transcriptBuf.WriteString(fmt.Sprintf(
+			"           %s %s  %s  %s\n",
+			icon, nameStr,
+			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
+			out,
+		))
+
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		m.transcriptBuf.WriteString(fmt.Sprintf("\n[%s] ■ Run ended: %s (steps=%d tokens=%d)\n",
-			ts, p.Reason, p.UsedSteps, p.UsedTokens))
+		m.transcriptBuf.WriteString(fmt.Sprintf(
+			"\n%s\n",
+			styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d",
+				p.Reason, p.UsedSteps, p.UsedTokens)),
+		))
+
+	case core.EventRunError:
+		var p core.RunErrorPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.transcriptBuf.WriteString(fmt.Sprintf(
+			"\n%s  %s\n",
+			styleFail.Render("✗ error"),
+			styleFail.Render(p.Error),
+		))
 	}
 
-	// Trace pane (raw events)
-	m.traceBuf.WriteString(fmt.Sprintf("[%s] %s\n", ts, ev.Type))
+	// Trace pane: compact colored event log
+	m.traceBuf.WriteString(
+		styleMuted.Render(ev.TS.Format(time.TimeOnly)) + "  " +
+			styleRunID.Render(string(ev.Type)) + "\n",
+	)
 
 	m.transcript.SetContent(m.transcriptBuf.String())
 	m.transcript.GotoBottom()
@@ -331,18 +392,15 @@ func (m *TUIModel) cycleFocus() {
 	}
 }
 
-func (m TUIModel) recalcLayout() TUIModel {
-	return m
-}
-
 func (m TUIModel) confirmView() string {
 	p := m.pendConfirm
-	msg := fmt.Sprintf(
-		"DANGEROUS TOOL CALL\n\nTool: %s\nArgs: %s\n\nApprove? Ctrl+Y = Yes   Ctrl+N = No",
-		p.toolName, p.args,
-	)
-	box := confirmStyle.Render(msg)
-	// Center the box
+	content := styleDanger.Render("⚠  DANGEROUS TOOL CALL") + "\n\n" +
+		styleMuted.Render("Tool: ") + styleTool.Render(p.toolName) + "\n" +
+		styleMuted.Render("Args: ") + p.args + "\n\n" +
+		styleWarn.Render("Approve?") + "  " +
+		styleOK.Render("Ctrl+Y") + " yes   " +
+		styleFail.Render("Ctrl+N") + " no"
+	box := tuiConfirmStyle.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
