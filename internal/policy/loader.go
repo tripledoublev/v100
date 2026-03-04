@@ -17,7 +17,7 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 		MaxToolCallsPerStep: cfg.MaxToolCallsPerStep,
 	}
 	if p.MaxToolCallsPerStep == 0 {
-		p.MaxToolCallsPerStep = 5
+		p.MaxToolCallsPerStep = 20
 	}
 
 	if cfg.SystemPromptPath != "" {
@@ -42,7 +42,7 @@ func Default() *Policy {
 	return &Policy{
 		Name:                "default",
 		SystemPrompt:        DefaultSystemPrompt,
-		MaxToolCallsPerStep: 5,
+		MaxToolCallsPerStep: 20,
 		ToolTimeoutMS:       30000,
 	}
 }

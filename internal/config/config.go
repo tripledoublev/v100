@@ -70,15 +70,15 @@ func DefaultConfig() *Config {
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
-				"fs.read", "fs.write", "fs.list", "fs.mkdir",
-				"git.status", "git.diff", "project.search", "patch.apply",
+				"fs_read", "fs_write", "fs_list", "fs_mkdir",
+				"git_status", "git_diff", "project_search", "patch_apply",
 			},
-			Dangerous: []string{"fs.write", "sh", "git.commit", "patch.apply"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "patch_apply"},
 		},
 		Policies: map[string]PolicyConfig{
 			"default": {
 				SystemPromptPath:    "~/.config/v100/policies/default.md",
-				MaxToolCallsPerStep: 5,
+				MaxToolCallsPerStep: 20,
 			},
 		},
 		Defaults: DefaultsConfig{
@@ -87,7 +87,7 @@ func DefaultConfig() *Config {
 			BudgetSteps:         50,
 			BudgetTokens:        100000,
 			ToolTimeoutMS:       30000,
-			MaxToolCallsPerStep: 5,
+			MaxToolCallsPerStep: 20,
 		},
 	}
 }
@@ -112,12 +112,12 @@ base_url = "https://api.openai.com/v1"
 env = "OPENAI_API_KEY"
 
 [tools]
-enabled = ["fs.read", "fs.write", "fs.list", "fs.mkdir", "git.status", "git.diff", "project.search", "patch.apply"]
-dangerous = ["fs.write", "sh", "git.commit", "patch.apply"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "project_search", "patch_apply"]
+dangerous = ["fs_write", "sh", "git_commit", "patch_apply"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
-max_tool_calls_per_step = 5
+max_tool_calls_per_step = 20
 
 [defaults]
 provider = "codex"            # use ChatGPT subscription by default
@@ -126,7 +126,7 @@ budget_steps = 50
 budget_tokens = 100000
 budget_cost_usd = 0.0
 tool_timeout_ms = 30000
-max_tool_calls_per_step = 5
+max_tool_calls_per_step = 20
 `
 }
 
