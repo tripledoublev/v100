@@ -9,38 +9,38 @@ import (
 )
 
 func TestRegistryEnabled(t *testing.T) {
-	reg := tools.NewRegistry([]string{"fs.read", "fs.list"})
+	reg := tools.NewRegistry([]string{"fs_read", "fs_list"})
 	reg.Register(tools.FSRead())
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
 
-	// fs.read is enabled
-	if _, ok := reg.Get("fs.read"); !ok {
-		t.Error("fs.read should be enabled")
+	// fs_read is enabled
+	if _, ok := reg.Get("fs_read"); !ok {
+		t.Error("fs_read should be enabled")
 	}
 
-	// fs.write is registered but NOT in enabled list
-	if _, ok := reg.Get("fs.write"); ok {
-		t.Error("fs.write should not be accessible (not enabled)")
+	// fs_write is registered but NOT in enabled list
+	if _, ok := reg.Get("fs_write"); ok {
+		t.Error("fs_write should not be accessible (not enabled)")
 	}
 
-	// fs.list is enabled
-	if _, ok := reg.Get("fs.list"); !ok {
-		t.Error("fs.list should be enabled")
+	// fs_list is enabled
+	if _, ok := reg.Get("fs_list"); !ok {
+		t.Error("fs_list should be enabled")
 	}
 }
 
 func TestRegistryDangerLevel(t *testing.T) {
-	reg := tools.NewRegistry([]string{"fs.read", "fs.write", "sh"})
+	reg := tools.NewRegistry([]string{"fs_read", "fs_write", "sh"})
 	reg.Register(tools.FSRead())
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.Sh())
 
-	if reg.IsDangerous("fs.read") {
-		t.Error("fs.read should not be dangerous")
+	if reg.IsDangerous("fs_read") {
+		t.Error("fs_read should not be dangerous")
 	}
-	if !reg.IsDangerous("fs.write") {
-		t.Error("fs.write should be dangerous")
+	if !reg.IsDangerous("fs_write") {
+		t.Error("fs_write should be dangerous")
 	}
 	if !reg.IsDangerous("sh") {
 		t.Error("sh should be dangerous")
@@ -48,7 +48,7 @@ func TestRegistryDangerLevel(t *testing.T) {
 }
 
 func TestRegistrySpecs(t *testing.T) {
-	reg := tools.NewRegistry([]string{"fs.read", "fs.list"})
+	reg := tools.NewRegistry([]string{"fs_read", "fs_list"})
 	reg.Register(tools.FSRead())
 	reg.Register(tools.FSList())
 
@@ -67,7 +67,7 @@ func TestRegistrySpecs(t *testing.T) {
 }
 
 func TestRegistryValidate(t *testing.T) {
-	reg := tools.NewRegistry([]string{"fs.read", "nonexistent"})
+	reg := tools.NewRegistry([]string{"fs_read", "nonexistent"})
 	reg.Register(tools.FSRead())
 
 	if err := reg.Validate(); err == nil {

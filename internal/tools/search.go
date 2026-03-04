@@ -12,7 +12,7 @@ type projectSearchTool struct{}
 
 func ProjectSearch() Tool { return &projectSearchTool{} }
 
-func (t *projectSearchTool) Name() string        { return "project.search" }
+func (t *projectSearchTool) Name() string        { return "project_search" }
 func (t *projectSearchTool) Description() string { return "Search for a pattern in project files using ripgrep (rg)." }
 func (t *projectSearchTool) DangerLevel() DangerLevel { return Safe }
 

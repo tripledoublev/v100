@@ -18,7 +18,7 @@ type fsReadTool struct{}
 
 func FSRead() Tool { return &fsReadTool{} }
 
-func (t *fsReadTool) Name() string        { return "fs.read" }
+func (t *fsReadTool) Name() string        { return "fs_read" }
 func (t *fsReadTool) Description() string { return "Read the contents of a file." }
 func (t *fsReadTool) DangerLevel() DangerLevel { return Safe }
 
@@ -64,7 +64,7 @@ type fsWriteTool struct{}
 
 func FSWrite() Tool { return &fsWriteTool{} }
 
-func (t *fsWriteTool) Name() string        { return "fs.write" }
+func (t *fsWriteTool) Name() string        { return "fs_write" }
 func (t *fsWriteTool) Description() string { return "Write or append content to a file." }
 func (t *fsWriteTool) DangerLevel() DangerLevel { return Dangerous }
 
@@ -131,7 +131,7 @@ type fsListTool struct{}
 
 func FSList() Tool { return &fsListTool{} }
 
-func (t *fsListTool) Name() string        { return "fs.list" }
+func (t *fsListTool) Name() string        { return "fs_list" }
 func (t *fsListTool) Description() string { return "List files and directories in a path." }
 func (t *fsListTool) DangerLevel() DangerLevel { return Safe }
 
@@ -186,7 +186,7 @@ type fsMkdirTool struct{}
 
 func FSMkdir() Tool { return &fsMkdirTool{} }
 
-func (t *fsMkdirTool) Name() string        { return "fs.mkdir" }
+func (t *fsMkdirTool) Name() string        { return "fs_mkdir" }
 func (t *fsMkdirTool) Description() string { return "Create a directory (and parents)." }
 func (t *fsMkdirTool) DangerLevel() DangerLevel { return Safe }
 

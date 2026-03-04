@@ -14,7 +14,7 @@ type patchApplyTool struct{}
 
 func PatchApply() Tool { return &patchApplyTool{} }
 
-func (t *patchApplyTool) Name() string        { return "patch.apply" }
+func (t *patchApplyTool) Name() string        { return "patch_apply" }
 func (t *patchApplyTool) Description() string { return "Apply a unified diff patch to files in the workspace." }
 func (t *patchApplyTool) DangerLevel() DangerLevel { return Dangerous }
 

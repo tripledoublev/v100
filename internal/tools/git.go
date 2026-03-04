@@ -16,7 +16,7 @@ type gitStatusTool struct{}
 
 func GitStatus() Tool { return &gitStatusTool{} }
 
-func (t *gitStatusTool) Name() string        { return "git.status" }
+func (t *gitStatusTool) Name() string        { return "git_status" }
 func (t *gitStatusTool) Description() string { return "Run git status in the workspace directory." }
 func (t *gitStatusTool) DangerLevel() DangerLevel { return Safe }
 
@@ -40,7 +40,7 @@ type gitDiffTool struct{}
 
 func GitDiff() Tool { return &gitDiffTool{} }
 
-func (t *gitDiffTool) Name() string        { return "git.diff" }
+func (t *gitDiffTool) Name() string        { return "git_diff" }
 func (t *gitDiffTool) Description() string { return "Show git diff of unstaged changes." }
 func (t *gitDiffTool) DangerLevel() DangerLevel { return Safe }
 
@@ -76,7 +76,7 @@ type gitCommitTool struct{}
 
 func GitCommit() Tool { return &gitCommitTool{} }
 
-func (t *gitCommitTool) Name() string        { return "git.commit" }
+func (t *gitCommitTool) Name() string        { return "git_commit" }
 func (t *gitCommitTool) Description() string { return "Stage all changes and commit with a message." }
 func (t *gitCommitTool) DangerLevel() DangerLevel { return Dangerous }
 
