@@ -156,10 +156,12 @@ type codexInput struct {
 	// For user/assistant messages
 	Role    string `json:"role,omitempty"`
 	Content any    `json:"content,omitempty"`
-	// For function_call_output
-	Type   string `json:"type,omitempty"`
-	CallID string `json:"call_id,omitempty"`
-	Output string `json:"output,omitempty"`
+	// For function_call / function_call_output items
+	Type      string `json:"type,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
 }
 
 type codexToolDef struct {
@@ -189,8 +191,20 @@ func codexConvertMessages(msgs []Message) (string, []codexInput) {
 		case "assistant":
 			if m.Content != "" {
 				input = append(input, codexInput{
-					Role:    "assistant",
-					Content: []map[string]string{{"type": "output_text", "text": m.Content}},
+					Role: "assistant",
+					Content: []map[string]any{{
+						"type": "output_text",
+						"text": m.Content,
+					}},
+				})
+			}
+			// Prior tool calls must be replayed as top-level function_call items.
+			for _, tc := range m.ToolCalls {
+				input = append(input, codexInput{
+					Type:      "function_call",
+					CallID:    tc.ID,
+					Name:      tc.Name,
+					Arguments: string(tc.Args),
 				})
 			}
 

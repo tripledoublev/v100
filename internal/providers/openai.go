@@ -11,7 +11,7 @@ import (
 
 // OpenAIProvider implements Provider using the OpenAI API.
 type OpenAIProvider struct {
-	client     *openai.Client
+	client       *openai.Client
 	defaultModel string
 }
 
@@ -56,6 +56,20 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		msg := openai.ChatCompletionMessage{
 			Role:    m.Role,
 			Content: m.Content,
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			tcs := make([]openai.ToolCall, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				tcs = append(tcs, openai.ToolCall{
+					ID:   tc.ID,
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      tc.Name,
+						Arguments: string(tc.Args),
+					},
+				})
+			}
+			msg.ToolCalls = tcs
 		}
 		if m.Role == "tool" {
 			msg.ToolCallID = m.ToolCallID

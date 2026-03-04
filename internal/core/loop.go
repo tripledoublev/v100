@@ -22,13 +22,13 @@ type OutputFn func(event Event)
 
 // Loop is the main agent execution engine.
 type Loop struct {
-	Run      *Run
-	Provider providers.Provider
-	Tools    *tools.Registry
-	Policy   *policy.Policy
-	Trace    *TraceWriter
-	Budget   *BudgetTracker
-	Messages []providers.Message
+	Run       *Run
+	Provider  providers.Provider
+	Tools     *tools.Registry
+	Policy    *policy.Policy
+	Trace     *TraceWriter
+	Budget    *BudgetTracker
+	Messages  []providers.Message
 	ConfirmFn ConfirmFn
 	OutputFn  OutputFn
 }
@@ -45,58 +45,78 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 	_ = userEv
 	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
 
-	// 2. Build messages with system prompt
-	msgs := l.buildMessages()
-
-	// 3. Call provider
-	resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
-		RunID:    l.Run.ID,
-		StepID:   stepID,
-		Messages: msgs,
-		Tools:    l.Tools.Specs(),
-		Model:    "",
-	})
-	if err != nil {
-		_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
-		return fmt.Errorf("provider: %w", err)
+	// 2. Continue model/tool turns until the model produces a final (no-tool) response.
+	maxToolCalls := 20
+	if l.Policy != nil && l.Policy.MaxToolCallsPerStep > 0 {
+		maxToolCalls = l.Policy.MaxToolCallsPerStep
 	}
+	toolCallsUsed := 0
 
-	// 4. Update budget
-	if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
-		return err
-	}
-	if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
-		return err
-	}
+	for {
+		msgs := l.buildMessages()
+		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+			RunID:    l.Run.ID,
+			StepID:   stepID,
+			Messages: msgs,
+			Tools:    l.Tools.Specs(),
+			Model:    "",
+			Hints: providers.Hints{
+				MaxToolCalls: maxToolCalls - toolCallsUsed,
+			},
+		})
+		if err != nil {
+			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+			return fmt.Errorf("provider: %w", err)
+		}
 
-	// 5. Emit model response
-	toolCalls := make([]ToolCall, len(resp.ToolCalls))
-	for i, tc := range resp.ToolCalls {
-		toolCalls[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
-	}
-	_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
-		Text:      resp.AssistantText,
-		ToolCalls: toolCalls,
-		Usage: Usage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			CostUSD:      resp.Usage.CostUSD,
-		},
-	})
-	if err != nil {
-		return err
-	}
-
-	// Append assistant message to history
-	l.Messages = append(l.Messages, providers.Message{
-		Role:    "assistant",
-		Content: resp.AssistantText,
-	})
-
-	// 6. Execute tool calls
-	for _, tc := range resp.ToolCalls {
-		if err := l.execToolCall(ctx, stepID, tc); err != nil {
+		if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
 			return err
+		}
+		if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
+			return err
+		}
+
+		tcPayload := make([]ToolCall, len(resp.ToolCalls))
+		for i, tc := range resp.ToolCalls {
+			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
+		}
+		_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
+			Text:      resp.AssistantText,
+			ToolCalls: tcPayload,
+			Usage: Usage{
+				InputTokens:  resp.Usage.InputTokens,
+				OutputTokens: resp.Usage.OutputTokens,
+				CostUSD:      resp.Usage.CostUSD,
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		l.Messages = append(l.Messages, providers.Message{
+			Role:      "assistant",
+			Content:   resp.AssistantText,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		if len(resp.ToolCalls) == 0 {
+			break
+		}
+
+		for _, tc := range resp.ToolCalls {
+			if toolCallsUsed >= maxToolCalls {
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
+					Error: fmt.Sprintf("max tool calls per step reached (%d)", maxToolCalls),
+				})
+				break
+			}
+			if err := l.execToolCall(ctx, stepID, tc); err != nil {
+				return err
+			}
+			toolCallsUsed++
+		}
+		if toolCallsUsed >= maxToolCalls {
+			break
 		}
 	}
 

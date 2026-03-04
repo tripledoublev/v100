@@ -16,8 +16,9 @@ type Capabilities struct {
 type Message struct {
 	Role       string // "system", "user", "assistant", "tool"
 	Content    string
-	ToolCallID string // for role=tool results
-	Name       string // for role=tool: tool name
+	ToolCallID string     // for role=tool results
+	Name       string     // for role=tool: tool name
+	ToolCalls  []ToolCall // for role=assistant tool-calling turns
 }
 
 // ToolSpec describes a tool to be sent to the provider.

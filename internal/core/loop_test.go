@@ -75,7 +75,7 @@ func TestLoopSingleStep(t *testing.T) {
 			{AssistantText: "Hello! How can I help?"},
 		},
 	}
-	loop, trace := newTestLoop(t, prov, []string{"fs.read"})
+	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
 	defer trace.Close()
 
 	if err := loop.EmitRunStart(core.RunStartPayload{Provider: "mock", Model: "test"}); err != nil {
@@ -117,7 +117,7 @@ func TestLoopToolCall(t *testing.T) {
 				ToolCalls: []providers.ToolCall{
 					{
 						ID:   "call-1",
-						Name: "fs.read",
+						Name: "fs_read",
 						Args: json.RawMessage(`{"path":"` + testFile + `"}`),
 					},
 				},
@@ -126,7 +126,7 @@ func TestLoopToolCall(t *testing.T) {
 		},
 	}
 
-	loop, trace := newTestLoop(t, prov, []string{"fs.read"})
+	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
 	loop.Run.Dir = dir
 	defer trace.Close()
 
