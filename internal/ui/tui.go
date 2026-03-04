@@ -9,14 +9,22 @@ import (
 // TUI wraps the Bubble Tea program for the agent harness.
 type TUI struct {
 	program *tea.Program
-	model   TUIModel
+	model   *TUIModel
 }
 
 // NewTUI creates a new TUI instance.
-func NewTUI(submitFn func(string)) *TUI {
+func NewTUI(submitFn func(string), useAltScreen bool, plainTTY bool) *TUI {
+	if plainTTY {
+		EnablePlainTTY()
+	}
 	m := NewTUIModel()
 	m.SubmitFn = submitFn
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	var p *tea.Program
+	if useAltScreen {
+		p = tea.NewProgram(m, tea.WithAltScreen())
+	} else {
+		p = tea.NewProgram(m)
+	}
 	return &TUI{program: p, model: m}
 }
 
@@ -45,5 +53,8 @@ func (t *TUI) Run() error {
 
 // Quit terminates the TUI program.
 func (t *TUI) Quit() {
+	if t.model != nil {
+		t.model.stopRadio()
+	}
 	t.program.Quit()
 }

@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+)
 
 // Color palette
 var (
@@ -109,4 +112,10 @@ func itoa(n int) string {
 		buf = append([]byte{'-'}, buf...)
 	}
 	return string(buf)
+}
+
+// EnablePlainTTY forces monochrome rendering for terminal compatibility.
+func EnablePlainTTY() {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	lipgloss.SetHasDarkBackground(false)
 }

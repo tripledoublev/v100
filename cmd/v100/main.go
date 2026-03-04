@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -78,6 +79,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 		maxToolCallsFlag    int
 		confirmToolsFlag    string
 		tuiFlag             bool
+		tuiNoAltFlag        bool
+		tuiPlainFlag        bool
+		tuiDebugFlag        bool
 	)
 
 	cmd := &cobra.Command{
@@ -186,7 +190,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(run, prov, reg, pol, trace, budget, model, confirmMode, workspace)
+				return runWithTUI(run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag)
 			}
 			return runWithCLI(run, prov, reg, pol, trace, budget, model, confirmMode, workspace)
 		},
@@ -206,6 +210,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&maxToolCallsFlag, "max-tool-calls-per-step", 0, "max tool calls per step")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable Bubble Tea TUI")
+	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
+	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
+	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 
 	return cmd
 }
@@ -277,9 +284,20 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 }
 
 func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool) error {
 
 	run.Dir = workspace
+
+	var logger *log.Logger
+	if debug {
+		logPath := filepath.Join(filepath.Dir(run.TraceFile), "tui.debug.log")
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err == nil {
+			defer f.Close()
+			logger = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
+			logger.Printf("start run_id=%s provider=%s model=%s alt=%t plain=%t", run.ID, prov.Name(), model, useAltScreen, plainTTY)
+		}
+	}
 
 	var tui *ui.TUI
 	ctx := context.Background()
@@ -288,7 +306,19 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 	var loop *core.Loop
 
 	submitFn := func(input string) {
+		if logger != nil {
+			logger.Printf("submit input_len=%d", len(input))
+		}
+		inputTrim := strings.TrimSpace(input)
+		if inputTrim == "/quit" || inputTrim == "/exit" {
+			reason = "user_exit"
+			tui.Quit()
+			return
+		}
 		if err := loop.Step(ctx, input); err != nil {
+			if logger != nil {
+				logger.Printf("step error: %v", err)
+			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
 				_ = loop.EmitRunEnd("budget_exceeded")
@@ -297,7 +327,7 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		}
 	}
 
-	tui = ui.NewTUI(submitFn)
+	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
 
 	confirmFn := func(toolName, args string) bool {
 		if confirmMode == "never" {
@@ -320,18 +350,39 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		OutputFn:  func(ev core.Event) { tui.SendEvent(ev) },
 	}
 
+	// Start Bubble Tea first: Program.Send blocks before Run initializes.
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- tui.Run()
+	}()
+
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:   pol.Name,
 		Provider: prov.Name(),
 		Model:    model,
 	}); err != nil {
+		if logger != nil {
+			logger.Printf("emit run_start error: %v", err)
+		}
+		tui.Quit()
+		_ = <-runErrCh
 		return err
 	}
 
-	if err := tui.Run(); err != nil {
+	if logger != nil {
+		logger.Printf("run_start emitted; waiting for tui loop")
+	}
+
+	if err := <-runErrCh; err != nil {
+		if logger != nil {
+			logger.Printf("tui run error: %v", err)
+		}
 		return err
 	}
 
+	if logger != nil {
+		logger.Printf("tui loop ended reason=%s", reason)
+	}
 	_ = loop.EmitRunEnd(reason)
 	return nil
 }
