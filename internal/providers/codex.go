@@ -157,11 +157,11 @@ type codexInput struct {
 	Role    string `json:"role,omitempty"`
 	Content any    `json:"content,omitempty"`
 	// For function_call / function_call_output items
-	Type      string `json:"type,omitempty"`
-	CallID    string `json:"call_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	Output    string `json:"output,omitempty"`
+	Type      string  `json:"type,omitempty"`
+	CallID    string  `json:"call_id,omitempty"`
+	Name      string  `json:"name,omitempty"`
+	Arguments string  `json:"arguments,omitempty"`
+	Output    *string `json:"output,omitempty"`
 }
 
 type codexToolDef struct {
@@ -209,10 +209,14 @@ func codexConvertMessages(msgs []Message) (string, []codexInput) {
 			}
 
 		case "tool":
+			out := m.Content
+			if out == "" {
+				out = "(no output)"
+			}
 			input = append(input, codexInput{
 				Type:   "function_call_output",
 				CallID: m.ToolCallID,
-				Output: m.Content,
+				Output: &out,
 			})
 		}
 	}
