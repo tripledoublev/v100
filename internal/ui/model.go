@@ -40,6 +40,12 @@ type confirmState struct {
 	approved chan bool
 }
 
+// copyTarget records a copy-icon line and its associated content.
+type copyTarget struct {
+	lineNo  int
+	content string
+}
+
 // TUIModel is the Bubble Tea application model for the agent harness.
 type TUIModel struct {
 	width, height int
@@ -72,6 +78,8 @@ type TUIModel struct {
 	radioArtist   string
 	radioTitle    string
 	radioLastPoll time.Time
+
+	copyTargets []copyTarget
 
 	// callbacks
 	SubmitFn func(string)
@@ -116,6 +124,9 @@ var (
 	tuiStatusLabelStyle = lipgloss.NewStyle().
 				Foreground(clrMuted).
 				Italic(true)
+
+	tuiCopyIconStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#374151"))
 )
 
 // NewTUIModel creates a fresh TUI model.
@@ -383,9 +394,8 @@ func (m *TUIModel) View() string {
 
 	inputHeight := lipgloss.Height(inputBox)
 	headerHeight := lipgloss.Height(header)
-	// JoinVertical adds one separator line between header/panes and panes/input.
-	joinSeparators := 2
-	remaining := m.height - headerHeight - inputHeight - joinSeparators
+	// JoinVertical uses '\n' as a line terminator between elements, not an extra row.
+	remaining := m.height - headerHeight - inputHeight
 	if remaining < 4 {
 		remaining = 4
 	}
@@ -417,7 +427,7 @@ func (m *TUIModel) View() string {
 		statusH := 0
 		traceH := paneInnerH
 		if m.showStatus {
-			rightBudget := remaining - 5
+			rightBudget := remaining - 4
 			traceH = rightBudget * m.tracePanePct / 100
 			if traceH < 4 {
 				traceH = 4
@@ -488,6 +498,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			"\n%s  %s  %s\n",
 			ts, styleUser.Render("you"), wrapped,
 		))
+		iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+		m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+		m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Content})
 
 	case core.EventModelResp:
 		var p core.ModelRespPayload
@@ -500,6 +513,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				"\n%s  %s\n%s\n",
 				ts, styleAssistant.Render("v100"), rendered,
 			))
+			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+			m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Text})
 		}
 		for _, tc := range p.ToolCalls {
 			args := m.wrapPlainForTranscript(tc.ArgsJSON)
@@ -1138,6 +1154,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		return
 	}
 	if !m.showTrace {
+		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
 		return
@@ -1150,6 +1167,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 	}
 	leftOuterEnd := leftW + 1 // 0-indexed: left border at 0, content 1..leftW, right border at leftW+1
 	if x <= leftOuterEnd {
+		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
 		return
@@ -1160,20 +1178,58 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.input.Blur()
 		return
 	}
-	// Approximate row where status pane starts: header(1) + sep(1) + traceH(outer)
-	headerH := 1
-	remaining := m.height - headerH - 3 - 2
-	traceH := remaining * m.tracePanePct / 100
-	if traceH < 6 {
-		traceH = 6
+	// Row where status pane starts: panes begin at row 1, trace outer = traceH+2, status starts after.
+	remaining := m.height - 1 - 3 // header=1, input=3, no extra separators
+	rightBudget := remaining - 4
+	traceH := rightBudget * m.tracePanePct / 100
+	if traceH < 4 {
+		traceH = 4
 	}
-	tracePaneEndY := headerH + 1 + traceH // header row + JoinVertical \n + traceH outer rows
+	tracePaneEndY := 1 + traceH + 2 // panes start row + trace outer height
 	if y < tracePaneEndY {
 		m.focus = focusTrace
 	} else {
 		m.focus = focusStatus
 	}
 	m.input.Blur()
+}
+
+// tryClickCopyTarget checks if the click row matches a copy icon and copies if so.
+// Transcript content starts at terminal row 2 (header=row0, pane_top_border=row1).
+func (m *TUIModel) tryClickCopyTarget(termY int) {
+	const contentStartRow = 2
+	if termY < contentStartRow {
+		return
+	}
+	contentLine := (termY - contentStartRow) + m.transcript.YOffset
+	for _, ct := range m.copyTargets {
+		if contentLine == ct.lineNo || contentLine == ct.lineNo+1 {
+			if err := copyToClipboard(ct.content); err != nil {
+				m.statusLine = "copy failed: " + err.Error()
+				m.statusMode = "error"
+			} else {
+				m.statusLine = "copied to clipboard!"
+			}
+			return
+		}
+	}
+}
+
+func copyToClipboard(text string) error {
+	cmds := [][]string{
+		{"wl-copy"},
+		{"xclip", "-selection", "clipboard"},
+		{"xsel", "--clipboard", "--input"},
+		{"pbcopy"},
+	}
+	for _, args := range cmds {
+		if _, err := exec.LookPath(args[0]); err == nil {
+			c := exec.Command(args[0], args[1:]...)
+			c.Stdin = strings.NewReader(text)
+			return c.Run()
+		}
+	}
+	return fmt.Errorf("no clipboard tool found (install wl-copy, xclip, or xsel)")
 }
 
 func (m *TUIModel) radioStationID() string {
