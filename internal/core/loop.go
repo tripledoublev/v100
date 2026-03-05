@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/policy"
@@ -66,6 +67,7 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 		})
 		if err != nil {
 			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+			l.emitErrorAssistance(ctx, stepID, err)
 			return fmt.Errorf("provider: %w", err)
 		}
 
@@ -126,6 +128,55 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 	}
 
 	return nil
+}
+
+// emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
+// If that fails, it emits a local fallback response so the transcript still guides the user.
+func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause error) {
+	msgs := append([]providers.Message{}, l.buildMessages()...)
+	msgs = append(msgs, providers.Message{
+		Role: "user",
+		Content: "System error encountered while processing your request:\n" + cause.Error() +
+			"\n\nPlease explain what likely happened and propose concrete next steps/remediation.",
+	})
+
+	resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+		RunID:    l.Run.ID,
+		StepID:   stepID,
+		Messages: msgs,
+		Tools:    nil, // explanatory turn only; avoid cascading tool errors
+		Model:    "",
+	})
+	if err != nil {
+		fallback := "I hit an internal error and couldn't run a recovery explanation step.\n" +
+			"Error: " + cause.Error() + "\n" +
+			"Next steps: verify credentials/network, retry the command, and inspect the last tool result in the transcript."
+		_, _ = l.emit(EventModelResp, stepID, ModelRespPayload{
+			Text: fallback,
+			Usage: Usage{
+				InputTokens:  0,
+				OutputTokens: 0,
+				CostUSD:      0,
+			},
+		})
+		l.Messages = append(l.Messages, providers.Message{Role: "assistant", Content: fallback})
+		return
+	}
+
+	text := resp.AssistantText
+	if strings.TrimSpace(text) == "" {
+		text = "I hit an error but didn't receive additional diagnostic text. Please inspect the run.error and tool results."
+	}
+	_, _ = l.emit(EventModelResp, stepID, ModelRespPayload{
+		Text:      text,
+		ToolCalls: nil,
+		Usage: Usage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+			CostUSD:      resp.Usage.CostUSD,
+		},
+	})
+	l.Messages = append(l.Messages, providers.Message{Role: "assistant", Content: text})
 }
 
 func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.ToolCall) error {

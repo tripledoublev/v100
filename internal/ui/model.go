@@ -51,26 +51,26 @@ type TUIModel struct {
 	transcriptBuf strings.Builder
 	traceBuf      strings.Builder
 
-	focus        focus
-	showTrace    bool
-	showStatus   bool
-	pendConfirm  *confirmState
-	statusMode   string
-	statusLine   string
-	statusTick   int
-	runSummary   string
-	leftPanePct  int
-	tracePanePct int
-	radioURL     string
-	radioPlayer  string
-	radioVolume  int
-	radioPlaying bool
-	radioWave    string
-	radioErr     string
-	radioStep    int
-	radioCmd     *exec.Cmd
-	radioArtist  string
-	radioTitle   string
+	focus         focus
+	showTrace     bool
+	showStatus    bool
+	pendConfirm   *confirmState
+	statusMode    string
+	statusLine    string
+	statusTick    int
+	runSummary    string
+	leftPanePct   int
+	tracePanePct  int
+	radioURL      string
+	radioPlayer   string
+	radioVolume   int
+	radioPlaying  bool
+	radioWave     string
+	radioErr      string
+	radioStep     int
+	radioCmd      *exec.Cmd
+	radioArtist   string
+	radioTitle    string
 	radioLastPoll time.Time
 
 	// callbacks
@@ -172,6 +172,11 @@ type radioNowPlayingMsg struct {
 	Title  string
 	Err    string
 }
+type downloadDoneMsg struct {
+	artist string
+	title  string
+	err    string
+}
 
 func (m *TUIModel) Init() tea.Cmd {
 	return tea.Batch(
@@ -179,6 +184,7 @@ func (m *TUIModel) Init() tea.Cmd {
 		tea.WindowSize(),
 		func() tea.Msg { return tea.ClearScreen() },
 		radioTickCmd(),
+		tea.EnableMouseCellMotion,
 	)
 }
 
@@ -222,6 +228,22 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.radioTitle = strings.TrimSpace(msg.Title)
 		}
 
+	case downloadDoneMsg:
+		if msg.err != "" {
+			m.radioErr = msg.err
+			m.statusMode = "error"
+			m.statusLine = "download failed"
+		} else {
+			m.radioErr = ""
+			m.statusMode = "idle"
+			m.statusLine = "downloaded: " + strings.TrimSpace(msg.artist+" - "+msg.title)
+		}
+
+	case tea.MouseMsg:
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			m.handleMouseClick(msg.X, msg.Y)
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -230,6 +252,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+t":
 			m.showTrace = !m.showTrace
+			if !m.showTrace && (m.focus == focusTrace || m.focus == focusStatus) {
+				m.focus = focusTranscript
+				m.input.Blur()
+			}
 
 		case "ctrl+s":
 			m.showStatus = !m.showStatus
@@ -247,6 +273,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cycleFocus()
 		case "shift+tab":
 			m.cycleFocusBack()
+		case "ctrl+shift+tab", "ctrl+tab", "ctrl+pgup", "ctrl+pgdown":
+			m.switchFocusHalf()
+		case "ctrl+\\":
+			m.switchFocusHalf()
 		case "shift+left":
 			m.resizeFocused(-4, 0)
 		case "shift+right":
@@ -273,7 +303,8 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := sanitizeInputNoise(strings.TrimSpace(m.input.Value()))
 				if val != "" {
 					m.input.SetValue("")
-					if m.handleBuiltInCommand(val) {
+					if cmd := m.handleBuiltInCommand(val); cmd != nil {
+						cmds = append(cmds, cmd)
 						break
 					}
 					if m.SubmitFn != nil {
@@ -333,9 +364,15 @@ func (m *TUIModel) View() string {
 		return m.confirmView()
 	}
 
-	// Header bar
-	header := tuiHeaderStyle.Render("v100") +
-		tuiHeaderDimStyle.Render("  Tab:focus  Shift+Tab:back  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+C:quit")
+	// Header bar with responsive width to avoid terminal soft-wrap.
+	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+C:quit"
+	if m.width < 130 {
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+C:quit"
+	}
+	if m.width < 100 {
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+C:quit"
+	}
+	header := tuiHeaderStyle.Render("v100") + tuiHeaderDimStyle.Render(headerHint)
 
 	// Input box
 	inputSt := tuiInputStyle
@@ -344,22 +381,27 @@ func (m *TUIModel) View() string {
 	}
 	inputBox := inputSt.Width(m.width - 2).Render(m.input.View())
 
-	inputHeight := 3
-	headerHeight := 1
-	remaining := m.height - headerHeight - inputHeight - 4
+	inputHeight := lipgloss.Height(inputBox)
+	headerHeight := lipgloss.Height(header)
+	// JoinVertical adds one separator line between header/panes and panes/input.
+	joinSeparators := 2
+	remaining := m.height - headerHeight - inputHeight - joinSeparators
 	if remaining < 4 {
 		remaining = 4
 	}
 
 	if m.showTrace {
-		leftW := (m.width - 3) * m.leftPanePct / 100
-		if leftW < 40 {
-			leftW = 40
+		// Each pane has a 1-char border on each side (2 per pane) + 1-char gap = 5 overhead.
+		// leftW and rightW are inner content widths; outer = inner + 2.
+		total := m.width - 5
+		leftW := total * m.leftPanePct / 100
+		if leftW < 38 {
+			leftW = 38
 		}
-		rightW := m.width - leftW - 3
-		if rightW < 26 {
-			rightW = 26
-			leftW = m.width - rightW - 3
+		rightW := total - leftW
+		if rightW < 24 {
+			rightW = 24
+			leftW = total - rightW
 		}
 
 		leftSt := tuiPaneStyle
@@ -371,26 +413,28 @@ func (m *TUIModel) View() string {
 			rightSt = tuiActivePaneStyle
 		}
 
+		paneInnerH := remaining - 2
 		statusH := 0
-		traceH := remaining
+		traceH := paneInnerH
 		if m.showStatus {
-			traceH = (remaining - 1) * m.tracePanePct / 100
-			if traceH < 6 {
-				traceH = 6
+			rightBudget := remaining - 5
+			traceH = rightBudget * m.tracePanePct / 100
+			if traceH < 4 {
+				traceH = 4
 			}
-			statusH = remaining - traceH - 1
-			if statusH < 4 {
-				statusH = 4
-				traceH = remaining - statusH - 1
+			statusH = rightBudget - traceH
+			if statusH < 2 {
+				statusH = 2
+				traceH = rightBudget - statusH
 			}
 		}
 
 		m.transcript.Width = leftW - 4
-		m.transcript.Height = remaining - 2
+		m.transcript.Height = paneInnerH
 		m.traceView.Width = rightW - 4
 		m.traceView.Height = traceH - 2
 
-		left := leftSt.Width(leftW).Height(remaining).Render(m.transcript.View())
+		left := leftSt.Width(leftW).Height(paneInnerH).Render(m.transcript.View())
 		tracePane := rightSt.Width(rightW).Height(traceH).Render(
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
 		)
@@ -400,7 +444,7 @@ func (m *TUIModel) View() string {
 			if m.focus == focusStatus {
 				statusSt = tuiActivePaneStyle
 			}
-			statusPane := statusSt.Width(rightW).Height(statusH).Render(m.statusView(rightW))
+			statusPane := statusSt.Width(rightW).Height(statusH).Render(m.statusView(rightW, statusH))
 			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, statusPane)
 		}
 
@@ -414,9 +458,10 @@ func (m *TUIModel) View() string {
 	if m.focus == focusTranscript {
 		tSt = tuiActivePaneStyle
 	}
+	paneInnerH := remaining - 2
 	m.transcript.Width = m.width - 4
-	m.transcript.Height = remaining - 2
-	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
+	m.transcript.Height = paneInnerH
+	pane := tSt.Width(m.width - 2).Height(paneInnerH).Render(m.transcript.View())
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
 }
@@ -515,51 +560,71 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 }
 
 func (m *TUIModel) cycleFocus() {
-	switch m.focus {
-	case focusInput:
+	if m.isInRightHalf() {
+		if m.focus == focusTrace && m.showStatus {
+			m.focus = focusStatus
+			m.input.Blur()
+			return
+		}
+		m.focus = focusTrace
+		m.input.Blur()
+		return
+	}
+
+	// Left half: transcript <-> input
+	if m.focus == focusInput {
 		m.focus = focusTranscript
 		m.input.Blur()
-	case focusTranscript:
-		if m.showTrace {
-			m.focus = focusTrace
-		} else {
-			m.focus = focusInput
-			m.input.Focus()
-		}
-	case focusTrace:
-		if m.showStatus {
-			m.focus = focusStatus
-		} else {
-			m.focus = focusInput
-			m.input.Focus()
-		}
-	case focusStatus:
-		m.focus = focusInput
-		m.input.Focus()
+		return
 	}
+	m.focus = focusInput
+	m.input.Focus()
 }
 
 func (m *TUIModel) cycleFocusBack() {
-	switch m.focus {
-	case focusInput:
+	if m.isInRightHalf() {
+		if m.focus == focusStatus {
+			m.focus = focusTrace
+			m.input.Blur()
+			return
+		}
 		if m.showStatus {
 			m.focus = focusStatus
-		} else if m.showTrace {
-			m.focus = focusTrace
-		} else {
-			m.focus = focusTranscript
+			m.input.Blur()
+			return
 		}
-		m.input.Blur()
-	case focusTranscript:
-		m.focus = focusInput
-		m.input.Focus()
-	case focusTrace:
-		m.focus = focusTranscript
-		m.input.Blur()
-	case focusStatus:
 		m.focus = focusTrace
 		m.input.Blur()
+		return
 	}
+
+	// Left half: input <-> transcript
+	if m.focus == focusInput {
+		m.focus = focusTranscript
+		m.input.Blur()
+		return
+	}
+	m.focus = focusInput
+	m.input.Focus()
+}
+
+func (m *TUIModel) switchFocusHalf() {
+	if m.isInRightHalf() {
+		m.focus = focusTranscript
+		m.input.Blur()
+		return
+	}
+	if m.showTrace {
+		m.focus = focusTrace
+		m.input.Blur()
+		return
+	}
+	m.focus = focusTranscript
+	m.input.Blur()
+}
+
+func (m *TUIModel) isInRightHalf() bool {
+	return m.focus == focusTrace || m.focus == focusStatus
 }
 
 func (m *TUIModel) resizeFocused(dxPct, dyPct int) {
@@ -599,7 +664,7 @@ func (m *TUIModel) seedWelcomeContent() {
 	m.transcriptBuf.WriteString(styleMuted.Render("3.") + " add a feature and patch files\n\n")
 
 	m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
-	m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
+	m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
 
 	m.transcriptBuf.WriteString(styleMuted.Render("Type a task below and press Enter."))
 
@@ -661,7 +726,7 @@ func (m *TUIModel) transcriptWrapWidth() int {
 	return m.width - 8
 }
 
-func (m *TUIModel) statusView(width int) string {
+func (m *TUIModel) statusView(width, height int) string {
 	line := m.statusLine
 	w := width - 6
 	if w < 12 {
@@ -669,23 +734,35 @@ func (m *TUIModel) statusView(width int) string {
 	}
 	line = wrap.String(line, w)
 
-	radio := styleMuted.Render("radio") + " " + m.radioStateLine()
-	radio += "\n" + styleMuted.Render("feed: "+m.radioURL)
+	lines := []string{
+		tuiStatusLabelStyle.Render("status"),
+		stylePrimary.Render(wrap.String(m.runSummary, w)),
+		styleBold.Render(strings.ToUpper(m.statusMode)),
+		styleMuted.Render(line),
+		"",
+		styleMuted.Render("radio") + " " + m.radioStateLine(),
+		styleMuted.Render("feed: " + m.radioURL),
+	}
 	if m.radioArtist != "" || m.radioTitle != "" {
-		radio += "\n" + stylePrimary.Render("now: "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle))
+		lines = append(lines, stylePrimary.Render("now: "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle)))
 	}
 	if m.radioWave != "" {
 		wave := m.renderWaveForWidth(w)
-		radio += "\n" + styleInfo.Copy().Width(w).Align(lipgloss.Center).Render(wave)
+		lines = append(lines, styleInfo.Render(centerToWidth(wave, w)))
 	}
 	if m.radioErr != "" {
-		radio += "\n" + styleFail.Render(m.radioErr)
+		lines = append(lines, styleFail.Render(m.radioErr))
 	}
-	return tuiStatusLabelStyle.Render("status") + "\n" +
-		stylePrimary.Render(wrap.String(m.runSummary, w)) + "\n" +
-		styleBold.Render(strings.ToUpper(m.statusMode)) + "\n" +
-		styleMuted.Render(line) + "\n\n" +
-		radio
+
+	// Keep content bounded to pane height to avoid stale lines after resize.
+	contentH := height - 2 // border consumes 2 lines in rounded style
+	if contentH < 1 {
+		contentH = 1
+	}
+	if len(lines) > contentH {
+		lines = lines[:contentH]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *TUIModel) renderTraceEvent(ev core.Event) string {
@@ -742,6 +819,10 @@ func toolEmoji(name string) string {
 		return "🧾"
 	case "git_commit":
 		return "✅"
+	case "git_push":
+		return "🚀"
+	case "curl_fetch":
+		return "🌐"
 	case "sh":
 		return "🖥"
 	default:
@@ -889,6 +970,19 @@ func (m *TUIModel) renderWaveForWidth(width int) string {
 	return wave[:target]
 }
 
+func centerToWidth(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	if lipgloss.Width(s) >= width {
+		return s
+	}
+	pad := width - lipgloss.Width(s)
+	left := pad / 2
+	right := pad - left
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
 func (m *TUIModel) toggleRadio() {
 	if m.radioPlaying {
 		m.stopRadio()
@@ -982,69 +1076,104 @@ func fetchNowPlayingCmd(stationID string) tea.Cmd {
 	}
 }
 
-func (m *TUIModel) handleBuiltInCommand(input string) bool {
+func (m *TUIModel) handleBuiltInCommand(input string) tea.Cmd {
 	if strings.EqualFold(strings.TrimSpace(input), "download this song") {
-		m.downloadCurrentSong()
-		return true
+		return m.startDownloadCmd()
 	}
-	return false
+	return nil
 }
 
-func (m *TUIModel) downloadCurrentSong() {
-	artist, title, err := fetchNowPlaying(m.radioStationID())
-	if err != nil {
-		m.radioErr = "download failed: now-playing unavailable"
-		m.statusMode = "error"
-		m.statusLine = "could not fetch current song"
-		return
+func (m *TUIModel) startDownloadCmd() tea.Cmd {
+	stationID := m.radioStationID()
+	if stationID == "" {
+		m.radioErr = "no radio station configured"
+		return nil
 	}
-	m.radioArtist = artist
-	m.radioTitle = title
-
-	query := strings.TrimSpace(artist + " " + title + " audio")
-	if query == "" {
-		m.radioErr = "download failed: empty song metadata"
-		m.statusMode = "error"
-		m.statusLine = "current song has no artist/title"
-		return
-	}
-
-	if _, err := exec.LookPath("yt-dlp"); err != nil {
-		m.radioErr = "download failed: yt-dlp not installed"
-		m.statusMode = "error"
-		m.statusLine = "install yt-dlp to enable song download"
-		return
-	}
-
-	dir := "/home/v/Music/favorites"
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		m.radioErr = "download failed: cannot create favorites folder"
-		m.statusMode = "error"
-		m.statusLine = "failed to create /home/v/Music/favorites"
-		return
-	}
-
-	metaPath := filepath.Join(dir, "favorites.txt")
-	f, err := os.OpenFile(metaPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err == nil {
-		_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | " + strings.TrimSpace(artist+" - "+title) + "\n")
-		_ = f.Close()
-	}
-
-	outTmpl := filepath.Join(dir, "%(title)s [%(id)s].%(ext)s")
-	cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "-o", outTmpl, "ytsearch1:"+query)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		m.radioErr = "download failed: yt-dlp error"
-		m.statusMode = "error"
-		m.statusLine = "could not download: " + strings.TrimSpace(artist+" - "+title)
-		return
-	}
-
+	m.statusMode = "downloading"
+	m.statusLine = "fetching song info…"
 	m.radioErr = ""
-	m.statusMode = "idle"
-	m.statusLine = "downloaded: " + strings.TrimSpace(artist+" - "+title)
+
+	return func() tea.Msg {
+		artist, title, err := fetchNowPlaying(stationID)
+		if err != nil {
+			return downloadDoneMsg{err: "now-playing unavailable"}
+		}
+		song := strings.TrimSpace(artist + " - " + title)
+		query := strings.TrimSpace(artist + " " + title + " audio")
+		if query == "" {
+			return downloadDoneMsg{err: "empty song metadata"}
+		}
+		if _, err := exec.LookPath("yt-dlp"); err != nil {
+			return downloadDoneMsg{err: "yt-dlp not installed"}
+		}
+		dir := "/home/v/Music/favorites"
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return downloadDoneMsg{err: "cannot create favorites folder"}
+		}
+		metaPath := filepath.Join(dir, "favorites.txt")
+		if f, err := os.OpenFile(metaPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | " + song + "\n")
+			_ = f.Close()
+		}
+		outTmpl := filepath.Join(dir, "%(title)s [%(id)s].%(ext)s")
+		cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "-o", outTmpl, "ytsearch1:"+query)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		if err := cmd.Run(); err != nil {
+			return downloadDoneMsg{err: "yt-dlp error"}
+		}
+		return downloadDoneMsg{artist: artist, title: title}
+	}
+}
+
+func (m *TUIModel) handleMouseClick(x, y int) {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+	// Input box occupies the last 3 rows (top border + content + bottom border).
+	inputStartY := m.height - 3
+	if y >= inputStartY {
+		m.focus = focusInput
+		m.input.Focus()
+		return
+	}
+	if !m.showTrace {
+		m.focus = focusTranscript
+		m.input.Blur()
+		return
+	}
+	// Left pane outer width = leftW(inner) + 2 borders. Right pane starts at leftW+2+1.
+	total := m.width - 5
+	leftW := total * m.leftPanePct / 100
+	if leftW < 38 {
+		leftW = 38
+	}
+	leftOuterEnd := leftW + 1 // 0-indexed: left border at 0, content 1..leftW, right border at leftW+1
+	if x <= leftOuterEnd {
+		m.focus = focusTranscript
+		m.input.Blur()
+		return
+	}
+	// Right half — trace vs status
+	if !m.showStatus {
+		m.focus = focusTrace
+		m.input.Blur()
+		return
+	}
+	// Approximate row where status pane starts: header(1) + sep(1) + traceH(outer)
+	headerH := 1
+	remaining := m.height - headerH - 3 - 2
+	traceH := remaining * m.tracePanePct / 100
+	if traceH < 6 {
+		traceH = 6
+	}
+	tracePaneEndY := headerH + 1 + traceH // header row + JoinVertical \n + traceH outer rows
+	if y < tracePaneEndY {
+		m.focus = focusTrace
+	} else {
+		m.focus = focusStatus
+	}
+	m.input.Blur()
 }
 
 func (m *TUIModel) radioStationID() string {
