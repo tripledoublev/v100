@@ -147,10 +147,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// Set workspace
-			workspace := workspaceFlag
-			if workspace == "" {
-				workspace = runDir
-			}
+			workspace := resolveWorkspace(workspaceFlag, runDir)
 
 			// Build provider
 			prov, err := buildProvider(cfg, cfg.Defaults.Provider)
@@ -240,14 +237,16 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 	run.Dir = workspace
 
 	if err := loop.EmitRunStart(core.RunStartPayload{
-		Policy:   pol.Name,
-		Provider: prov.Name(),
-		Model:    model,
+		Policy:    pol.Name,
+		Provider:  prov.Name(),
+		Model:     model,
+		Workspace: workspace,
 	}); err != nil {
 		return err
 	}
 
 	fmt.Println(ui.Info(ui.Dim("trace: ") + run.TraceFile))
+	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
@@ -394,6 +393,7 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 
 func resumeCmd(cfgPath *string) *cobra.Command {
 	var tuiFlag bool
+	var workspaceFlag string
 
 	cmd := &cobra.Command{
 		Use:   "resume <run_id>",
@@ -420,7 +420,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// Reconstruct message history from trace
-			msgs, providerName, model := reconstructHistory(events)
+			msgs, providerName, model, tracedWorkspace := reconstructHistory(events)
 
 			if providerName == "" {
 				providerName = cfg.Defaults.Provider
@@ -449,6 +449,11 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Dir:       runDir,
 				TraceFile: tracePath,
 			}
+			workspace := resolveWorkspace(workspaceFlag, runDir)
+			if workspaceFlag == "" && strings.TrimSpace(tracedWorkspace) != "" {
+				workspace = resolveWorkspace(tracedWorkspace, runDir)
+			}
+			run.Dir = workspace
 
 			loop := &core.Loop{
 				Run:       run,
@@ -465,6 +470,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			loop.OutputFn = renderer.RenderEvent
 
 			fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", runID, len(events))))
+			fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 			_ = model
 			_ = tuiFlag
 
@@ -493,6 +499,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable TUI")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
 	return cmd
 }
 
@@ -846,9 +853,9 @@ func buildConfirmFn(mode string) core.ConfirmFn {
 	}
 }
 
-func reconstructHistory(events []core.Event) ([]providers.Message, string, string) {
+func reconstructHistory(events []core.Event) ([]providers.Message, string, string, string) {
 	var msgs []providers.Message
-	var providerName, model string
+	var providerName, model, workspace string
 
 	for _, ev := range events {
 		switch ev.Type {
@@ -857,6 +864,7 @@ func reconstructHistory(events []core.Event) ([]providers.Message, string, strin
 			_ = json.Unmarshal(ev.Payload, &p)
 			providerName = p.Provider
 			model = p.Model
+			workspace = strings.TrimSpace(p.Workspace)
 
 		case core.EventUserMsg:
 			var p core.UserMsgPayload
@@ -883,7 +891,23 @@ func reconstructHistory(events []core.Event) ([]providers.Message, string, strin
 			})
 		}
 	}
-	return msgs, providerName, model
+	return msgs, providerName, model, workspace
+}
+
+func resolveWorkspace(workspaceFlag, runDir string) string {
+	workspace := strings.TrimSpace(workspaceFlag)
+	if workspace == "" {
+		// Default to caller CWD so the agent operates on the project by default.
+		if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+			workspace = wd
+		} else {
+			workspace = runDir
+		}
+	}
+	if abs, err := filepath.Abs(workspace); err == nil {
+		return abs
+	}
+	return workspace
 }
 
 func findRunDir(runID string) (string, error) {

@@ -97,6 +97,8 @@ v100 run --tui
 --workspace string      Workspace directory for tool operations
 ```
 
+Default workspace is the current directory where `v100 run` is launched.
+
 ## Tools
 
 | Tool | Danger | Description |
@@ -142,7 +144,6 @@ budget_tokens = 100000
 runs/<run_id>/
   trace.jsonl    # append-only event log
   memory/        # injected into context each step
-  workspace/     # tool working directory
   artifacts/
 ```
 

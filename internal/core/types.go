@@ -72,6 +72,7 @@ type RunStartPayload struct {
 	Policy   string `json:"policy"`
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // UserMsgPayload is the Payload for EventUserMsg.
