@@ -163,6 +163,10 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if toolTimeoutFlag > 0 {
 				pol.ToolTimeoutMS = toolTimeoutFlag
 			}
+			pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
+			if cfg.Defaults.ContextLimit > 0 {
+				pol.ContextLimit = cfg.Defaults.ContextLimit
+			}
 
 			// Override workspace for tools
 			_ = workspace
@@ -433,6 +437,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 
 			reg := buildToolRegistry(cfg)
 			pol := loadPolicy(cfg, "default")
+			if cfg.Defaults.ContextLimit > 0 {
+				pol.ContextLimit = cfg.Defaults.ContextLimit
+			}
 			budget := core.NewBudgetTracker(&core.Budget{
 				MaxSteps:  cfg.Defaults.BudgetSteps,
 				MaxTokens: cfg.Defaults.BudgetTokens,
@@ -454,6 +461,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				workspace = resolveWorkspace(tracedWorkspace, runDir)
 			}
 			run.Dir = workspace
+			pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
 
 			loop := &core.Loop{
 				Run:       run,

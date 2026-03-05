@@ -6,6 +6,8 @@ type Policy struct {
 	SystemPrompt        string
 	MaxToolCallsPerStep int
 	ToolTimeoutMS       int
+	MemoryPath          string // path to MEMORY.md in workspace; injected into every buildMessages call
+	ContextLimit        int    // estimated token threshold for compression (0 = disabled)
 }
 
 // DefaultSystemPrompt is the built-in "agent that builds the agent" prompt.
@@ -35,6 +37,15 @@ Your primary mission is to help the user build and improve v100 itself. You are 
 - You can update internal/providers/ to support new models or APIs.
 - You can edit this system prompt at internal/policy/policy.go to evolve your own behavior.
 - Always run go build ./... after making Go changes to verify compilation.
+
+## Memory
+
+You have a persistent memory file at MEMORY.md in your workspace.
+- Read it at the start of every session to restore context.
+- Update it regularly during the session: what you've learned, what you changed, what's next.
+- Keep it under 100 lines. Use dated bullet points.
+- IMPORTANT: Write to MEMORY.md before making changes that will trigger a hot-reload restart
+  (editing .go files under ` + "`./v100 dev`" + `), since the restart will clear your conversation history.
 
 ## General Rules
 

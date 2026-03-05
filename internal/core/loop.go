@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -46,7 +47,12 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 	_ = userEv
 	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
 
-	// 2. Continue model/tool turns until the model produces a final (no-tool) response.
+	// 2. Maybe compress history before calling the provider.
+	if l.Policy != nil && l.Policy.ContextLimit > 0 {
+		_ = l.maybeCompress(ctx) // best-effort; log but don't fail
+	}
+
+	// 3. Continue model/tool turns until the model produces a final (no-tool) response.
 	maxToolCalls := 20
 	if l.Policy != nil && l.Policy.MaxToolCallsPerStep > 0 {
 		maxToolCalls = l.Policy.MaxToolCallsPerStep
@@ -264,9 +270,9 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 }
 
 func (l *Loop) buildMessages() []providers.Message {
-	msgs := make([]providers.Message, 0, len(l.Messages)+1)
+	msgs := make([]providers.Message, 0, len(l.Messages)+2)
 
-	// System prompt
+	// 1. Static system prompt
 	if l.Policy != nil && l.Policy.SystemPrompt != "" {
 		msgs = append(msgs, providers.Message{
 			Role:    "system",
@@ -274,8 +280,72 @@ func (l *Loop) buildMessages() []providers.Message {
 		})
 	}
 
+	// 2. Dynamic persistent memory — re-read on every call so in-run writes are visible
+	if l.Policy != nil && l.Policy.MemoryPath != "" {
+		if mem, err := os.ReadFile(l.Policy.MemoryPath); err == nil && len(mem) > 0 {
+			msgs = append(msgs, providers.Message{
+				Role:    "system",
+				Content: "## Persistent Memory\n\n" + string(mem),
+			})
+		}
+	}
+
+	// 3. Conversation history
 	msgs = append(msgs, l.Messages...)
 	return msgs
+}
+
+// estimateTokens returns a rough token count for a message slice (1 token ≈ 4 chars).
+func estimateTokens(msgs []providers.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Content) / 4
+		for _, tc := range m.ToolCalls {
+			n += len(tc.Args) / 4
+		}
+	}
+	return n
+}
+
+// maybeCompress compresses the oldest half of l.Messages when estimated tokens exceed
+// 3/4 of the configured context limit, using a dedicated summarization call.
+func (l *Loop) maybeCompress(ctx context.Context) error {
+	msgs := l.buildMessages()
+	if estimateTokens(msgs) < l.Policy.ContextLimit*3/4 {
+		return nil
+	}
+
+	cutoff := len(l.Messages) / 2
+	if cutoff < 4 {
+		return nil // too short to compress meaningfully
+	}
+	toSummarize := l.Messages[:cutoff]
+
+	summaryReq := providers.CompleteRequest{
+		RunID: l.Run.ID,
+		Messages: append(
+			[]providers.Message{{
+				Role:    "system",
+				Content: "You are a summarizer. Produce a dense, structured summary of the following conversation segment. Preserve: decisions made, files read/edited, tool results, current task state. Be concise.",
+			}},
+			toSummarize...,
+		),
+	}
+	resp, err := l.Provider.Complete(ctx, summaryReq)
+	if err != nil {
+		return err
+	}
+
+	// Account for compression tokens against the budget.
+	_ = l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	_ = l.Budget.AddCost(resp.Usage.CostUSD)
+
+	summary := providers.Message{
+		Role:    "system",
+		Content: "[CONTEXT SUMMARY — earlier conversation compressed]\n\n" + resp.AssistantText,
+	}
+	l.Messages = append([]providers.Message{summary}, l.Messages[cutoff:]...)
+	return nil
 }
 
 func (l *Loop) emit(t EventType, stepID string, payload any) (Event, error) {

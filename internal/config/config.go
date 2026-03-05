@@ -51,6 +51,7 @@ type DefaultsConfig struct {
 	BudgetCostUSD       float64 `toml:"budget_cost_usd"`
 	ToolTimeoutMS       int     `toml:"tool_timeout_ms"`
 	MaxToolCallsPerStep int     `toml:"max_tool_calls_per_step"`
+	ContextLimit        int     `toml:"context_limit"` // estimated token threshold for compression (0 = disabled, default 80000)
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -88,6 +89,7 @@ func DefaultConfig() *Config {
 			BudgetTokens:        100000,
 			ToolTimeoutMS:       30000,
 			MaxToolCallsPerStep: 20,
+			ContextLimit:        80000,
 		},
 	}
 }
@@ -127,6 +129,7 @@ budget_tokens = 100000
 budget_cost_usd = 0.0
 tool_timeout_ms = 30000
 max_tool_calls_per_step = 20
+context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
 `
 }
 
