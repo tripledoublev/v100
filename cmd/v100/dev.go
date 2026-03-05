@@ -53,18 +53,31 @@ func runDev(cmd *cobra.Command, args []string) error {
 		stopWatch := make(chan struct{})
 		go watchGoFiles(root, changed, stopWatch)
 
+		childDone := make(chan error, 1)
+		go func() { childDone <- child.Wait() }()
+
 		select {
 		case <-changed:
-			fmt.Println("\n→ change detected, rebuilding…")
+			// Debounce: collect any additional saves in the same burst.
+			time.Sleep(200 * time.Millisecond)
 			close(stopWatch)
-			done := make(chan error, 1)
-			go func() { done <- child.Wait() }()
+
+			// SIGINT lets bubbletea restore terminal (alt-screen, raw mode).
+			_ = child.Process.Signal(os.Interrupt)
 			select {
-			case <-done:
+			case <-childDone:
 			case <-time.After(2 * time.Second):
 				_ = child.Process.Kill()
-				<-done
+				<-childDone
 			}
+			// Safety net: restore terminal in case TUI cleanup didn't run.
+			_ = exec.Command("stty", "sane").Run()
+			fmt.Println("→ change detected, rebuilding…")
+
+		case exitErr := <-childDone:
+			// User quit the TUI normally — exit the supervisor too.
+			close(stopWatch)
+			return exitErr
 		}
 	}
 }
