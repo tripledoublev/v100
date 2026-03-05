@@ -71,9 +71,9 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir",
-				"git_status", "git_diff", "project_search", "patch_apply",
+				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "patch_apply"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply"},
 		},
 		Policies: map[string]PolicyConfig{
 			"default": {
@@ -112,8 +112,8 @@ base_url = "https://api.openai.com/v1"
 env = "OPENAI_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "project_search", "patch_apply"]
-dangerous = ["fs_write", "sh", "git_commit", "patch_apply"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -142,6 +142,10 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	// Backward-compatible tool migrations for older config files.
+	ensureString(&cfg.Tools.Enabled, "git_push")
+	ensureString(&cfg.Tools.Dangerous, "git_push")
+	ensureString(&cfg.Tools.Enabled, "curl_fetch")
 	return &cfg, nil
 }
 
@@ -160,4 +164,13 @@ func expandHome(path string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
+}
+
+func ensureString(items *[]string, want string) {
+	for _, s := range *items {
+		if s == want {
+			return
+		}
+	}
+	*items = append(*items, want)
 }

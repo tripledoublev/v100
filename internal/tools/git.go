@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -16,8 +17,8 @@ type gitStatusTool struct{}
 
 func GitStatus() Tool { return &gitStatusTool{} }
 
-func (t *gitStatusTool) Name() string        { return "git_status" }
-func (t *gitStatusTool) Description() string { return "Run git status in the workspace directory." }
+func (t *gitStatusTool) Name() string             { return "git_status" }
+func (t *gitStatusTool) Description() string      { return "Run git status in the workspace directory." }
 func (t *gitStatusTool) DangerLevel() DangerLevel { return Safe }
 
 func (t *gitStatusTool) InputSchema() json.RawMessage {
@@ -40,8 +41,8 @@ type gitDiffTool struct{}
 
 func GitDiff() Tool { return &gitDiffTool{} }
 
-func (t *gitDiffTool) Name() string        { return "git_diff" }
-func (t *gitDiffTool) Description() string { return "Show git diff of unstaged changes." }
+func (t *gitDiffTool) Name() string             { return "git_diff" }
+func (t *gitDiffTool) Description() string      { return "Show git diff of unstaged changes." }
 func (t *gitDiffTool) DangerLevel() DangerLevel { return Safe }
 
 func (t *gitDiffTool) InputSchema() json.RawMessage {
@@ -76,8 +77,8 @@ type gitCommitTool struct{}
 
 func GitCommit() Tool { return &gitCommitTool{} }
 
-func (t *gitCommitTool) Name() string        { return "git_commit" }
-func (t *gitCommitTool) Description() string { return "Stage all changes and commit with a message." }
+func (t *gitCommitTool) Name() string             { return "git_commit" }
+func (t *gitCommitTool) Description() string      { return "Stage all changes and commit with a message." }
 func (t *gitCommitTool) DangerLevel() DangerLevel { return Dangerous }
 
 func (t *gitCommitTool) InputSchema() json.RawMessage {
@@ -121,6 +122,63 @@ func (t *gitCommitTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		}
 	}
 	return runGit(ctx, call, "commit", "-m", a.Message)
+}
+
+// ─────────────────────────────────────────
+// git.push
+// ─────────────────────────────────────────
+
+type gitPushTool struct{}
+
+func GitPush() Tool { return &gitPushTool{} }
+
+func (t *gitPushTool) Name() string             { return "git_push" }
+func (t *gitPushTool) Description() string      { return "Push commits to a remote branch." }
+func (t *gitPushTool) DangerLevel() DangerLevel { return Dangerous }
+
+func (t *gitPushTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"remote": {"type": "string", "description": "Remote name.", "default": "origin"},
+			"branch": {"type": "string", "description": "Branch name. If omitted, push current branch."},
+			"set_upstream": {"type": "boolean", "description": "If true, use -u for upstream tracking.", "default": false},
+			"force_with_lease": {"type": "boolean", "description": "If true, include --force-with-lease.", "default": false}
+		}
+	}`)
+}
+
+func (t *gitPushTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"output": {"type": "string"}}}`)
+}
+
+func (t *gitPushTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var a struct {
+		Remote         string `json:"remote"`
+		Branch         string `json:"branch"`
+		SetUpstream    bool   `json:"set_upstream"`
+		ForceWithLease bool   `json:"force_with_lease"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(time.Now(), "invalid args: "+err.Error()), nil
+	}
+	remote := strings.TrimSpace(a.Remote)
+	if remote == "" {
+		remote = "origin"
+	}
+
+	gitArgs := []string{"push"}
+	if a.SetUpstream {
+		gitArgs = append(gitArgs, "-u")
+	}
+	if a.ForceWithLease {
+		gitArgs = append(gitArgs, "--force-with-lease")
+	}
+	gitArgs = append(gitArgs, remote)
+	if branch := strings.TrimSpace(a.Branch); branch != "" {
+		gitArgs = append(gitArgs, branch)
+	}
+	return runGit(ctx, call, gitArgs...)
 }
 
 // ─────────────────────────────────────────

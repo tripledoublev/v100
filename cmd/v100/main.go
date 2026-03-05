@@ -55,6 +55,7 @@ func rootCmd() *cobra.Command {
 		doctorCmd(&cfgPath),
 		loginCmd(),
 		logoutCmd(),
+		devCmd(),
 	)
 	return root
 }
@@ -65,23 +66,23 @@ func rootCmd() *cobra.Command {
 
 func runCmd(cfgPath *string) *cobra.Command {
 	var (
-		providerFlag        string
-		modelFlag           string
-		policyFlag          string
-		runDirFlag          string
-		workspaceFlag       string
-		unsafeFlag          bool
-		autoFlag            bool
-		budgetStepsFlag     int
-		budgetTokensFlag    int
-		budgetCostFlag      float64
-		toolTimeoutFlag     int
-		maxToolCallsFlag    int
-		confirmToolsFlag    string
-		tuiFlag             bool
-		tuiNoAltFlag        bool
-		tuiPlainFlag        bool
-		tuiDebugFlag        bool
+		providerFlag     string
+		modelFlag        string
+		policyFlag       string
+		runDirFlag       string
+		workspaceFlag    string
+		unsafeFlag       bool
+		autoFlag         bool
+		budgetStepsFlag  int
+		budgetTokensFlag int
+		budgetCostFlag   float64
+		toolTimeoutFlag  int
+		maxToolCallsFlag int
+		confirmToolsFlag string
+		tuiFlag          bool
+		tuiNoAltFlag     bool
+		tuiPlainFlag     bool
+		tuiDebugFlag     bool
 	)
 
 	cmd := &cobra.Command{
@@ -225,12 +226,12 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 	confirmFn := buildConfirmFn(confirmMode)
 
 	loop := &core.Loop{
-		Run:      run,
-		Provider: prov,
-		Tools:    reg,
-		Policy:   pol,
-		Trace:    trace,
-		Budget:   budget,
+		Run:       run,
+		Provider:  prov,
+		Tools:     reg,
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    budget,
 		ConfirmFn: confirmFn,
 		OutputFn:  renderer.RenderEvent,
 	}
@@ -340,12 +341,12 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 	}
 
 	loop = &core.Loop{
-		Run:      run,
-		Provider: prov,
-		Tools:    reg,
-		Policy:   pol,
-		Trace:    trace,
-		Budget:   budget,
+		Run:       run,
+		Provider:  prov,
+		Tools:     reg,
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    budget,
 		ConfirmFn: confirmFn,
 		OutputFn:  func(ev core.Event) { tui.SendEvent(ev) },
 	}
@@ -812,6 +813,8 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.GitStatus())
 	reg.Register(tools.GitDiff())
 	reg.Register(tools.GitCommit())
+	reg.Register(tools.GitPush())
+	reg.Register(tools.CurlFetch())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
 	return reg
