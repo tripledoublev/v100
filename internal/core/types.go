@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/providers"
 )
 
 // EventType identifies the kind of trace event.
@@ -11,6 +13,7 @@ type EventType string
 const (
 	EventRunStart    EventType = "run.start"
 	EventUserMsg     EventType = "user.message"
+	EventModelCall   EventType = "model.call"
 	EventModelResp   EventType = "model.response"
 	EventToolCall    EventType = "tool.call"
 	EventToolResult  EventType = "tool.result"
@@ -82,6 +85,14 @@ type RunStartPayload struct {
 // UserMsgPayload is the Payload for EventUserMsg.
 type UserMsgPayload struct {
 	Content string `json:"content"`
+}
+
+// ModelCallPayload is the Payload for EventModelCall.
+type ModelCallPayload struct {
+	Model        string              `json:"model,omitempty"`
+	Messages     []providers.Message `json:"messages"`
+	ToolNames    []string            `json:"tool_names,omitempty"`
+	MaxToolCalls int                 `json:"max_tool_calls,omitempty"`
 }
 
 // ModelRespPayload is the Payload for EventModelResp.

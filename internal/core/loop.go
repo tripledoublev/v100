@@ -65,12 +65,23 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 
 	for {
 		msgs := l.buildMessages()
+		toolSpecs := l.Tools.Specs()
+		toolNames := make([]string, 0, len(toolSpecs))
+		for _, ts := range toolSpecs {
+			toolNames = append(toolNames, ts.Name)
+		}
+		_, _ = l.emit(EventModelCall, stepID, ModelCallPayload{
+			Model:        "",
+			Messages:     msgs,
+			ToolNames:    toolNames,
+			MaxToolCalls: maxToolCalls - toolCallsUsed,
+		})
 		t0 := time.Now()
 		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
 			RunID:    l.Run.ID,
 			StepID:   stepID,
 			Messages: msgs,
-			Tools:    l.Tools.Specs(),
+			Tools:    toolSpecs,
 			Model:    "",
 			Hints: providers.Hints{
 				MaxToolCalls: maxToolCalls - toolCallsUsed,

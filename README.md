@@ -103,6 +103,16 @@ v100 run --name "parser refactor" --tag team=core --tag sprint=12
 | `v100 query [--tag k=v ...] [--score pass|fail|partial]` | Filter runs by metadata |
 | `v100 dev` | Rebuild/restart dev binary when `.v100-reload` appears |
 
+### Deterministic replay
+
+```bash
+v100 replay --deterministic <run_id>
+v100 replay --deterministic --step <run_id>
+```
+
+In deterministic mode, model responses and tool outputs are replayed from trace records.
+`--step` pauses between model/tool events for debugger-style inspection.
+
 ### `v100 run` flags
 
 ```

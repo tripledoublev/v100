@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -551,7 +552,10 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 // ─────────────────────────────────────────
 
 func replayCmd() *cobra.Command {
-	return &cobra.Command{
+	var deterministic bool
+	var stepMode bool
+
+	cmd := &cobra.Command{
 		Use:   "replay <run_id>",
 		Short: "Pretty-print a run trace as a readable transcript",
 		Args:  cobra.ExactArgs(1),
@@ -567,12 +571,117 @@ func replayCmd() *cobra.Command {
 				return err
 			}
 
+			if deterministic {
+				return deterministicReplay(events, stepMode)
+			}
+
 			for _, ev := range events {
 				ui.PrintReplayEvent(ev)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&deterministic, "deterministic", false, "replay recorded model/tool events deterministically")
+	cmd.Flags().BoolVar(&stepMode, "step", false, "pause between deterministic replay events")
+	return cmd
+}
+
+func deterministicReplay(events []core.Event, stepMode bool) error {
+	fmt.Println(ui.Header("Deterministic Replay"))
+	fmt.Println(ui.Dim("model/tool outputs are sourced from trace records only"))
+
+	hasModelCall := false
+	reader := bufio.NewReader(os.Stdin)
+
+	pause := func(label string) error {
+		if !stepMode {
+			return nil
+		}
+		fmt.Print(ui.Dim("Press Enter to continue (" + label + ")..."))
+		_, err := reader.ReadString('\n')
+		return err
+	}
+
+	for i, ev := range events {
+		switch ev.Type {
+		case core.EventModelCall:
+			hasModelCall = true
+			var p core.ModelCallPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] MODEL CALL  step=%s", i+1, shortID(ev.StepID))))
+			fmt.Printf("%s\n", ui.Dim(fmt.Sprintf("tools=%d  max_tool_calls=%d", len(p.ToolNames), p.MaxToolCalls)))
+			for _, m := range p.Messages {
+				content := strings.TrimSpace(m.Content)
+				if len(content) > 200 {
+					content = content[:200] + "…"
+				}
+				content = strings.ReplaceAll(content, "\n", " ")
+				if content == "" && len(m.ToolCalls) > 0 {
+					content = fmt.Sprintf("[assistant tool-calls: %d]", len(m.ToolCalls))
+				}
+				fmt.Printf("  %s: %s\n", m.Role, content)
+			}
+			if err := pause("model.call"); err != nil {
+				return err
+			}
+
+		case core.EventModelResp:
+			var p core.ModelRespPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] MODEL RESPONSE (recorded)", i+1)))
+			if strings.TrimSpace(p.Text) != "" {
+				fmt.Println(p.Text)
+			}
+			if len(p.ToolCalls) > 0 {
+				fmt.Println(ui.Dim(fmt.Sprintf("tool_calls=%d", len(p.ToolCalls))))
+			}
+			if err := pause("model.response"); err != nil {
+				return err
+			}
+
+		case core.EventToolCall:
+			var p core.ToolCallPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] TOOL CALL (recorded) %s", i+1, p.Name)))
+			fmt.Println(p.Args)
+			if err := pause("tool.call"); err != nil {
+				return err
+			}
+
+		case core.EventToolResult:
+			var p core.ToolResultPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] TOOL RESULT (recorded) %s  ok=%t", i+1, p.Name, p.OK)))
+			out := p.Output
+			if len(out) > 500 {
+				out = out[:500] + "…"
+			}
+			fmt.Println(out)
+			if err := pause("tool.result"); err != nil {
+				return err
+			}
+
+		default:
+			// Keep compatibility with all existing event types.
+			ui.PrintReplayEvent(ev)
+		}
+	}
+
+	if !hasModelCall {
+		fmt.Println(ui.Warn("trace has no model.call events; rerun with newer v100 to capture deterministic prompts"))
+	}
+	return nil
+}
+
+func styleReplayTitle(s string) string {
+	return ui.Bold(s)
+}
+
+func shortID(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }
 
 // ─────────────────────────────────────────
