@@ -1220,9 +1220,13 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		if rem := budget.RemainingSteps(); rem > 0 && maxSteps > rem {
 			maxSteps = rem
 		}
-		maxTokens := 25000
-		if rem := budget.RemainingTokens(); rem > 0 && maxTokens > rem {
+		// Token cap: inherit parent remaining budget first; fall back to configured default.
+		// 0 means unlimited in BudgetTracker semantics.
+		maxTokens := 0
+		if rem := budget.RemainingTokens(); rem > 0 {
 			maxTokens = rem
+		} else if cfg.Defaults.BudgetTokens > 0 {
+			maxTokens = cfg.Defaults.BudgetTokens
 		}
 		maxCost := 0.0
 		if rem := budget.RemainingCost(); rem > 0 {
