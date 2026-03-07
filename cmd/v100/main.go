@@ -256,7 +256,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	confirmFn := buildConfirmFn(confirmMode)
 
 	outputFn := core.OutputFn(renderer.RenderEvent)
-	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep)
 
 	loop := &core.Loop{
 		Run:       run,
@@ -376,7 +376,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 
 	tuiOutputFn := core.OutputFn(func(ev core.Event) { tui.SendEvent(ev) })
-	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace)
+	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep)
 
 	loop = &core.Loop{
 		Run:       run,
@@ -875,7 +875,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 }
 
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
-	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string) {
+	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int) {
 
 	providerBuilder := func(model string) (providers.Provider, error) {
 		pc, ok := cfg.Providers[cfg.Defaults.Provider]
@@ -950,9 +950,15 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 
 		childPolicy := &policy.Policy{
-			Name:                "sub-agent",
-			SystemPrompt:        "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you.",
-			MaxToolCallsPerStep: 10,
+			Name:         "sub-agent",
+			SystemPrompt: "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you.",
+		}
+		childPolicy.MaxToolCallsPerStep = parentMaxToolCalls
+		if childPolicy.MaxToolCallsPerStep <= 0 {
+			childPolicy.MaxToolCallsPerStep = cfg.Defaults.MaxToolCallsPerStep
+		}
+		if childPolicy.MaxToolCallsPerStep <= 0 {
+			childPolicy.MaxToolCallsPerStep = 50
 		}
 
 		// Resolve output function
