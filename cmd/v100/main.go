@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1020,6 +1021,27 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login'", name, tokenPath)))
 						ok = false
 					}
+				case "ollama":
+					baseURL := strings.TrimSpace(pc.BaseURL)
+					if baseURL == "" {
+						baseURL = "http://localhost:11434"
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/tags", nil)
+					resp, err := http.DefaultClient.Do(req)
+					cancel()
+					if err != nil {
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: cannot reach %s (%v)", name, baseURL, err)))
+						ok = false
+						break
+					}
+					_ = resp.Body.Close()
+					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable at %s", name, baseURL)))
+					} else {
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode)))
+						ok = false
+					}
 				default:
 					key := os.Getenv(pc.Auth.Env)
 					if key == "" {
@@ -1118,6 +1140,8 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 			authEnv = "OPENAI_API_KEY"
 		}
 		return providers.NewOpenAIProvider(authEnv, pc.BaseURL, pc.DefaultModel)
+	case "ollama":
+		return providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
@@ -1285,10 +1309,17 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			childPolicy.MaxToolCallsPerStep = 50
 		}
 
-		// Resolve output function
+		// Resolve output function and count tool uses
+		var toolUseCount int
 		var childOutputFn core.OutputFn
 		if outputFn != nil {
-			childOutputFn = *outputFn
+			parentFn := *outputFn
+			childOutputFn = func(ev core.Event) {
+				if ev.Type == core.EventToolCall {
+					toolUseCount++
+				}
+				parentFn(ev)
+			}
 		}
 
 		// Emit agent.start event
@@ -1372,6 +1403,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			AgentRunID:   childRunID,
 			OK:           ok,
 			Result:       result,
+			ToolUses:     toolUseCount,
 			UsedSteps:    cb.UsedSteps,
 			UsedTokens:   cb.UsedTokens,
 			CostUSD:      cb.UsedCostUSD,

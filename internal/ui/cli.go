@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -13,11 +14,19 @@ import (
 )
 
 // CLIRenderer prints events to stdout line by line with colors.
-type CLIRenderer struct{}
+type CLIRenderer struct {
+	agentStarts map[string]time.Time // agentRunID → start time
+	inSubAgent  int                  // nesting depth of sub-agents
+	spinnerStop chan struct{}
+	spinnerDone chan struct{}
+	mu          sync.Mutex
+}
 
 // NewCLIRenderer creates a CLI renderer.
 func NewCLIRenderer() *CLIRenderer {
-	return &CLIRenderer{}
+	return &CLIRenderer{
+		agentStarts: make(map[string]time.Time),
+	}
 }
 
 // RenderEvent prints a human-readable, colorized representation of an event.
@@ -40,10 +49,12 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		)
 
 	case core.EventModelResp:
+		if r.inSubAgent > 0 {
+			break // suppress sub-agent model responses
+		}
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if p.Text != "" {
-			// Indent wrapped lines to align under the label
 			indented := indentLines(p.Text, "              ")
 			fmt.Printf("\n%s  %s  %s\n",
 				ts,
@@ -60,9 +71,13 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 
 	case core.EventToolCall:
-		// Shown inline in EventModelResp above; skip duplicate output.
+		// Suppress sub-agent tool calls; top-level shown inline in EventModelResp.
+		break
 
 	case core.EventToolResult:
+		if r.inSubAgent > 0 {
+			break // suppress sub-agent tool results
+		}
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		var icon, statusStyle string
@@ -102,16 +117,25 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		r.mu.Lock()
+		r.agentStarts[p.AgentRunID] = ev.TS
+		r.inSubAgent++
+		r.mu.Unlock()
 		task := p.Task
 		if len(task) > 60 {
 			task = task[:60] + "…"
 		}
-		label := "◆ agent"
+		label := "Agent"
 		if strings.TrimSpace(p.Agent) != "" {
-			label = "◆ dispatch:" + p.Agent
+			label = "Dispatch:" + p.Agent
 		}
-		fmt.Printf("\n%s  %s  task: %s  model: %s\n",
-			ts, styleInfo.Render(label), task, styleMuted.Render(p.Model))
+		fmt.Printf("\n%s\n", styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)))
+		// Start spinner
+		r.mu.Lock()
+		r.spinnerStop = make(chan struct{})
+		r.spinnerDone = make(chan struct{})
+		r.mu.Unlock()
+		go r.runSpinner()
 
 	case core.EventAgentDispatch:
 		var p core.AgentDispatchPayload
@@ -122,28 +146,42 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		pat := ""
 		if p.Pattern != "" {
-			pat = " " + styleMuted.Render("["+p.Pattern+"]")
+			pat = " [" + p.Pattern + "]"
 		}
-		fmt.Printf("\n%s  %s  role=%s%s  task: %s\n",
-			ts, styleInfo.Render("◆ dispatch"), p.Agent, pat, task)
+		fmt.Printf("\n%s\n", styleInfo.Render(fmt.Sprintf("● Orchestrate%s %s", pat, task)))
 
 	case core.EventAgentEnd:
+		// Stop spinner
+		r.mu.Lock()
+		if r.spinnerStop != nil {
+			close(r.spinnerStop)
+			r.spinnerStop = nil
+		}
+		done := r.spinnerDone
+		r.mu.Unlock()
+		if done != nil {
+			<-done
+		}
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		label := "◆ agent"
-		if strings.TrimSpace(p.Agent) != "" {
-			label = "◆ dispatch:" + p.Agent
+		r.mu.Lock()
+		startTime := r.agentStarts[p.AgentRunID]
+		delete(r.agentStarts, p.AgentRunID)
+		r.inSubAgent--
+		if r.inSubAgent < 0 {
+			r.inSubAgent = 0
+		}
+		r.mu.Unlock()
+		dur := ev.TS.Sub(startTime)
+		summary := fmt.Sprintf("%d tool uses · %s · %s",
+			p.ToolUses, formatTokens(p.UsedTokens), formatDuration(dur.Milliseconds()))
+		if p.CostUSD > 0 {
+			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
 		}
 		if p.OK {
-			fmt.Printf("%s  %s  done  steps=%d tokens=%d cost=$%.4f\n",
-				ts, styleOK.Render(label), p.UsedSteps, p.UsedTokens, p.CostUSD)
+			fmt.Printf("  %s  %s\n", styleMuted.Render("⎿"), styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"))
 		} else {
-			result := p.Result
-			if len(result) > 80 {
-				result = result[:80] + "…"
-			}
-			fmt.Printf("%s  %s  failed: %s\n",
-				ts, styleFail.Render(label), result)
+			fmt.Printf("  %s  %s\n", styleMuted.Render("⎿"), styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"))
 		}
 
 	case core.EventCompress:
@@ -169,6 +207,30 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 
 	default:
 		fmt.Printf("%s  %s\n", ts, styleMuted.Render(string(ev.Type)))
+	}
+}
+
+// runSpinner displays a cycling spinner until spinnerStop is closed.
+func (r *CLIRenderer) runSpinner() {
+	r.mu.Lock()
+	stop := r.spinnerStop
+	done := r.spinnerDone
+	r.mu.Unlock()
+	defer close(done)
+
+	frames := []string{"-", "\\", "|", "/"}
+	i := 0
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			fmt.Print("\r\033[K") // clear spinner line
+			return
+		case <-ticker.C:
+			fmt.Printf("\r  %s  %s working...", styleMuted.Render("⎿"), styleMuted.Render(frames[i%len(frames)]))
+			i++
+		}
 	}
 }
 
@@ -292,46 +354,39 @@ func PrintReplayEvent(ev core.Event) {
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		task := p.Task
-		if len(task) > 80 {
-			task = task[:80] + "…"
+		if len(task) > 60 {
+			task = task[:60] + "…"
 		}
-		label := "◆ agent start"
+		label := "Agent"
 		if strings.TrimSpace(p.Agent) != "" {
-			label = "◆ dispatch start (" + p.Agent + ")"
+			label = "Dispatch:" + p.Agent
 		}
-		fmt.Printf("\n  %s  task: %s  model: %s  max_steps: %d\n",
-			styleInfo.Render(label), task, styleMuted.Render(p.Model), p.MaxSteps)
+		fmt.Printf("\n  %s\n", styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)))
 
 	case core.EventAgentDispatch:
 		var p core.AgentDispatchPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		task := p.Task
-		if len(task) > 80 {
-			task = task[:80] + "…"
+		if len(task) > 60 {
+			task = task[:60] + "…"
 		}
+		pat := ""
 		if p.Pattern != "" {
-			fmt.Printf("  %s  role=%s pattern=%s task: %s\n",
-				styleInfo.Render("◆ dispatch"), p.Agent, p.Pattern, styleMuted.Render(task))
-		} else {
-			fmt.Printf("  %s  role=%s task: %s\n",
-				styleInfo.Render("◆ dispatch"), p.Agent, styleMuted.Render(task))
+			pat = " [" + p.Pattern + "]"
 		}
+		fmt.Printf("  %s\n", styleInfo.Render(fmt.Sprintf("● Orchestrate%s %s", pat, task)))
 
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		okLabel := "◆ agent done"
-		failLabel := "◆ agent failed"
-		if strings.TrimSpace(p.Agent) != "" {
-			okLabel = "◆ dispatch done (" + p.Agent + ")"
-			failLabel = "◆ dispatch failed (" + p.Agent + ")"
+		summary := fmt.Sprintf("%d tool uses · %s", p.ToolUses, formatTokens(p.UsedTokens))
+		if p.CostUSD > 0 {
+			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
 		}
 		if p.OK {
-			fmt.Printf("  %s  steps=%d tokens=%d cost=$%.4f\n",
-				styleOK.Render(okLabel), p.UsedSteps, p.UsedTokens, p.CostUSD)
+			fmt.Printf("  %s  %s\n", styleMuted.Render("⎿"), styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"))
 		} else {
-			fmt.Printf("  %s  %s\n",
-				styleFail.Render(failLabel), styleFail.Render(p.Result))
+			fmt.Printf("  %s  %s\n", styleMuted.Render("⎿"), styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"))
 		}
 
 	case core.EventCompress:
@@ -356,6 +411,34 @@ func PrintReplayEvent(ev core.Event) {
 	default:
 		fmt.Printf("%s  %s\n", styleMuted.Render(ts), styleMuted.Render(string(ev.Type)))
 	}
+}
+
+// formatTokens formats a token count for display: 0→"0", 500→"500", 1500→"1.5k", 24000→"24k".
+func formatTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n%1000 == 0 {
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000.0)
+}
+
+// formatDuration formats milliseconds for display: 500→"0.5s", 3200→"3s", 65000→"1m5s".
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%.1fs", float64(ms)/1000.0)
+	}
+	sec := ms / 1000
+	if sec < 60 {
+		return fmt.Sprintf("%ds", sec)
+	}
+	min := sec / 60
+	rem := sec % 60
+	if rem == 0 {
+		return fmt.Sprintf("%dm", min)
+	}
+	return fmt.Sprintf("%dm%ds", min, rem)
 }
 
 // indentLines adds a prefix to every line after the first.

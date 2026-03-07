@@ -179,6 +179,7 @@ type AgentEndPayload struct {
 	AgentRunID   string  `json:"agent_run_id"`
 	OK           bool    `json:"ok"`
 	Result       string  `json:"result"`
+	ToolUses     int     `json:"tool_uses"`
 	UsedSteps    int     `json:"used_steps"`
 	UsedTokens   int     `json:"used_tokens"`
 	CostUSD      float64 `json:"cost_usd"`

@@ -537,19 +537,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if sub {
-			// Sub-agent model response: show only a compact summary line
-			if p.Text != "" {
-				summary := p.Text
-				if len(summary) > 120 {
-					summary = summary[:120] + "…"
-				}
-				summary = strings.ReplaceAll(summary, "\n", " ")
-				m.transcriptBuf.WriteString(fmt.Sprintf(
-					"       %s  %s\n",
-					styleMuted.Render("◆"), styleMuted.Render(summary),
-				))
-			}
-			break
+			break // suppress sub-agent model responses from transcript
 		}
 		m.focus = focusTranscript
 		m.input.Blur()
@@ -576,37 +564,14 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 
 	case core.EventToolCall:
 		if sub {
-			// Sub-agent tool calls: single compact line
-			var p core.ToolCallPayload
-			_ = json.Unmarshal(ev.Payload, &p)
-			agent := m.currentAgentLabel()
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"       %s %s  %s %s\n",
-				styleMuted.Render("◆"),
-				styleMuted.Render(agent),
-				styleTool.Render(p.Name),
-				styleMuted.Render("…"),
-			))
+			break // suppress sub-agent tool calls from transcript
 		}
 
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if sub {
-			// Sub-agent tool results: one short status line
-			icon := styleOK.Render("✓")
-			if !p.OK {
-				icon = styleFail.Render("✗")
-			}
-			agent := m.currentAgentLabel()
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"       %s %s  %s %s\n",
-				styleMuted.Render("◆"),
-				styleMuted.Render(agent),
-				icon,
-				styleMuted.Render(p.Name),
-			))
-			break
+			break // suppress sub-agent tool results from transcript
 		}
 		icon, nameStr := styleOK.Render("✓"), styleOK.Render(p.Name)
 		if !p.OK {
@@ -668,70 +633,54 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		})
 		m.inSubAgent = len(m.activeAgents)
 		task := p.Task
-		if len(task) > 80 {
-			task = task[:80] + "…"
+		if len(task) > 60 {
+			task = task[:60] + "…"
 		}
-		label := "◆ agent▸"
+		label := "Agent"
 		if strings.TrimSpace(p.Agent) != "" {
-			label = "◆ dispatch▸ " + p.Agent
+			label = "Dispatch:" + p.Agent
 		}
 		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s  %s  %s  %s\n",
-			ts,
-			styleInfo.Render(label),
-			styleMuted.Render(shortRunID(p.AgentRunID)),
-			styleMuted.Render(fmt.Sprintf("%s  tools=%d max_steps=%d", p.Model, len(p.Tools), p.MaxSteps)),
+			"\n%s\n",
+			styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)),
 		))
-		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"       %s\n",
-			styleMuted.Render(task),
-		))
-		m.plainBuf.WriteString(fmt.Sprintf("\n◆ agent: %s\n", task))
+		m.plainBuf.WriteString(fmt.Sprintf("\n● %s(%s)\n", label, task))
 
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		var dur time.Duration
+		for _, f := range m.activeAgents {
+			if f.RunID == p.AgentRunID {
+				dur = ev.TS.Sub(f.Started)
+				break
+			}
+		}
 		m.removeActiveAgent(p.AgentRunID)
 		m.inSubAgent = len(m.activeAgents)
-		okLabel := "◆ done"
-		failLabel := "◆ agent failed"
-		if strings.TrimSpace(p.Agent) != "" {
-			okLabel = "◆ dispatch done"
-			failLabel = "◆ dispatch failed"
+		summary := fmt.Sprintf("%d tool uses · %s · %s",
+			p.ToolUses, formatTokens(p.UsedTokens), formatDuration(dur.Milliseconds()))
+		if p.CostUSD > 0 {
+			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
 		}
 		if p.OK {
 			m.agentDoneCount++
-			// Show a trimmed result summary
-			result := p.Result
-			if len(result) > 200 {
-				result = result[:200] + "…"
-			}
-			result = strings.ReplaceAll(result, "\n", " ")
-			m.lastAgentNote = fmt.Sprintf("%s ok  steps=%d tok=%d", shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens)
+			m.lastAgentNote = fmt.Sprintf("done (%s)", summary)
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"%s  %s  %s  %s  %s  %s\n",
-				ts, styleOK.Render(okLabel),
-				styleMuted.Render(shortRunID(p.AgentRunID)),
-				styleMuted.Render(fmt.Sprintf("steps=%d tok=%d", p.UsedSteps, p.UsedTokens)),
-				styleMuted.Render(fmt.Sprintf("$%.4f", p.CostUSD)),
-				styleMuted.Render(result),
+				"  %s  %s\n",
+				styleMuted.Render("⎿"),
+				styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"),
 			))
-			m.plainBuf.WriteString(fmt.Sprintf("◆ agent done (steps=%d tokens=%d): %s\n", p.UsedSteps, p.UsedTokens, result))
+			m.plainBuf.WriteString(fmt.Sprintf("  ⎿  Done (%s)\n", summary))
 		} else {
 			m.agentFailCount++
-			result := p.Result
-			if len(result) > 120 {
-				result = result[:120] + "…"
-			}
-			result = strings.ReplaceAll(result, "\n", " ")
-			m.lastAgentNote = fmt.Sprintf("%s failed", shortRunID(p.AgentRunID))
+			m.lastAgentNote = fmt.Sprintf("failed (%s)", summary)
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"%s  %s  %s  %s\n",
-				ts, styleFail.Render(failLabel),
-				styleMuted.Render(shortRunID(p.AgentRunID)),
-				styleMuted.Render(result),
+				"  %s  %s\n",
+				styleMuted.Render("⎿"),
+				styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"),
 			))
-			m.plainBuf.WriteString(fmt.Sprintf("◆ agent failed: %s\n", result))
+			m.plainBuf.WriteString(fmt.Sprintf("  ⎿  Failed (%s)\n", summary))
 		}
 	}
 
@@ -1215,13 +1164,6 @@ func shortRunID(id string) string {
 		return "agent"
 	}
 	return id
-}
-
-func (m *TUIModel) currentAgentLabel() string {
-	if len(m.activeAgents) == 0 {
-		return "agent"
-	}
-	return shortRunID(m.activeAgents[len(m.activeAgents)-1].RunID)
 }
 
 func (m *TUIModel) removeActiveAgent(runID string) {
