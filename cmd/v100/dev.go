@@ -13,10 +13,14 @@ import (
 func devCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "dev [args...]",
-		Short: "Hot-reload dev mode: watches .go files and restarts on changes",
+		Short: "Dev mode: rebuild+restart on demand (create .v100-reload to trigger)",
 		RunE:  runDev,
 	}
 }
+
+// sentinelFile is the path (relative to project root) the agent or user creates
+// to request a rebuild+restart at a strategic moment.
+const sentinelFile = ".v100-reload"
 
 func runDev(cmd *cobra.Command, args []string) error {
 	root, err := findProjectRoot()
@@ -30,12 +34,16 @@ func runDev(cmd *cobra.Command, args []string) error {
 	}
 
 	binary := filepath.Join(root, "v100")
+	sentinel := filepath.Join(root, sentinelFile)
+
+	fmt.Printf("→ reload trigger: create %s\n", sentinel)
 
 	for {
 		fmt.Println("→ building…")
 		if err := buildBinary(root, binary); err != nil {
 			fmt.Fprintf(os.Stderr, "build failed: %v\n", err)
-			waitForChange(root)
+			waitForSentinel(sentinel)
+			_ = os.Remove(sentinel)
 			continue
 		}
 
@@ -49,18 +57,17 @@ func runDev(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("start failed: %w", err)
 		}
 
-		changed := make(chan struct{}, 1)
+		reloadReq := make(chan struct{}, 1)
 		stopWatch := make(chan struct{})
-		go watchGoFiles(root, changed, stopWatch)
+		go watchSentinelChan(sentinel, reloadReq, stopWatch)
 
 		childDone := make(chan error, 1)
 		go func() { childDone <- child.Wait() }()
 
 		select {
-		case <-changed:
-			// Debounce: collect any additional saves in the same burst.
-			time.Sleep(200 * time.Millisecond)
+		case <-reloadReq:
 			close(stopWatch)
+			_ = os.Remove(sentinel)
 
 			// SIGINT lets bubbletea restore terminal (alt-screen, raw mode).
 			_ = child.Process.Signal(os.Interrupt)
@@ -72,12 +79,17 @@ func runDev(cmd *cobra.Command, args []string) error {
 			}
 			// Safety net: restore terminal in case TUI cleanup didn't run.
 			_ = exec.Command("stty", "sane").Run()
-			fmt.Println("→ change detected, rebuilding…")
+			fmt.Println("→ reload triggered, rebuilding…")
 
 		case exitErr := <-childDone:
-			// User quit the TUI normally — exit the supervisor too.
 			close(stopWatch)
-			return exitErr
+			if exitErr != nil {
+				// Crash — rebuild and restart immediately.
+				fmt.Fprintf(os.Stderr, "→ child crashed: %v — rebuilding…\n", exitErr)
+				continue
+			}
+			// Clean exit (user /quit) — supervisor exits too.
+			return nil
 		}
 	}
 }
@@ -90,18 +102,16 @@ func buildBinary(root, binary string) error {
 	return cmd.Run()
 }
 
-func watchGoFiles(root string, changed chan<- struct{}, stop <-chan struct{}) {
-	snapshot := goFileMtimes(root)
+// watchSentinelChan polls for the sentinel file and signals reloadReq when found.
+func watchSentinelChan(sentinel string, reloadReq chan<- struct{}, stop <-chan struct{}) {
 	for {
 		select {
 		case <-stop:
 			return
 		case <-time.After(500 * time.Millisecond):
-			current := goFileMtimes(root)
-			if !mtimesEqual(snapshot, current) {
-				snapshot = current
+			if _, err := os.Stat(sentinel); err == nil {
 				select {
-				case changed <- struct{}{}:
+				case reloadReq <- struct{}{}:
 				default:
 				}
 			}
@@ -109,39 +119,11 @@ func watchGoFiles(root string, changed chan<- struct{}, stop <-chan struct{}) {
 	}
 }
 
-func goFileMtimes(root string) map[string]time.Time {
-	m := map[string]time.Time{}
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) == ".go" {
-			if fi, e := d.Info(); e == nil {
-				m[path] = fi.ModTime()
-			}
-		}
-		return nil
-	})
-	return m
-}
-
-func mtimesEqual(a, b map[string]time.Time) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-func waitForChange(root string) {
-	snapshot := goFileMtimes(root)
+// waitForSentinel blocks until the sentinel file appears.
+func waitForSentinel(sentinel string) {
 	for {
 		time.Sleep(500 * time.Millisecond)
-		if !mtimesEqual(snapshot, goFileMtimes(root)) {
+		if _, err := os.Stat(sentinel); err == nil {
 			return
 		}
 	}
