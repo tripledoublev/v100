@@ -59,6 +59,7 @@ func rootCmd() *cobra.Command {
 		devCmd(),
 		scoreCmd(),
 		statsCmd(),
+		metricsCmd(),
 		compareCmd(),
 		benchCmd(&cfgPath),
 		queryCmd(),
@@ -1560,6 +1561,32 @@ func statsCmd() *cobra.Command {
 				stats.Score = meta.Score
 			}
 			fmt.Print(core.FormatStats(stats))
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// metrics command
+// ─────────────────────────────────────────
+
+func metricsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "metrics <run_id>",
+		Short: "Compute trace-derived metrics and automatic run classification",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runDir, err := findRunDir(args[0])
+			if err != nil {
+				return err
+			}
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+			metrics := core.ComputeMetrics(events)
+			classification := core.ClassifyRun(events)
+			fmt.Print(core.FormatMetrics(metrics, classification))
 			return nil
 		},
 	}

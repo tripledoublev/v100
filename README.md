@@ -15,6 +15,7 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Durable traces** — every run is logged as append-only JSONL (`runs/<id>/trace.jsonl`)
 - **Run metadata + scoring** — attach names/tags and score outcomes for later analysis
 - **Evaluation tooling** — per-run stats, run comparisons, and batch bench execution
+- **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
 - **Tool execution** — file system, shell, git, patch, curl, ripgrep search
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
@@ -98,6 +99,7 @@ v100 run --name "parser refactor" --tag team=core --tag sprint=12
 | `v100 logout` | Remove stored OAuth token |
 | `v100 score <run_id> <pass|fail|partial> [notes...]` | Score a completed run |
 | `v100 stats <run_id>` | Compute stats from trace events |
+| `v100 metrics <run_id>` | Compute trace-derived efficiency/behavior metrics and auto-classification |
 | `v100 compare <run_id> <run_id> [run_id...]` | Compare multiple runs side-by-side |
 | `v100 bench <bench.toml>` | Batch-run prompt/provider/model variants |
 | `v100 query [--tag k=v ...] [--score pass|fail|partial]` | Filter runs by metadata |
