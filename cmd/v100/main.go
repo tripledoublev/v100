@@ -1242,6 +1242,9 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
+	reg.Register(tools.SemDiff())
+	reg.Register(tools.SemImpact())
+	reg.Register(tools.SemBlame())
 	return reg
 }
 

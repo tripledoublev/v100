@@ -224,6 +224,9 @@ Default workspace is the current directory where `v100 run` is launched.
 | `git_diff` | safe | Git diff |
 | `git_commit` | **dangerous** | Stage and commit |
 | `git_push` | **dangerous** | Push current branch |
+| `sem_diff` | safe | Semantic entity-level diffing (functions, classes) |
+| `sem_impact` | safe | Impact analysis for specific code entities |
+| `sem_blame` | safe | Entity-level blame for a file |
 | `patch_apply` | **dangerous** | Apply unified diff |
 | `project_search` | safe | Ripgrep search |
 | `curl_fetch` | safe | Fetch URL content |

@@ -93,6 +93,7 @@ func DefaultConfig() *Config {
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir",
 				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
+				"sem_diff", "sem_impact", "sem_blame",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
 		},
@@ -172,7 +173,7 @@ type = "gemini"
 default_model = "gemini-2.5-flash"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"]
 
 [agents.researcher]
@@ -240,6 +241,9 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "blackboard_read")
 	ensureString(&cfg.Tools.Enabled, "blackboard_write")
 	ensureString(&cfg.Tools.Dangerous, "blackboard_write")
+	ensureString(&cfg.Tools.Enabled, "sem_diff")
+	ensureString(&cfg.Tools.Enabled, "sem_impact")
+	ensureString(&cfg.Tools.Enabled, "sem_blame")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}
