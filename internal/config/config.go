@@ -79,7 +79,7 @@ func DefaultConfig() *Config {
 		Policies: map[string]PolicyConfig{
 			"default": {
 				SystemPromptPath:    "~/.config/v100/policies/default.md",
-				MaxToolCallsPerStep: 20,
+				MaxToolCallsPerStep: 50,
 			},
 		},
 		Defaults: DefaultsConfig{
@@ -88,7 +88,7 @@ func DefaultConfig() *Config {
 			BudgetSteps:         50,
 			BudgetTokens:        100000,
 			ToolTimeoutMS:       30000,
-			MaxToolCallsPerStep: 20,
+			MaxToolCallsPerStep: 50,
 			ContextLimit:        80000,
 		},
 	}
@@ -119,7 +119,7 @@ dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
-max_tool_calls_per_step = 20
+max_tool_calls_per_step = 50
 
 [defaults]
 provider = "codex"            # use ChatGPT subscription by default
@@ -128,7 +128,7 @@ budget_steps = 50
 budget_tokens = 100000
 budget_cost_usd = 0.0
 tool_timeout_ms = 30000
-max_tool_calls_per_step = 20
+max_tool_calls_per_step = 50
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
 `
 }
