@@ -56,6 +56,11 @@ func rootCmd() *cobra.Command {
 		loginCmd(),
 		logoutCmd(),
 		devCmd(),
+		scoreCmd(),
+		statsCmd(),
+		compareCmd(),
+		benchCmd(&cfgPath),
+		queryCmd(),
 	)
 	return root
 }
@@ -83,6 +88,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
+		nameFlag         string
+		tagFlags         []string
 	)
 
 	cmd := &cobra.Command{
@@ -127,6 +134,26 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if err := os.MkdirAll(runDir, 0o755); err != nil {
 				return fmt.Errorf("create run dir: %w", err)
 			}
+
+			// Write meta.json
+			tags := parseTags(tagFlags)
+			meta := core.RunMeta{
+				RunID:     runID,
+				Name:      nameFlag,
+				Tags:      tags,
+				Provider:  cfg.Defaults.Provider,
+				Model:     modelFlag,
+				CreatedAt: time.Now().UTC(),
+			}
+			if meta.Model == "" {
+				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
+					meta.Model = pc.DefaultModel
+				}
+			}
+			if meta.Provider == "" {
+				meta.Provider = cfg.Defaults.Provider
+			}
+			_ = core.WriteMeta(runDir, meta)
 
 			tracePath := filepath.Join(runDir, "trace.jsonl")
 			trace, err := core.OpenTrace(tracePath)
@@ -215,6 +242,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
+	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
+	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 
 	return cmd
 }
@@ -1131,6 +1160,303 @@ func findInPath(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s not found in PATH", name)
+}
+
+// ─────────────────────────────────────────
+// score command
+// ─────────────────────────────────────────
+
+func scoreCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "score <run_id> <pass|fail|partial> [notes...]",
+		Short: "Score a completed run",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			score := args[1]
+			if score != "pass" && score != "fail" && score != "partial" {
+				return fmt.Errorf("score must be pass, fail, or partial")
+			}
+			notes := ""
+			if len(args) > 2 {
+				notes = strings.Join(args[2:], " ")
+			}
+
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			meta, err := core.ReadMeta(runDir)
+			if err != nil {
+				// Create minimal meta for old runs
+				meta = core.RunMeta{RunID: runID, CreatedAt: time.Now().UTC()}
+			}
+			meta.Score = score
+			meta.ScoreNotes = notes
+			if err := core.WriteMeta(runDir, meta); err != nil {
+				return err
+			}
+			fmt.Println(ui.OK(fmt.Sprintf("Scored run %s: %s", runID, score)))
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// stats command
+// ─────────────────────────────────────────
+
+func statsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stats <run_id>",
+		Short: "Show statistics for a completed run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runDir, err := findRunDir(args[0])
+			if err != nil {
+				return err
+			}
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+			stats := core.ComputeStats(events)
+			// Enrich with meta score if available
+			if meta, err := core.ReadMeta(runDir); err == nil {
+				stats.Score = meta.Score
+			}
+			fmt.Print(core.FormatStats(stats))
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// compare command
+// ─────────────────────────────────────────
+
+func compareCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "compare <run_id> <run_id> [run_id...]",
+		Short: "Compare statistics across multiple runs",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var allStats []core.RunStats
+			for _, id := range args {
+				runDir, err := findRunDir(id)
+				if err != nil {
+					return err
+				}
+				events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+				if err != nil {
+					return err
+				}
+				s := core.ComputeStats(events)
+				if meta, err := core.ReadMeta(runDir); err == nil {
+					s.Score = meta.Score
+				}
+				allStats = append(allStats, s)
+			}
+			fmt.Print(core.FormatCompare(allStats))
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// bench command
+// ─────────────────────────────────────────
+
+func benchCmd(cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "bench <bench.toml>",
+		Short: "Run batch evaluation from a bench config file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bc, err := core.LoadBenchConfig(args[0])
+			if err != nil {
+				return err
+			}
+
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+
+			var allStats []core.RunStats
+
+			for _, variant := range bc.Variants {
+				for pi, prompt := range bc.Prompts {
+					fmt.Printf("\n%s  variant=%s  prompt=%d\n",
+						ui.Info("bench"), variant.Name, pi+1)
+
+					// Create run
+					runID := newRunID()
+					runDir := filepath.Join("runs", runID)
+					if err := os.MkdirAll(runDir, 0o755); err != nil {
+						return err
+					}
+
+					meta := core.RunMeta{
+						RunID:    runID,
+						Name:     bc.Name,
+						Tags:     map[string]string{"experiment": bc.Name, "variant": variant.Name},
+						Provider: variant.Provider,
+						Model:    variant.Model,
+						CreatedAt: time.Now().UTC(),
+					}
+					_ = core.WriteMeta(runDir, meta)
+
+					tracePath := filepath.Join(runDir, "trace.jsonl")
+					trace, err := core.OpenTrace(tracePath)
+					if err != nil {
+						return err
+					}
+
+					// Build provider from variant config
+					pc, ok := cfg.Providers[variant.Provider]
+					if !ok {
+						trace.Close()
+						return fmt.Errorf("provider %q not configured", variant.Provider)
+					}
+					if variant.Model != "" {
+						pc.DefaultModel = variant.Model
+					}
+					prov, err := buildProviderFromConfig(pc)
+					if err != nil {
+						trace.Close()
+						return err
+					}
+
+					reg := buildToolRegistry(cfg)
+					pol := loadPolicy(cfg, "default")
+
+					budgetSteps := variant.BudgetSteps
+					if budgetSteps == 0 {
+						budgetSteps = cfg.Defaults.BudgetSteps
+					}
+					budget := core.NewBudgetTracker(&core.Budget{
+						MaxSteps:   budgetSteps,
+						MaxTokens:  cfg.Defaults.BudgetTokens,
+						MaxCostUSD: cfg.Defaults.BudgetCostUSD,
+					})
+
+					run := &core.Run{ID: runID, Dir: runDir, TraceFile: tracePath}
+					renderer := ui.NewCLIRenderer()
+					confirmFn := func(_, _ string) bool { return true } // auto-approve
+					outputFn := core.OutputFn(renderer.RenderEvent)
+
+					loop := &core.Loop{
+						Run:       run,
+						Provider:  prov,
+						Tools:     reg,
+						Policy:    pol,
+						Trace:     trace,
+						Budget:    budget,
+						ConfirmFn: confirmFn,
+						OutputFn:  outputFn,
+					}
+
+					_ = loop.EmitRunStart(core.RunStartPayload{
+						Policy:   pol.Name,
+						Provider: prov.Name(),
+						Model:    variant.Model,
+					})
+
+					ctx := context.Background()
+					reason := "completed"
+					if err := loop.Step(ctx, prompt.Message); err != nil {
+						reason = "error"
+					}
+					_ = loop.EmitRunEnd(reason)
+					trace.Close()
+
+					// Compute stats
+					events, _ := core.ReadAll(tracePath)
+					s := core.ComputeStats(events)
+					s.Score = meta.Score
+					allStats = append(allStats, s)
+				}
+			}
+
+			fmt.Printf("\n%s\n", ui.Header("Bench Results"))
+			fmt.Print(core.FormatCompare(allStats))
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// query command
+// ─────────────────────────────────────────
+
+func queryCmd() *cobra.Command {
+	var tagFilter []string
+	var scoreFilter string
+
+	cmd := &cobra.Command{
+		Use:   "query",
+		Short: "Query runs by tags, score, or name",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entries, err := os.ReadDir("runs")
+			if err != nil {
+				return fmt.Errorf("cannot read runs/: %w", err)
+			}
+
+			wantTags := parseTags(tagFilter)
+
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				dir := filepath.Join("runs", entry.Name())
+				meta, err := core.ReadMeta(dir)
+				if err != nil {
+					continue
+				}
+
+				// Filter by score
+				if scoreFilter != "" && meta.Score != scoreFilter {
+					continue
+				}
+
+				// Filter by tags
+				match := true
+				for k, v := range wantTags {
+					if meta.Tags[k] != v {
+						match = false
+						break
+					}
+				}
+				if !match {
+					continue
+				}
+
+				score := meta.Score
+				if score == "" {
+					score = "-"
+				}
+				fmt.Printf("%-28s  %-10s %-8s %-12s %s\n",
+					meta.RunID, meta.Provider, meta.Model, score, meta.Name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&tagFilter, "tag", nil, "filter by tag key=value (repeatable)")
+	cmd.Flags().StringVar(&scoreFilter, "score", "", "filter by score (pass|fail|partial)")
+	return cmd
+}
+
+func parseTags(raw []string) map[string]string {
+	tags := make(map[string]string)
+	for _, s := range raw {
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) == 2 {
+			tags[parts[0]] = parts[1]
+		}
+	}
+	return tags
 }
 
 func newRunID() string {

@@ -33,11 +33,15 @@ type Loop struct {
 	Messages  []providers.Message
 	ConfirmFn ConfirmFn
 	OutputFn  OutputFn
+	stepCount int // running step counter for step.summary events
 }
 
 // Step processes a single user input through the full model + tool execution cycle.
 func (l *Loop) Step(ctx context.Context, userInput string) error {
 	stepID := newID()
+	stepStart := time.Now()
+	budgetBefore := l.Budget.Budget()
+	var modelCalls int
 
 	// 1. Append user message
 	userEv, err := l.emit(EventUserMsg, stepID, UserMsgPayload{Content: userInput})
@@ -49,7 +53,7 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 
 	// 2. Maybe compress history before calling the provider.
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		_ = l.maybeCompress(ctx) // best-effort; log but don't fail
+		_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
 	}
 
 	// 3. Continue model/tool turns until the model produces a final (no-tool) response.
@@ -61,6 +65,7 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 
 	for {
 		msgs := l.buildMessages()
+		t0 := time.Now()
 		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
 			RunID:    l.Run.ID,
 			StepID:   stepID,
@@ -71,6 +76,8 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 				MaxToolCalls: maxToolCalls - toolCallsUsed,
 			},
 		})
+		durMS := time.Since(t0).Milliseconds()
+		modelCalls++
 		if err != nil {
 			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
 			l.emitErrorAssistance(ctx, stepID, err)
@@ -96,6 +103,7 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 				OutputTokens: resp.Usage.OutputTokens,
 				CostUSD:      resp.Usage.CostUSD,
 			},
+			DurationMS: durMS,
 		})
 		if err != nil {
 			return err
@@ -128,7 +136,20 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 		}
 	}
 
-	// 7. Increment step budget
+	// Emit step summary before incrementing step budget
+	budgetAfter := l.Budget.Budget()
+	l.stepCount++
+	_, _ = l.emit(EventStepSummary, stepID, StepSummaryPayload{
+		StepNumber:   l.stepCount,
+		InputTokens:  budgetAfter.UsedTokens - budgetBefore.UsedTokens,
+		OutputTokens: 0, // tracked in aggregate via UsedTokens
+		CostUSD:      budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
+		ToolCalls:    toolCallsUsed,
+		ModelCalls:   modelCalls,
+		DurationMS:   time.Since(stepStart).Milliseconds(),
+	})
+
+	// Increment step budget
 	if err := l.Budget.AddStep(); err != nil {
 		return err
 	}
@@ -309,9 +330,10 @@ func estimateTokens(msgs []providers.Message) int {
 
 // maybeCompress compresses the oldest half of l.Messages when estimated tokens exceed
 // 3/4 of the configured context limit, using a dedicated summarization call.
-func (l *Loop) maybeCompress(ctx context.Context) error {
+func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	msgs := l.buildMessages()
-	if estimateTokens(msgs) < l.Policy.ContextLimit*3/4 {
+	tokensBefore := estimateTokens(msgs)
+	if tokensBefore < l.Policy.ContextLimit*3/4 {
 		return nil
 	}
 
@@ -319,6 +341,7 @@ func (l *Loop) maybeCompress(ctx context.Context) error {
 	if cutoff < 4 {
 		return nil // too short to compress meaningfully
 	}
+	msgsBefore := len(l.Messages)
 	toSummarize := l.Messages[:cutoff]
 
 	summaryReq := providers.CompleteRequest{
@@ -345,6 +368,15 @@ func (l *Loop) maybeCompress(ctx context.Context) error {
 		Content: "[CONTEXT SUMMARY — earlier conversation compressed]\n\n" + resp.AssistantText,
 	}
 	l.Messages = append([]providers.Message{summary}, l.Messages[cutoff:]...)
+
+	tokensAfter := estimateTokens(l.buildMessages())
+	_, _ = l.emit(EventCompress, stepID, CompressPayload{
+		MessagesBefore: msgsBefore,
+		MessagesAfter:  len(l.Messages),
+		TokensBefore:   tokensBefore,
+		TokensAfter:    tokensAfter,
+		CostUSD:        resp.Usage.CostUSD,
+	})
 	return nil
 }
 
