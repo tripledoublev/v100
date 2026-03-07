@@ -9,13 +9,17 @@ import (
 type EventType string
 
 const (
-	EventRunStart   EventType = "run.start"
-	EventUserMsg    EventType = "user.message"
-	EventModelResp  EventType = "model.response"
-	EventToolCall   EventType = "tool.call"
-	EventToolResult EventType = "tool.result"
-	EventRunError   EventType = "run.error"
-	EventRunEnd     EventType = "run.end"
+	EventRunStart    EventType = "run.start"
+	EventUserMsg     EventType = "user.message"
+	EventModelResp   EventType = "model.response"
+	EventToolCall    EventType = "tool.call"
+	EventToolResult  EventType = "tool.result"
+	EventRunError    EventType = "run.error"
+	EventRunEnd      EventType = "run.end"
+	EventAgentStart  EventType = "agent.start"
+	EventAgentEnd    EventType = "agent.end"
+	EventCompress    EventType = "context.compress"
+	EventStepSummary EventType = "step.summary"
 )
 
 // Event is a single entry in the trace log.
@@ -82,9 +86,30 @@ type UserMsgPayload struct {
 
 // ModelRespPayload is the Payload for EventModelResp.
 type ModelRespPayload struct {
-	Text      string    `json:"text"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	Usage     Usage     `json:"usage"`
+	Text       string     `json:"text"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Usage      Usage      `json:"usage"`
+	DurationMS int64      `json:"duration_ms,omitempty"`
+}
+
+// CompressPayload is the Payload for EventCompress.
+type CompressPayload struct {
+	MessagesBefore int     `json:"messages_before"`
+	MessagesAfter  int     `json:"messages_after"`
+	TokensBefore   int     `json:"tokens_before"`
+	TokensAfter    int     `json:"tokens_after"`
+	CostUSD        float64 `json:"cost_usd"`
+}
+
+// StepSummaryPayload is the Payload for EventStepSummary.
+type StepSummaryPayload struct {
+	StepNumber   int     `json:"step_number"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	ToolCalls    int     `json:"tool_calls"`
+	ModelCalls   int     `json:"model_calls"`
+	DurationMS   int64   `json:"duration_ms"`
 }
 
 // ToolCallPayload is the Payload for EventToolCall.
@@ -113,6 +138,27 @@ type RunEndPayload struct {
 	Reason     string `json:"reason"` // "user_exit", "budget_steps", "budget_tokens", "budget_cost", "error"
 	UsedSteps  int    `json:"used_steps"`
 	UsedTokens int    `json:"used_tokens"`
+}
+
+// AgentStartPayload is the Payload for EventAgentStart.
+type AgentStartPayload struct {
+	ParentCallID string   `json:"parent_call_id"`
+	AgentRunID   string   `json:"agent_run_id"`
+	Task         string   `json:"task"`
+	Model        string   `json:"model"`
+	Tools        []string `json:"tools"`
+	MaxSteps     int      `json:"max_steps"`
+}
+
+// AgentEndPayload is the Payload for EventAgentEnd.
+type AgentEndPayload struct {
+	ParentCallID string  `json:"parent_call_id"`
+	AgentRunID   string  `json:"agent_run_id"`
+	OK           bool    `json:"ok"`
+	Result       string  `json:"result"`
+	UsedSteps    int     `json:"used_steps"`
+	UsedTokens   int     `json:"used_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
 }
 
 // ErrBudgetExceeded is returned when any budget limit is hit.

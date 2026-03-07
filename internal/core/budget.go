@@ -44,6 +44,42 @@ func (t *BudgetTracker) Budget() Budget {
 	return *t.b
 }
 
+// RemainingSteps returns how many steps remain (0 means unlimited).
+func (t *BudgetTracker) RemainingSteps() int {
+	if t.b.MaxSteps <= 0 {
+		return 0
+	}
+	r := t.b.MaxSteps - t.b.UsedSteps
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
+// RemainingTokens returns how many tokens remain (0 means unlimited).
+func (t *BudgetTracker) RemainingTokens() int {
+	if t.b.MaxTokens <= 0 {
+		return 0
+	}
+	r := t.b.MaxTokens - t.b.UsedTokens
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
+// RemainingCost returns how much cost remains (0 means unlimited).
+func (t *BudgetTracker) RemainingCost() float64 {
+	if t.b.MaxCostUSD <= 0 {
+		return 0
+	}
+	r := t.b.MaxCostUSD - t.b.UsedCostUSD
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
 // Summary returns a human-readable budget usage string.
 func (t *BudgetTracker) Summary() string {
 	b := t.b

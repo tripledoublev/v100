@@ -192,9 +192,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag)
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag)
 			}
-			return runWithCLI(run, prov, reg, pol, trace, budget, model, confirmMode, workspace)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace)
 		},
 	}
 
@@ -219,12 +219,15 @@ func runCmd(cfgPath *string) *cobra.Command {
 	return cmd
 }
 
-func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
 	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string) error {
 
 	renderer := ui.NewCLIRenderer()
 
 	confirmFn := buildConfirmFn(confirmMode)
+
+	outputFn := core.OutputFn(renderer.RenderEvent)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace)
 
 	loop := &core.Loop{
 		Run:       run,
@@ -234,7 +237,7 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		Trace:     trace,
 		Budget:    budget,
 		ConfirmFn: confirmFn,
-		OutputFn:  renderer.RenderEvent,
+		OutputFn:  outputFn,
 	}
 
 	// Override workspace for tool execution
@@ -287,7 +290,7 @@ func runWithCLI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 	return nil
 }
 
-func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
 	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool) error {
 
 	run.Dir = workspace
@@ -343,6 +346,9 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		return true
 	}
 
+	tuiOutputFn := core.OutputFn(func(ev core.Event) { tui.SendEvent(ev) })
+	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace)
+
 	loop = &core.Loop{
 		Run:       run,
 		Provider:  prov,
@@ -351,7 +357,7 @@ func runWithTUI(run *core.Run, prov providers.Provider, reg *tools.Registry, pol
 		Trace:     trace,
 		Budget:    budget,
 		ConfirmFn: confirmFn,
-		OutputFn:  func(ev core.Event) { tui.SendEvent(ev) },
+		OutputFn:  tuiOutputFn,
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.
@@ -804,6 +810,10 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 	if !ok {
 		return nil, fmt.Errorf("provider %q not configured", providerName)
 	}
+	return buildProviderFromConfig(pc)
+}
+
+func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
 	switch pc.Type {
 	case "codex":
 		return providers.NewCodexProvider("", pc.DefaultModel)
@@ -833,6 +843,187 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
 	return reg
+}
+
+func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
+	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string) {
+
+	providerBuilder := func(model string) (providers.Provider, error) {
+		pc, ok := cfg.Providers[cfg.Defaults.Provider]
+		if !ok {
+			return nil, fmt.Errorf("provider %q not configured", cfg.Defaults.Provider)
+		}
+		if model != "" {
+			pc.DefaultModel = model
+		}
+		return buildProviderFromConfig(pc)
+	}
+
+	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
+		// Build provider
+		prov, err := providerBuilder(params.Model)
+		if err != nil {
+			return tools.AgentRunResult{OK: false, Result: "build provider: " + err.Error()}
+		}
+
+		// Build child tool registry: all parent tools except "agent"
+		parentTools := reg.EnabledTools()
+		wantTools := make(map[string]bool)
+		if len(params.Tools) > 0 {
+			for _, tn := range params.Tools {
+				if tn != "agent" {
+					wantTools[tn] = true
+				}
+			}
+		} else {
+			for _, pt := range parentTools {
+				if pt.Name() != "agent" {
+					wantTools[pt.Name()] = true
+				}
+			}
+		}
+
+		enabledNames := make([]string, 0, len(wantTools))
+		for n := range wantTools {
+			enabledNames = append(enabledNames, n)
+		}
+		childReg := tools.NewRegistry(enabledNames)
+		for _, pt := range parentTools {
+			if wantTools[pt.Name()] {
+				childReg.Register(pt)
+			}
+		}
+
+		// Cap child budget by parent's remaining budget
+		maxSteps := params.MaxSteps
+		if rem := budget.RemainingSteps(); rem > 0 && maxSteps > rem {
+			maxSteps = rem
+		}
+		maxTokens := 25000
+		if rem := budget.RemainingTokens(); rem > 0 && maxTokens > rem {
+			maxTokens = rem
+		}
+		maxCost := 0.0
+		if rem := budget.RemainingCost(); rem > 0 {
+			maxCost = rem
+		}
+
+		childBudget := core.NewBudgetTracker(&core.Budget{
+			MaxSteps:   maxSteps,
+			MaxTokens:  maxTokens,
+			MaxCostUSD: maxCost,
+		})
+
+		childRunID := fmt.Sprintf("agent-%s", params.CallID[:8])
+		childRun := &core.Run{
+			ID:  childRunID,
+			Dir: workspace,
+		}
+
+		childPolicy := &policy.Policy{
+			Name:                "sub-agent",
+			SystemPrompt:        "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you.",
+			MaxToolCallsPerStep: 10,
+		}
+
+		// Resolve output function
+		var childOutputFn core.OutputFn
+		if outputFn != nil {
+			childOutputFn = *outputFn
+		}
+
+		// Emit agent.start event
+		modelName := params.Model
+		if modelName == "" {
+			modelName = prov.Name()
+		}
+		startPayload := core.AgentStartPayload{
+			ParentCallID: params.CallID,
+			AgentRunID:   childRunID,
+			Task:         params.Task,
+			Model:        modelName,
+			Tools:        childReg.List(),
+			MaxSteps:     maxSteps,
+		}
+		emitAgentEvent(trace, childOutputFn, params.RunID, params.StepID,
+			params.CallID+"-astart", core.EventAgentStart, startPayload)
+
+		childLoop := &core.Loop{
+			Run:       childRun,
+			Provider:  prov,
+			Tools:     childReg,
+			Policy:    childPolicy,
+			Trace:     trace,
+			Budget:    childBudget,
+			ConfirmFn: confirmFn,
+			OutputFn:  childOutputFn,
+		}
+
+		var result string
+		ok := true
+		if stepErr := childLoop.Step(ctx, params.Task); stepErr != nil {
+			ok = false
+			result = "sub-agent error: " + stepErr.Error()
+		} else {
+			// Extract last assistant message
+			for i := len(childLoop.Messages) - 1; i >= 0; i-- {
+				if childLoop.Messages[i].Role == "assistant" && childLoop.Messages[i].Content != "" {
+					result = childLoop.Messages[i].Content
+					break
+				}
+			}
+			if result == "" {
+				result = "(sub-agent produced no text response)"
+			}
+		}
+
+		// Add child's consumed budget to parent
+		cb := childBudget.Budget()
+		_ = budget.AddTokens(cb.UsedTokens, 0)
+		_ = budget.AddCost(cb.UsedCostUSD)
+
+		// Emit agent.end event
+		endPayload := core.AgentEndPayload{
+			ParentCallID: params.CallID,
+			AgentRunID:   childRunID,
+			OK:           ok,
+			Result:       result,
+			UsedSteps:    cb.UsedSteps,
+			UsedTokens:   cb.UsedTokens,
+			CostUSD:      cb.UsedCostUSD,
+		}
+		emitAgentEvent(trace, childOutputFn, params.RunID, params.StepID,
+			params.CallID+"-aend", core.EventAgentEnd, endPayload)
+
+		return tools.AgentRunResult{
+			OK:         ok,
+			Result:     result,
+			UsedSteps:  cb.UsedSteps,
+			UsedTokens: cb.UsedTokens,
+			CostUSD:    cb.UsedCostUSD,
+		}
+	}
+
+	reg.Register(tools.NewAgent(runFn))
+}
+
+func emitAgentEvent(trace *core.TraceWriter, outputFn core.OutputFn,
+	runID, stepID, eventID string, eventType core.EventType, payload any) {
+	b, _ := json.Marshal(payload)
+	ev := core.Event{
+		TS:      time.Now().UTC(),
+		RunID:   runID,
+		StepID:  stepID,
+		EventID: eventID,
+		Type:    eventType,
+		Payload: b,
+	}
+	if trace != nil {
+		_ = trace.Write(ev)
+	}
+	if outputFn != nil {
+		outputFn(ev)
+	}
 }
 
 func loadPolicy(cfg *config.Config, name string) *policy.Policy {

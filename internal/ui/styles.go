@@ -18,6 +18,10 @@ var (
 	clrTool      = lipgloss.Color("#FBBF24") // amber   — tool calls
 	clrRunID     = lipgloss.Color("#818CF8") // indigo  — run IDs
 	clrDanger    = lipgloss.Color("#F87171") // red     — dangerous tool confirm
+	clrCost      = lipgloss.Color("#F0ABFC") // pink    — cost/budget lines
+	clrLatSlow   = lipgloss.Color("#F87171") // red     — slow model calls (>2s)
+	clrLatMed    = lipgloss.Color("#FBBF24") // amber   — medium latency (500ms-2s)
+	clrLatFast   = lipgloss.Color("#34D399") // green   — fast model calls (<500ms)
 )
 
 // Named base styles (unexported, used in this package)
@@ -34,6 +38,10 @@ var (
 	styleRunID     = lipgloss.NewStyle().Foreground(clrRunID)
 	styleDanger    = lipgloss.NewStyle().Foreground(clrDanger).Bold(true)
 	styleBold      = lipgloss.NewStyle().Bold(true)
+	styleCost      = lipgloss.NewStyle().Foreground(clrCost)
+	styleLatSlow   = lipgloss.NewStyle().Foreground(clrLatSlow)
+	styleLatMed    = lipgloss.NewStyle().Foreground(clrLatMed)
+	styleLatFast   = lipgloss.NewStyle().Foreground(clrLatFast)
 )
 
 // ── Exported helpers used by main.go and cli.go ───────────────────────────────

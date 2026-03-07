@@ -99,6 +99,52 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		fmt.Printf("\n%s\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
 
+	case core.EventAgentStart:
+		var p core.AgentStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		task := p.Task
+		if len(task) > 60 {
+			task = task[:60] + "…"
+		}
+		fmt.Printf("\n%s  %s  task: %s  model: %s\n",
+			ts, styleInfo.Render("◆ agent"), task, styleMuted.Render(p.Model))
+
+	case core.EventAgentEnd:
+		var p core.AgentEndPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.OK {
+			fmt.Printf("%s  %s  done  steps=%d tokens=%d cost=$%.4f\n",
+				ts, styleOK.Render("◆ agent"), p.UsedSteps, p.UsedTokens, p.CostUSD)
+		} else {
+			result := p.Result
+			if len(result) > 80 {
+				result = result[:80] + "…"
+			}
+			fmt.Printf("%s  %s  failed: %s\n",
+				ts, styleFail.Render("◆ agent"), result)
+		}
+
+	case core.EventCompress:
+		var p core.CompressPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		fmt.Printf("\n%s  %s  %s\n",
+			ts,
+			styleInfo.Render("⊘ compress"),
+			styleMuted.Render(fmt.Sprintf("%d→%d msgs  ~%dk→%dk tok  $%.4f",
+				p.MessagesBefore, p.MessagesAfter,
+				p.TokensBefore/1000, p.TokensAfter/1000, p.CostUSD)),
+		)
+
+	case core.EventStepSummary:
+		var p core.StepSummaryPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		fmt.Printf("\n%s  %s  %s\n",
+			ts,
+			stylePrimary.Render(fmt.Sprintf("── step %d ──", p.StepNumber)),
+			styleMuted.Render(fmt.Sprintf("tok=%dk  $%.4f  %d tools  %d model calls  %dms",
+				p.InputTokens/1000, p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
+		)
+
 	default:
 		fmt.Printf("%s  %s\n", ts, styleMuted.Render(string(ev.Type)))
 	}
@@ -219,6 +265,46 @@ func PrintReplayEvent(ev core.Event) {
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+
+	case core.EventAgentStart:
+		var p core.AgentStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		task := p.Task
+		if len(task) > 80 {
+			task = task[:80] + "…"
+		}
+		fmt.Printf("\n  %s  task: %s  model: %s  max_steps: %d\n",
+			styleInfo.Render("◆ agent start"), task, styleMuted.Render(p.Model), p.MaxSteps)
+
+	case core.EventAgentEnd:
+		var p core.AgentEndPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.OK {
+			fmt.Printf("  %s  steps=%d tokens=%d cost=$%.4f\n",
+				styleOK.Render("◆ agent done"), p.UsedSteps, p.UsedTokens, p.CostUSD)
+		} else {
+			fmt.Printf("  %s  %s\n",
+				styleFail.Render("◆ agent failed"), styleFail.Render(p.Result))
+		}
+
+	case core.EventCompress:
+		var p core.CompressPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		fmt.Printf("\n  %s  %s\n",
+			styleInfo.Render("⊘ compress"),
+			styleMuted.Render(fmt.Sprintf("%d→%d msgs  ~%dk→%dk tok  $%.4f",
+				p.MessagesBefore, p.MessagesAfter,
+				p.TokensBefore/1000, p.TokensAfter/1000, p.CostUSD)),
+		)
+
+	case core.EventStepSummary:
+		var p core.StepSummaryPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		fmt.Printf("\n  %s  %s\n",
+			stylePrimary.Render(fmt.Sprintf("── step %d ──", p.StepNumber)),
+			styleMuted.Render(fmt.Sprintf("tok=%dk  $%.4f  %d tools  %d model calls  %dms",
+				p.InputTokens/1000, p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
+		)
 
 	default:
 		fmt.Printf("%s  %s\n", styleMuted.Render(ts), styleMuted.Render(string(ev.Type)))
