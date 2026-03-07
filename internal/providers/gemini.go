@@ -1,0 +1,551 @@
+package providers
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/tripledoublev/v100/internal/auth"
+)
+
+const (
+	geminiBaseURL     = "https://cloudcode-pa.googleapis.com"
+	geminiDefaultModel = "gemini-2.5-flash" // also: gemini-2.5-pro, gemini-3-pro-preview, gemini-3-flash-preview
+)
+
+// GeminiProvider implements Provider using Google's Code Assist API
+// with a Gemini Pro / Google One AI Premium subscription (no API billing).
+type GeminiProvider struct {
+	mu           sync.Mutex
+	token        auth.GeminiToken
+	tokenPath    string
+	defaultModel string
+	client       *http.Client
+}
+
+// NewGeminiProvider creates a provider that loads its OAuth token from tokenPath.
+func NewGeminiProvider(tokenPath, defaultModel string) (*GeminiProvider, error) {
+	if tokenPath == "" {
+		tokenPath = auth.DefaultGeminiTokenPath()
+	}
+	if defaultModel == "" {
+		defaultModel = geminiDefaultModel
+	}
+	p := &GeminiProvider{
+		tokenPath:    tokenPath,
+		defaultModel: defaultModel,
+		client:       &http.Client{Timeout: 120 * time.Second},
+	}
+	t, err := auth.LoadGemini(tokenPath)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: %w\n  → run 'v100 login --provider gemini' to authenticate", err)
+	}
+	p.token = *t
+	return p, nil
+}
+
+func (p *GeminiProvider) Name() string { return "gemini" }
+
+func (p *GeminiProvider) Capabilities() Capabilities {
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+}
+
+// accessToken returns a valid access token, refreshing if expired.
+func (p *GeminiProvider) accessToken(ctx context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.token.Valid() {
+		refreshed, err := auth.RefreshGemini(ctx, p.token.Refresh)
+		if err != nil {
+			return "", fmt.Errorf("gemini: token refresh failed: %w\n  → run 'v100 login --provider gemini' to re-authenticate", err)
+		}
+		p.token.Access = refreshed.Access
+		p.token.ExpiresMS = refreshed.ExpiresMS
+		if refreshed.Refresh != "" {
+			p.token.Refresh = refreshed.Refresh
+		}
+		if saveErr := auth.SaveGemini(p.tokenPath, &p.token); saveErr != nil {
+			fmt.Printf("gemini: warning: could not save refreshed token: %v\n", saveErr)
+		}
+	}
+	return p.token.Access, nil
+}
+
+// geminiClientMetadata is sent with Code Assist lifecycle calls.
+type geminiClientMetadata struct {
+	IdeType    string `json:"ideType,omitempty"`
+	Platform   string `json:"platform,omitempty"`
+	PluginType string `json:"pluginType,omitempty"`
+}
+
+var defaultClientMetadata = geminiClientMetadata{
+	IdeType:    "IDE_UNSPECIFIED",
+	Platform:   "PLATFORM_UNSPECIFIED",
+	PluginType: "GEMINI",
+}
+
+// onboard calls the Code Assist API to look up or provision the user's GCP project.
+func (p *GeminiProvider) onboard(ctx context.Context, access string) (string, error) {
+	// Try loadCodeAssist first — most users already have a project
+	projectID, tierID, err := p.loadCodeAssist(ctx, access)
+	if err == nil && projectID != "" {
+		return projectID, nil
+	}
+
+	// Need to onboard — use FREE tier if no tier was detected
+	if tierID == "" {
+		tierID = "FREE"
+	}
+	projectID, err = p.onboardUser(ctx, access, tierID)
+	if err != nil {
+		return "", fmt.Errorf("gemini: onboard: %w", err)
+	}
+	return projectID, nil
+}
+
+func (p *GeminiProvider) loadCodeAssist(ctx context.Context, access string) (projectID, tierID string, err error) {
+	body, _ := json.Marshal(map[string]any{
+		"metadata": defaultClientMetadata,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiBaseURL+"/v1internal:loadCodeAssist", bytes.NewReader(body))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+access)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("loadCodeAssist HTTP %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		CloudaicompanionProject string `json:"cloudaicompanionProject"`
+		CurrentTier             *struct {
+			ID string `json:"id"`
+		} `json:"currentTier"`
+		PaidTier *struct {
+			ID string `json:"id"`
+		} `json:"paidTier"`
+		AllowedTiers []struct {
+			ID        string `json:"id"`
+			IsDefault bool   `json:"isDefault"`
+		} `json:"allowedTiers"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", "", err
+	}
+
+	// Extract project ID
+	projectID = result.CloudaicompanionProject
+
+	// Extract tier: prefer paidTier, then currentTier
+	if result.PaidTier != nil && result.PaidTier.ID != "" {
+		tierID = result.PaidTier.ID
+	} else if result.CurrentTier != nil && result.CurrentTier.ID != "" {
+		tierID = result.CurrentTier.ID
+	}
+
+	// If no current tier, pick default from allowedTiers (for onboarding)
+	if tierID == "" {
+		for _, t := range result.AllowedTiers {
+			if t.IsDefault {
+				tierID = t.ID
+				break
+			}
+		}
+	}
+
+	return projectID, tierID, nil
+}
+
+func (p *GeminiProvider) onboardUser(ctx context.Context, access, tierID string) (string, error) {
+	reqBody := map[string]any{
+		"tierId":   tierID,
+		"metadata": defaultClientMetadata,
+	}
+	// FREE tier: Google manages the project; don't send cloudaicompanionProject
+	body, _ := json.Marshal(reqBody)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiBaseURL+"/v1internal:onboardUser", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+access)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("onboardUser HTTP %d: %s", resp.StatusCode, raw)
+	}
+
+	// Response is a long-running operation
+	var lro struct {
+		Done     bool `json:"done"`
+		Response *struct {
+			CloudaicompanionProject *struct {
+				ID string `json:"id"`
+			} `json:"cloudaicompanionProject"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(raw, &lro); err != nil {
+		return "", err
+	}
+
+	if lro.Response != nil && lro.Response.CloudaicompanionProject != nil {
+		return lro.Response.CloudaicompanionProject.ID, nil
+	}
+	return "", fmt.Errorf("onboardUser: no project ID in response: %s", raw)
+}
+
+// ─────────────────────────────────────────
+// Complete
+// ─────────────────────────────────────────
+
+func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	access, err := p.accessToken(ctx)
+	if err != nil {
+		return CompleteResponse{}, err
+	}
+
+	// Ensure we have a project ID (and tier)
+	p.mu.Lock()
+	if p.token.ProjectID == "" {
+		projectID, tierID, err := p.loadCodeAssist(ctx, access)
+		if err == nil && projectID != "" {
+			p.token.ProjectID = projectID
+			p.token.TierID = tierID
+		} else {
+			projectID, err = p.onboard(ctx, access)
+			if err != nil {
+				p.mu.Unlock()
+				return CompleteResponse{}, err
+			}
+			p.token.ProjectID = projectID
+		}
+		if saveErr := auth.SaveGemini(p.tokenPath, &p.token); saveErr != nil {
+			fmt.Printf("gemini: warning: could not save project ID: %v\n", saveErr)
+		}
+	}
+	projectID := p.token.ProjectID
+	p.mu.Unlock()
+
+	sysInstruction, contents := geminiConvertMessages(req.Messages)
+
+	var tools []geminiToolDef
+	if len(req.Tools) > 0 {
+		var funcDecls []geminiFunctionDecl
+		for _, ts := range req.Tools {
+			funcDecls = append(funcDecls, geminiFunctionDecl{
+				Name:        ts.Name,
+				Description: ts.Description,
+				Parameters:  ts.InputSchema,
+			})
+		}
+		tools = []geminiToolDef{{FunctionDeclarations: funcDecls}}
+	}
+
+	promptID := fmt.Sprintf("%x", time.Now().UnixNano())
+
+	envelope := geminiEnvelope{
+		Model:              model,
+		Project:            projectID,
+		UserPromptID:       promptID,
+		EnabledCreditTypes: []string{"GOOGLE_ONE_AI"},
+		Request: geminiRequest{
+			Contents:          contents,
+			SystemInstruction: sysInstruction,
+			Tools:             tools,
+		},
+	}
+
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return CompleteResponse{}, err
+	}
+
+	// Retry loop for 429/5xx (up to 3 attempts)
+	for attempt := 0; attempt < 3; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			geminiBaseURL+"/v1internal:streamGenerateContent?alt=sse",
+			bytes.NewReader(body))
+		if err != nil {
+			return CompleteResponse{}, err
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+access)
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+
+		httpResp, err := p.client.Do(httpReq)
+		if err != nil {
+			return CompleteResponse{}, fmt.Errorf("gemini: request: %w", err)
+		}
+
+		if httpResp.StatusCode == http.StatusOK {
+			resp, err := geminiParseSSE(httpResp.Body)
+			httpResp.Body.Close()
+			return resp, err
+		}
+
+		raw, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+
+		retryable := httpResp.StatusCode == http.StatusTooManyRequests ||
+			(httpResp.StatusCode >= 500 && httpResp.StatusCode < 600)
+		if retryable && attempt < 2 {
+			wait := geminiParseRetryWait(raw)
+			if httpResp.StatusCode >= 500 {
+				wait = time.Duration(attempt+1) * time.Second
+			}
+			fmt.Printf("gemini: HTTP %d, retrying in %v…\n", httpResp.StatusCode, wait)
+			select {
+			case <-time.After(wait):
+				continue
+			case <-ctx.Done():
+				return CompleteResponse{}, ctx.Err()
+			}
+		}
+
+		return CompleteResponse{}, fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+	}
+
+	return CompleteResponse{}, fmt.Errorf("gemini: exhausted retries")
+}
+
+// ─────────────────────────────────────────
+// Request types (Gemini native format)
+// ─────────────────────────────────────────
+
+type geminiEnvelope struct {
+	Model              string        `json:"model"`
+	Project            string        `json:"project,omitempty"`
+	UserPromptID       string        `json:"user_prompt_id"`
+	EnabledCreditTypes []string      `json:"enabled_credit_types,omitempty"`
+	Request            geminiRequest `json:"request"`
+}
+
+type geminiRequest struct {
+	Contents          []geminiContent  `json:"contents"`
+	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
+	Tools             []geminiToolDef  `json:"tools,omitempty"`
+}
+
+type geminiContent struct {
+	Role  string       `json:"role"`
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiPart struct {
+	Text             string              `json:"text,omitempty"`
+	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFuncResponse `json:"functionResponse,omitempty"`
+}
+
+type geminiFunctionCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
+type geminiFuncResponse struct {
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response"`
+}
+
+type geminiToolDef struct {
+	FunctionDeclarations []geminiFunctionDecl `json:"functionDeclarations"`
+}
+
+type geminiFunctionDecl struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// geminiConvertMessages converts provider messages to Gemini format.
+// Returns (systemInstruction, contents).
+func geminiConvertMessages(msgs []Message) (*geminiContent, []geminiContent) {
+	var sysInstruction *geminiContent
+	var contents []geminiContent
+
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			sysInstruction = &geminiContent{
+				Parts: []geminiPart{{Text: m.Content}},
+			}
+
+		case "user":
+			contents = append(contents, geminiContent{
+				Role:  "user",
+				Parts: []geminiPart{{Text: m.Content}},
+			})
+
+		case "assistant":
+			var parts []geminiPart
+			if m.Content != "" {
+				parts = append(parts, geminiPart{Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				parts = append(parts, geminiPart{
+					FunctionCall: &geminiFunctionCall{
+						Name: tc.Name,
+						Args: tc.Args,
+					},
+				})
+			}
+			if len(parts) > 0 {
+				contents = append(contents, geminiContent{
+					Role:  "model",
+					Parts: parts,
+				})
+			}
+
+		case "tool":
+			content := m.Content
+			if content == "" {
+				content = "(no output)"
+			}
+			// Function responses go in a "user" turn (Gemini convention for tool results)
+			contents = append(contents, geminiContent{
+				Role: "user",
+				Parts: []geminiPart{{
+					FunctionResponse: &geminiFuncResponse{
+						Name:     m.Name,
+						Response: map[string]any{"result": content},
+					},
+				}},
+			})
+		}
+	}
+	return sysInstruction, contents
+}
+
+// ─────────────────────────────────────────
+// SSE stream parser
+// ─────────────────────────────────────────
+
+// geminiSSEChunk is a single SSE data chunk from streamGenerateContent.
+type geminiSSEChunk struct {
+	Response struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text         string `json:"text"`
+					FunctionCall *struct {
+						Name string          `json:"name"`
+						Args json.RawMessage `json:"args"`
+					} `json:"functionCall"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		UsageMetadata struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+		} `json:"usageMetadata"`
+	} `json:"response"`
+}
+
+func geminiParseSSE(r io.Reader) (CompleteResponse, error) {
+	var (
+		textBuf   strings.Builder
+		toolCalls []ToolCall
+		usage     Usage
+	)
+
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		var chunk geminiSSEChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		resp := chunk.Response
+
+		// Accumulate text and tool calls from candidates
+		if len(resp.Candidates) > 0 {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					textBuf.WriteString(part.Text)
+				}
+				if part.FunctionCall != nil {
+					args := part.FunctionCall.Args
+					if args == nil {
+						args = json.RawMessage("{}")
+					}
+					toolCalls = append(toolCalls, ToolCall{
+						ID:   fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, len(toolCalls)),
+						Name: part.FunctionCall.Name,
+						Args: args,
+					})
+				}
+			}
+		}
+
+		// Update usage from the last chunk that has it
+		if resp.UsageMetadata.PromptTokenCount > 0 || resp.UsageMetadata.CandidatesTokenCount > 0 {
+			usage.InputTokens = resp.UsageMetadata.PromptTokenCount
+			usage.OutputTokens = resp.UsageMetadata.CandidatesTokenCount
+			usage.CostUSD = 0 // subscription — no API cost
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return CompleteResponse{}, fmt.Errorf("gemini: stream: %w", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"streamed": true})
+	return CompleteResponse{
+		AssistantText: textBuf.String(),
+		ToolCalls:     toolCalls,
+		Usage:         usage,
+		Raw:           raw,
+	}, nil
+}
+
+// geminiParseRetryWait extracts wait time from a 429 error body like "after 49s".
+var retryAfterRe = regexp.MustCompile(`after (\d+)s`)
+
+func geminiParseRetryWait(body []byte) time.Duration {
+	m := retryAfterRe.FindSubmatch(body)
+	if len(m) >= 2 {
+		if secs, err := strconv.Atoi(string(m[1])); err == nil {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 10 * time.Second // default fallback
+}

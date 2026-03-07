@@ -10,24 +10,153 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 )
 
+// OAuth endpoint URLs (not secret — these are public API endpoints).
 const (
-	ClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
-	AuthURL     = "https://auth.openai.com/oauth/authorize"
-	TokenURL    = "https://auth.openai.com/oauth/token"
-	RedirectURI = "http://localhost:1455/auth/callback"
-	Scope       = "openid profile email offline_access"
+	CodexAuthURL     = "https://auth.openai.com/oauth/authorize"
+	CodexTokenURL    = "https://auth.openai.com/oauth/token"
+	CodexRedirectURI = "http://localhost:1455/auth/callback"
+	CodexScopes      = "openid profile email offline_access"
+
+	GeminiAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
+	GeminiTokenURL    = "https://oauth2.googleapis.com/token"
+	GeminiRedirectURI = "http://127.0.0.1:8085/oauth2callback"
+	GeminiScopes      = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
 )
 
-// Login performs a PKCE OAuth authorization code flow.
-// It opens the user's browser, waits for the callback on localhost:1455,
-// exchanges the code for tokens, and returns the resulting Token.
+// OAuthCredentials holds client credentials loaded from disk.
+type OAuthCredentials struct {
+	CodexClientID      string `json:"codex_client_id"`
+	GeminiClientID     string `json:"gemini_client_id"`
+	GeminiClientSecret string `json:"gemini_client_secret"`
+}
+
+// DefaultCredentialsPath returns ~/.config/v100/oauth_credentials.json.
+func DefaultCredentialsPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "v100", "oauth_credentials.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "v100", "oauth_credentials.json")
+}
+
+// CredentialsTemplate returns a stub oauth_credentials.json payload.
+func CredentialsTemplate() string {
+	return "{\n  \"codex_client_id\": \"\",\n  \"gemini_client_id\": \"\",\n  \"gemini_client_secret\": \"\"\n}\n"
+}
+
+// LoadCodexCredentials reads and validates the Codex OAuth client config.
+func LoadCodexCredentials() (*OAuthCredentials, error) {
+	return loadCredentials("codex_client_id")
+}
+
+// LoadGeminiCredentials reads and validates the Gemini OAuth client config.
+func LoadGeminiCredentials() (*OAuthCredentials, error) {
+	return loadCredentials("gemini_client_id", "gemini_client_secret")
+}
+
+func loadCredentials(requiredFields ...string) (*OAuthCredentials, error) {
+	path := DefaultCredentialsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("auth: read %s: %w\n  → create it with JSON keys: %s\n  → see: v100 doctor", path, err, strings.Join(requiredFields, ", "))
+	}
+	var c OAuthCredentials
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("auth: parse %s: %w", path, err)
+	}
+	missing := missingCredentialFields(&c, requiredFields...)
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("auth: missing %s in %s\n  → fill the required OAuth client values and retry\n  → see: v100 doctor", strings.Join(missing, ", "), path)
+	}
+	return &c, nil
+}
+
+func missingCredentialFields(c *OAuthCredentials, requiredFields ...string) []string {
+	var missing []string
+	for _, field := range requiredFields {
+		if strings.TrimSpace(credentialValue(c, field)) == "" {
+			missing = append(missing, field)
+		}
+	}
+	return missing
+}
+
+func credentialValue(c *OAuthCredentials, field string) string {
+	switch field {
+	case "codex_client_id":
+		return c.CodexClientID
+	case "gemini_client_id":
+		return c.GeminiClientID
+	case "gemini_client_secret":
+		return c.GeminiClientSecret
+	default:
+		return ""
+	}
+}
+
+// OAuthConfig describes parameters for a PKCE OAuth authorization code flow.
+type OAuthConfig struct {
+	ClientID     string
+	ClientSecret string // empty for public clients (Codex)
+	AuthURL      string
+	TokenURL     string
+	RedirectURI  string
+	Scopes       string
+	ExtraParams  map[string]string // e.g. access_type=offline
+}
+
+// CodexOAuthConfig returns the OAuth config for the Codex (OpenAI) provider.
+func CodexOAuthConfig(creds *OAuthCredentials) OAuthConfig {
+	return OAuthConfig{
+		ClientID:    creds.CodexClientID,
+		AuthURL:     CodexAuthURL,
+		TokenURL:    CodexTokenURL,
+		RedirectURI: CodexRedirectURI,
+		Scopes:      CodexScopes,
+	}
+}
+
+// GeminiOAuthConfig returns the OAuth config for the Gemini provider.
+func GeminiOAuthConfig(creds *OAuthCredentials) OAuthConfig {
+	return OAuthConfig{
+		ClientID:     creds.GeminiClientID,
+		ClientSecret: creds.GeminiClientSecret,
+		AuthURL:      GeminiAuthURL,
+		TokenURL:     GeminiTokenURL,
+		RedirectURI:  GeminiRedirectURI,
+		Scopes:       GeminiScopes,
+		ExtraParams:  map[string]string{"access_type": "offline", "prompt": "consent"},
+	}
+}
+
+// Login performs a PKCE OAuth authorization code flow for Codex (OpenAI).
 func Login(ctx context.Context) (*Token, error) {
+	creds, err := LoadCodexCredentials()
+	if err != nil {
+		return nil, err
+	}
+	return LoginWithConfig(ctx, CodexOAuthConfig(creds))
+}
+
+// LoginGemini performs a PKCE OAuth authorization code flow for Gemini.
+func LoginGemini(ctx context.Context) (*Token, error) {
+	creds, err := LoadGeminiCredentials()
+	if err != nil {
+		return nil, err
+	}
+	return LoginWithConfig(ctx, GeminiOAuthConfig(creds))
+}
+
+// LoginWithConfig performs a PKCE OAuth authorization code flow using the given config.
+func LoginWithConfig(ctx context.Context, cfg OAuthConfig) (*Token, error) {
 	verifier, challenge, err := GeneratePKCE()
 	if err != nil {
 		return nil, err
@@ -46,8 +175,19 @@ func Login(ctx context.Context) (*Token, error) {
 	}
 	ch := make(chan callbackResult, 1)
 
+	// Extract callback path from redirect URI
+	redirectURL, err := url.Parse(cfg.RedirectURI)
+	if err != nil {
+		return nil, fmt.Errorf("auth: parse redirect URI: %w", err)
+	}
+	callbackPath := redirectURL.Path
+	if callbackPath == "" {
+		callbackPath = "/"
+	}
+	listenAddr := redirectURL.Host
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if q.Get("state") != state {
 			http.Error(w, "invalid state", http.StatusBadRequest)
@@ -64,25 +204,28 @@ func Login(ctx context.Context) (*Token, error) {
 		ch <- callbackResult{code: code}
 	})
 
-	ln, err := net.Listen("tcp", "127.0.0.1:1455")
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("auth: listen :1455: %w", err)
+		return nil, fmt.Errorf("auth: listen %s: %w", listenAddr, err)
 	}
 	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln) //nolint:errcheck
+	go srv.Serve(ln)                         //nolint:errcheck
 	defer srv.Shutdown(context.Background()) //nolint:errcheck
 
 	// Build authorization URL
 	params := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {ClientID},
-		"redirect_uri":          {RedirectURI},
-		"scope":                 {Scope},
+		"client_id":             {cfg.ClientID},
+		"redirect_uri":          {cfg.RedirectURI},
+		"scope":                 {cfg.Scopes},
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}
-	authLink := AuthURL + "?" + params.Encode()
+	for k, v := range cfg.ExtraParams {
+		params.Set(k, v)
+	}
+	authLink := cfg.AuthURL + "?" + params.Encode()
 
 	fmt.Printf("Opening browser for authentication...\n%s\n\n", authLink)
 	openBrowser(authLink)
@@ -93,20 +236,39 @@ func Login(ctx context.Context) (*Token, error) {
 		if res.err != nil {
 			return nil, res.err
 		}
-		return exchangeCode(ctx, res.code, verifier)
+		return exchangeCodeWithConfig(ctx, cfg, res.code, verifier)
 	case <-ctx.Done():
 		return nil, fmt.Errorf("auth: login cancelled: %w", ctx.Err())
 	}
 }
 
-// Refresh exchanges a refresh token for a new access token.
+// Refresh exchanges a refresh token for a new access token (Codex/OpenAI).
 func Refresh(ctx context.Context, refreshToken string) (*Token, error) {
+	creds, err := LoadCodexCredentials()
+	if err != nil {
+		return nil, err
+	}
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
-		"client_id":     {ClientID},
+		"client_id":     {creds.CodexClientID},
 	}
-	return postTokenRequest(ctx, form)
+	return postTokenRequest(ctx, CodexTokenURL, form)
+}
+
+// RefreshGemini exchanges a refresh token for a new access token (Gemini).
+func RefreshGemini(ctx context.Context, refreshToken string) (*Token, error) {
+	creds, err := LoadGeminiCredentials()
+	if err != nil {
+		return nil, err
+	}
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {creds.GeminiClientID},
+		"client_secret": {creds.GeminiClientSecret},
+	}
+	return postTokenRequest(ctx, GeminiTokenURL, form)
 }
 
 // AccountIDFromJWT decodes the JWT payload and extracts chatgpt_account_id.
@@ -149,21 +311,24 @@ func AccountIDFromJWT(token string) string {
 	return auth.AccountID
 }
 
-// exchangeCode POSTs authorization_code + verifier to TokenURL.
-func exchangeCode(ctx context.Context, code, verifier string) (*Token, error) {
+// exchangeCodeWithConfig POSTs authorization_code + verifier to the token endpoint.
+func exchangeCodeWithConfig(ctx context.Context, cfg OAuthConfig, code, verifier string) (*Token, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
-		"client_id":     {ClientID},
+		"client_id":     {cfg.ClientID},
 		"code":          {code},
-		"redirect_uri":  {RedirectURI},
+		"redirect_uri":  {cfg.RedirectURI},
 		"code_verifier": {verifier},
 	}
-	return postTokenRequest(ctx, form)
+	if cfg.ClientSecret != "" {
+		form.Set("client_secret", cfg.ClientSecret)
+	}
+	return postTokenRequest(ctx, cfg.TokenURL, form)
 }
 
 // postTokenRequest is the shared token endpoint caller.
-func postTokenRequest(ctx context.Context, form url.Values) (*Token, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, TokenURL, strings.NewReader(form.Encode()))
+func postTokenRequest(ctx context.Context, tokenURL string, form url.Values) (*Token, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("auth: build request: %w", err)
 	}

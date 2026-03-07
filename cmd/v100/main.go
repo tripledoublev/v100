@@ -915,6 +915,22 @@ func configInitCmd() *cobra.Command {
 			}
 			fmt.Println(ui.OK("Config written to " + path))
 
+			credsPath := auth.DefaultCredentialsPath()
+			switch _, err := os.Stat(credsPath); {
+			case err == nil:
+				fmt.Println(ui.OK("OAuth client config found at " + credsPath))
+			case os.IsNotExist(err):
+				if err := os.MkdirAll(filepath.Dir(credsPath), 0o700); err != nil {
+					return err
+				}
+				if err := os.WriteFile(credsPath, []byte(auth.CredentialsTemplate()), 0o600); err != nil {
+					return err
+				}
+				fmt.Println(ui.OK("OAuth client template written to " + credsPath))
+			default:
+				return err
+			}
+
 			// Also write default policy prompt
 			if err := policy.WriteDefaultPrompt(); err != nil {
 				fmt.Fprintln(os.Stderr, ui.Warn("could not write default policy: "+err.Error()))
@@ -932,28 +948,55 @@ func configInitCmd() *cobra.Command {
 // ─────────────────────────────────────────
 
 func loginCmd() *cobra.Command {
-	return &cobra.Command{
+	var provider string
+	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate via browser OAuth (ChatGPT Plus/Pro)",
+		Short: "Authenticate via browser OAuth",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			fmt.Println(ui.Info("Starting OAuth login flow…"))
-			t, err := auth.Login(ctx)
-			if err != nil {
-				return fmt.Errorf("login: %w", err)
+			switch provider {
+			case "codex", "":
+				fmt.Println(ui.Info("Starting OAuth login flow (ChatGPT Plus/Pro)…"))
+				t, err := auth.Login(ctx)
+				if err != nil {
+					return fmt.Errorf("login: %w", err)
+				}
+				path := auth.DefaultTokenPath()
+				if err := auth.Save(path, t); err != nil {
+					return fmt.Errorf("login: save token: %w", err)
+				}
+				fmt.Println(ui.OK("Logged in successfully"))
+				if t.AccountID != "" {
+					fmt.Println(ui.Dim("Account ID: ") + t.AccountID)
+				}
+				fmt.Println(ui.Dim("Token saved to: ") + path)
+
+			case "gemini":
+				fmt.Println(ui.Info("Starting OAuth login flow (Gemini)…"))
+				t, err := auth.LoginGemini(ctx)
+				if err != nil {
+					return fmt.Errorf("login: %w", err)
+				}
+				path := auth.DefaultGeminiTokenPath()
+				gt := &auth.GeminiToken{
+					Access:    t.Access,
+					Refresh:   t.Refresh,
+					ExpiresMS: t.ExpiresMS,
+				}
+				if err := auth.SaveGemini(path, gt); err != nil {
+					return fmt.Errorf("login: save token: %w", err)
+				}
+				fmt.Println(ui.OK("Logged in to Gemini successfully"))
+				fmt.Println(ui.Dim("Token saved to: ") + path)
+
+			default:
+				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini)", provider)
 			}
-			path := auth.DefaultTokenPath()
-			if err := auth.Save(path, t); err != nil {
-				return fmt.Errorf("login: save token: %w", err)
-			}
-			fmt.Println(ui.OK("Logged in successfully"))
-			if t.AccountID != "" {
-				fmt.Println(ui.Dim("Account ID: ") + t.AccountID)
-			}
-			fmt.Println(ui.Dim("Token saved to: ") + path)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini)")
+	return cmd
 }
 
 // ─────────────────────────────────────────
@@ -961,11 +1004,20 @@ func loginCmd() *cobra.Command {
 // ─────────────────────────────────────────
 
 func logoutCmd() *cobra.Command {
-	return &cobra.Command{
+	var provider string
+	cmd := &cobra.Command{
 		Use:   "logout",
 		Short: "Remove stored OAuth token",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := auth.DefaultTokenPath()
+			var path string
+			switch provider {
+			case "codex", "":
+				path = auth.DefaultTokenPath()
+			case "gemini":
+				path = auth.DefaultGeminiTokenPath()
+			default:
+				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini)", provider)
+			}
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
 					fmt.Println(ui.Dim("Already logged out (no token found)"))
@@ -977,6 +1029,8 @@ func logoutCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini)")
+	return cmd
 }
 
 // ─────────────────────────────────────────
@@ -1010,15 +1064,38 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				return nil
 			}
 
+			printOAuthConfigStatus := func(name string, err error) {
+				credsPath := auth.DefaultCredentialsPath()
+				if err == nil {
+					fmt.Println(ui.OK(fmt.Sprintf("Provider %s: OAuth client config at %s", name, credsPath)))
+					return
+				}
+				fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: OAuth client config invalid at %s", name, credsPath)))
+				fmt.Println(ui.Dim("  " + strings.ReplaceAll(err.Error(), "\n", "\n  ")))
+				ok = false
+			}
+
 			// 2. Provider auth
 			for name, pc := range cfg.Providers {
 				switch pc.Type {
 				case "codex":
+					_, credsErr := auth.LoadCodexCredentials()
+					printOAuthConfigStatus(name, credsErr)
 					tokenPath := auth.DefaultTokenPath()
 					if _, err := os.Stat(tokenPath); err == nil {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login'", name, tokenPath)))
+						ok = false
+					}
+				case "gemini":
+					_, credsErr := auth.LoadGeminiCredentials()
+					printOAuthConfigStatus(name, credsErr)
+					tokenPath := auth.DefaultGeminiTokenPath()
+					if _, err := os.Stat(tokenPath); err == nil {
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
+					} else {
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider gemini'", name, tokenPath)))
 						ok = false
 					}
 				case "ollama":
@@ -1142,6 +1219,8 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 		return providers.NewOpenAIProvider(authEnv, pc.BaseURL, pc.DefaultModel)
 	case "ollama":
 		return providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel)
+	case "gemini":
+		return providers.NewGeminiProvider("", pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}

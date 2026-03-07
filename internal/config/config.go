@@ -84,6 +84,10 @@ func DefaultConfig() *Config {
 				DefaultModel: "qwen3.5:2b",
 				BaseURL:      "http://localhost:11434",
 			},
+			"gemini": {
+				Type:         "gemini",
+				DefaultModel: "gemini-2.5-flash",
+			},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
@@ -138,7 +142,8 @@ func DefaultTOML() string {
 	return `# v100 agent harness configuration
 
 # ── Codex provider (ChatGPT Plus/Pro subscription — no API billing) ──────────
-# Run 'agent login' to authenticate via browser OAuth.
+# Put OAuth client values in ~/.config/v100/oauth_credentials.json first,
+# then run 'v100 login' to authenticate via browser OAuth.
 # Token is stored at ~/.config/v100/auth.json automatically.
 [providers.codex]
 type = "codex"
@@ -157,6 +162,14 @@ env = "OPENAI_API_KEY"
 type = "ollama"
 default_model = "qwen3.5:2b"
 base_url = "http://localhost:11434"
+
+# ── Gemini provider (Gemini Pro / Google One AI Premium — no API billing) ──
+# Put OAuth client values in ~/.config/v100/oauth_credentials.json first,
+# then run 'v100 login --provider gemini' to authenticate via browser OAuth.
+# Token is stored at ~/.config/v100/gemini_auth.json automatically.
+[providers.gemini]
+type = "gemini"
+default_model = "gemini-2.5-flash"
 
 [tools]
 enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write"]

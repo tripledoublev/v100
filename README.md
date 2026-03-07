@@ -25,15 +25,25 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Three providers** — ChatGPT subscription (Codex), OpenAI API, or local Ollama
+- **Four providers** — ChatGPT subscription (Codex), Gemini subscription, OpenAI API, or local Ollama
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea 3-pane TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
 ## Providers
 
+OAuth client config for the subscription providers lives outside the repo at `~/.config/v100/oauth_credentials.json`:
+
+```json
+{
+  "codex_client_id": "YOUR_CODEX_CLIENT_ID",
+  "gemini_client_id": "YOUR_GEMINI_CLIENT_ID",
+  "gemini_client_secret": "YOUR_GEMINI_CLIENT_SECRET"
+}
+```
+
 ### ChatGPT subscription (default)
 
-Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate directly with `v100 login` (opens browser for PKCE OAuth):
+Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate directly with `v100 login` after filling `~/.config/v100/oauth_credentials.json`:
 
 ```bash
 v100 login   # opens browser → completes OAuth → saves token to ~/.config/v100/auth.json
@@ -49,6 +59,19 @@ Standard pay-as-you-go API access.
 export OPENAI_API_KEY=sk-...
 v100 run --provider openai --model gpt-4o
 ```
+
+### Gemini subscription
+
+Uses your existing Gemini Pro / Google One AI Premium plan — no separate API billing. Authenticate with `v100 login --provider gemini` after filling `~/.config/v100/oauth_credentials.json`:
+
+```bash
+v100 login --provider gemini   # opens browser → completes OAuth → saves token
+v100 run --provider gemini     # uses gemini-2.5-flash by default
+v100 run --provider gemini --model gemini-2.5-pro
+v100 run --provider gemini --model gemini-3-pro-preview
+```
+
+Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, `gemini-3-flash-preview`
 
 ### Ollama (local)
 
@@ -74,6 +97,8 @@ Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `p
 ```bash
 # Initialize config
 v100 config init
+
+# Fill ~/.config/v100/oauth_credentials.json with your OAuth client values
 
 # Authenticate with ChatGPT subscription
 v100 login
@@ -138,7 +163,7 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 ### `v100 run` flags
 
 ```
---provider string       Provider name (codex, openai, ollama)
+--provider string       Provider name (codex, gemini, openai, ollama)
 --model string          Model override
 --budget-steps int      Max steps before halting
 --budget-tokens int     Max tokens before halting
@@ -201,6 +226,10 @@ env = "OPENAI_API_KEY"
 type = "ollama"
 default_model = "qwen3.5:9b"
 base_url = "http://localhost:11434"
+
+[providers.gemini]
+type = "gemini"
+default_model = "gemini-2.5-flash"
 
 [agents.researcher]
 system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
