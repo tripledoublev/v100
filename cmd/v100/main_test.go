@@ -132,3 +132,28 @@ func TestApplyInjectedToolOutputs(t *testing.T) {
 		t.Fatalf("input slice should not be mutated")
 	}
 }
+
+func TestNormalizeModelOverride(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerType string
+		in           string
+		want         string
+		wantChanged  bool
+	}{
+		{name: "codex 4o mini remapped", providerType: "codex", in: "gpt-4o-mini", want: "gpt-5.3-codex", wantChanged: true},
+		{name: "codex 4o remapped", providerType: "codex", in: "gpt-4o", want: "gpt-5.3-codex", wantChanged: true},
+		{name: "codex keep gpt5", providerType: "codex", in: "gpt-5.4", want: "gpt-5.4", wantChanged: false},
+		{name: "openai keep 4o mini", providerType: "openai", in: "gpt-4o-mini", want: "gpt-4o-mini", wantChanged: false},
+		{name: "blank unchanged", providerType: "codex", in: " ", want: "", wantChanged: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := normalizeModelOverride(tt.providerType, tt.in)
+			if got != tt.want || changed != tt.wantChanged {
+				t.Fatalf("normalizeModelOverride(%q, %q) = (%q,%v), want (%q,%v)",
+					tt.providerType, tt.in, got, changed, tt.want, tt.wantChanged)
+			}
+		})
+	}
+}

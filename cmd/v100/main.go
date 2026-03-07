@@ -1106,6 +1106,9 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 }
 
 func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
+	if pc.Type == "codex" {
+		pc.DefaultModel, _ = normalizeCodexModelOverride(pc.DefaultModel)
+	}
 	switch pc.Type {
 	case "codex":
 		return providers.NewCodexProvider("", pc.DefaultModel)
@@ -1142,15 +1145,21 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
 	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int) {
 
-	providerBuilder := func(model string) (providers.Provider, error) {
+	providerBuilder := func(model string) (providers.Provider, string, error) {
 		pc, ok := cfg.Providers[cfg.Defaults.Provider]
 		if !ok {
-			return nil, fmt.Errorf("provider %q not configured", cfg.Defaults.Provider)
+			return nil, "", fmt.Errorf("provider %q not configured", cfg.Defaults.Provider)
 		}
 		if model != "" {
-			pc.DefaultModel = model
+			normalized, changed := normalizeModelOverride(pc.Type, model)
+			if changed {
+				pc.DefaultModel = normalized
+			} else {
+				pc.DefaultModel = model
+			}
 		}
-		return buildProviderFromConfig(pc)
+		prov, err := buildProviderFromConfig(pc)
+		return prov, pc.DefaultModel, err
 	}
 
 	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
@@ -1169,7 +1178,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 
 		// Build provider
-		prov, err := providerBuilder(modelOverride)
+		prov, effectiveModel, err := providerBuilder(modelOverride)
 		if err != nil {
 			return tools.AgentRunResult{OK: false, Result: "build provider: " + err.Error()}
 		}
@@ -1283,10 +1292,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 
 		// Emit agent.start event
-		modelName := params.Model
-		if modelName == "" {
-			modelName = modelOverride
-		}
+		modelName := strings.TrimSpace(effectiveModel)
 		if modelName == "" {
 			modelName = prov.Name()
 		}
@@ -1936,6 +1942,30 @@ func parseTags(raw []string) map[string]string {
 		}
 	}
 	return tags
+}
+
+func normalizeModelOverride(providerType, model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", false
+	}
+	if providerType != "codex" {
+		return model, false
+	}
+	return normalizeCodexModelOverride(model)
+}
+
+func normalizeCodexModelOverride(model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", false
+	}
+	switch strings.ToLower(model) {
+	case "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
+		return "gpt-5.3-codex", true
+	default:
+		return model, false
+	}
 }
 
 func newRunID() string {

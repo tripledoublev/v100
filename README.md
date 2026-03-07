@@ -114,7 +114,7 @@ v100 run --name "parser refactor" --tag team=core --tag sprint=12
 ```bash
 v100 replay --deterministic <run_id>
 v100 replay --deterministic --step <run_id>
-v100 replay --deterministic --replace-model gpt-4o <run_id>
+v100 replay --deterministic --replace-model gpt-5.4 <run_id>
 v100 replay --deterministic --inject-tool project_search="parser.go:123" <run_id>
 ```
 
