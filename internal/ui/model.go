@@ -46,6 +46,16 @@ type copyTarget struct {
 	content string
 }
 
+type agentFrame struct {
+	RunID    string
+	CallID   string
+	Task     string
+	Model    string
+	MaxSteps int
+	Tools    int
+	Started  time.Time
+}
+
 // TUIModel is the Bubble Tea application model for the agent harness.
 type TUIModel struct {
 	width, height int
@@ -83,6 +93,10 @@ type TUIModel struct {
 	plainBuf       strings.Builder // plain-text transcript for full-copy
 	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
 	traceStepCount int             // running step count for trace pane
+	activeAgents   []agentFrame
+	agentDoneCount int
+	agentFailCount int
+	lastAgentNote  string
 
 	// callbacks
 	SubmitFn func(string)
@@ -489,7 +503,7 @@ func (m *TUIModel) View() string {
 func (m *TUIModel) appendEvent(ev core.Event) {
 	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
 	m.updateStatusFromEvent(ev)
-	sub := m.inSubAgent > 0
+	sub := len(m.activeAgents) > 0
 
 	switch ev.Type {
 	case core.EventRunStart:
@@ -565,9 +579,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			// Sub-agent tool calls: single compact line
 			var p core.ToolCallPayload
 			_ = json.Unmarshal(ev.Payload, &p)
+			agent := m.currentAgentLabel()
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"       %s %s %s\n",
+				"       %s %s  %s %s\n",
 				styleMuted.Render("◆"),
+				styleMuted.Render(agent),
 				styleTool.Render(p.Name),
 				styleMuted.Render("…"),
 			))
@@ -582,9 +598,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			if !p.OK {
 				icon = styleFail.Render("✗")
 			}
+			agent := m.currentAgentLabel()
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"       %s %s %s\n",
+				"       %s %s  %s %s\n",
 				styleMuted.Render("◆"),
+				styleMuted.Render(agent),
 				icon,
 				styleMuted.Render(p.Name),
 			))
@@ -637,48 +655,71 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		}
 
 	case core.EventAgentStart:
-		m.inSubAgent++
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		m.activeAgents = append(m.activeAgents, agentFrame{
+			RunID:    p.AgentRunID,
+			CallID:   p.ParentCallID,
+			Task:     p.Task,
+			Model:    p.Model,
+			MaxSteps: p.MaxSteps,
+			Tools:    len(p.Tools),
+			Started:  ev.TS,
+		})
+		m.inSubAgent = len(m.activeAgents)
 		task := p.Task
 		if len(task) > 80 {
 			task = task[:80] + "…"
 		}
 		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s  %s  %s\n",
-			ts, styleInfo.Render("◆ agent▸"), styleMuted.Render(task),
+			"\n%s  %s  %s  %s\n",
+			ts,
+			styleInfo.Render("◆ agent▸"),
+			styleMuted.Render(shortRunID(p.AgentRunID)),
+			styleMuted.Render(fmt.Sprintf("%s  tools=%d max_steps=%d", p.Model, len(p.Tools), p.MaxSteps)),
+		))
+		m.transcriptBuf.WriteString(fmt.Sprintf(
+			"       %s\n",
+			styleMuted.Render(task),
 		))
 		m.plainBuf.WriteString(fmt.Sprintf("\n◆ agent: %s\n", task))
 
 	case core.EventAgentEnd:
-		if m.inSubAgent > 0 {
-			m.inSubAgent--
-		}
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		m.removeActiveAgent(p.AgentRunID)
+		m.inSubAgent = len(m.activeAgents)
 		if p.OK {
+			m.agentDoneCount++
 			// Show a trimmed result summary
 			result := p.Result
 			if len(result) > 200 {
 				result = result[:200] + "…"
 			}
 			result = strings.ReplaceAll(result, "\n", " ")
+			m.lastAgentNote = fmt.Sprintf("%s ok  steps=%d tok=%d", shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens)
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"%s  %s  %s  %s\n",
+				"%s  %s  %s  %s  %s  %s\n",
 				ts, styleOK.Render("◆ done"),
+				styleMuted.Render(shortRunID(p.AgentRunID)),
 				styleMuted.Render(fmt.Sprintf("steps=%d tok=%d", p.UsedSteps, p.UsedTokens)),
+				styleMuted.Render(fmt.Sprintf("$%.4f", p.CostUSD)),
 				styleMuted.Render(result),
 			))
 			m.plainBuf.WriteString(fmt.Sprintf("◆ agent done (steps=%d tokens=%d): %s\n", p.UsedSteps, p.UsedTokens, result))
 		} else {
+			m.agentFailCount++
 			result := p.Result
 			if len(result) > 120 {
 				result = result[:120] + "…"
 			}
 			result = strings.ReplaceAll(result, "\n", " ")
+			m.lastAgentNote = fmt.Sprintf("%s failed", shortRunID(p.AgentRunID))
 			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"%s  %s  %s\n",
-				ts, styleFail.Render("◆ agent failed"), styleMuted.Render(result),
+				"%s  %s  %s  %s\n",
+				ts, styleFail.Render("◆ agent failed"),
+				styleMuted.Render(shortRunID(p.AgentRunID)),
+				styleMuted.Render(result),
 			))
 			m.plainBuf.WriteString(fmt.Sprintf("◆ agent failed: %s\n", result))
 		}
@@ -874,6 +915,10 @@ func (m *TUIModel) statusView(width, height int) string {
 		styleBold.Render(strings.ToUpper(m.statusMode)),
 		styleMuted.Render(line),
 		"",
+		styleMuted.Render(fmt.Sprintf("sub-agents: active=%d done=%d failed=%d",
+			len(m.activeAgents), m.agentDoneCount, m.agentFailCount)),
+		styleMuted.Render(m.subAgentStatusLine()),
+		"",
 		styleMuted.Render("radio") + " " + m.radioStateLine(),
 		styleMuted.Render("feed: " + m.radioURL),
 	}
@@ -939,14 +984,19 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 	case core.EventRunEnd:
 		return sep + "  " + styleMuted.Render("■■") + "  " + styleMuted.Render("end")
 	case core.EventAgentStart:
-		return sep + "  " + styleInfo.Render("◆▶") + "  " + styleInfo.Render("agent")
+		var p core.AgentStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		return sep + "  " + styleInfo.Render("◆▶") + "  " + styleInfo.Render(
+			fmt.Sprintf("agent %s  %s  max=%d", shortRunID(p.AgentRunID), p.Model, p.MaxSteps))
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if p.OK {
-			return sep + "  " + styleOK.Render("◆■") + "  " + styleOK.Render("agent done")
+			return sep + "  " + styleOK.Render("◆■") + "  " + styleOK.Render(
+				fmt.Sprintf("agent %s done  steps=%d tok=%d", shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens))
 		}
-		return sep + "  " + styleFail.Render("◆■") + "  " + styleFail.Render("agent fail")
+		return sep + "  " + styleFail.Render("◆■") + "  " + styleFail.Render(
+			fmt.Sprintf("agent %s fail", shortRunID(p.AgentRunID)))
 	case core.EventStepSummary:
 		var p core.StepSummaryPayload
 		_ = json.Unmarshal(ev.Payload, &p)
@@ -1072,11 +1122,19 @@ func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
 		m.statusMode = "idle"
 		m.statusLine = "run ended"
 	case core.EventAgentStart:
+		var p core.AgentStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
 		m.statusMode = "tooling"
-		m.statusLine = "sub-agent working on task"
+		m.statusLine = fmt.Sprintf("sub-agent %s running (%s)", shortRunID(p.AgentRunID), p.Model)
 	case core.EventAgentEnd:
+		var p core.AgentEndPayload
+		_ = json.Unmarshal(ev.Payload, &p)
 		m.statusMode = "thinking"
-		m.statusLine = "sub-agent completed"
+		if p.OK {
+			m.statusLine = fmt.Sprintf("sub-agent %s completed", shortRunID(p.AgentRunID))
+		} else {
+			m.statusLine = fmt.Sprintf("sub-agent %s failed", shortRunID(p.AgentRunID))
+		}
 	case core.EventStepSummary:
 		var p core.StepSummaryPayload
 		_ = json.Unmarshal(ev.Payload, &p)
@@ -1121,6 +1179,53 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func shortRunID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	if strings.TrimSpace(id) == "" {
+		return "agent"
+	}
+	return id
+}
+
+func (m *TUIModel) currentAgentLabel() string {
+	if len(m.activeAgents) == 0 {
+		return "agent"
+	}
+	return shortRunID(m.activeAgents[len(m.activeAgents)-1].RunID)
+}
+
+func (m *TUIModel) removeActiveAgent(runID string) {
+	if len(m.activeAgents) == 0 {
+		return
+	}
+	for i := len(m.activeAgents) - 1; i >= 0; i-- {
+		if m.activeAgents[i].RunID == runID {
+			m.activeAgents = append(m.activeAgents[:i], m.activeAgents[i+1:]...)
+			return
+		}
+	}
+	// Fallback for malformed traces: pop the most recent frame.
+	m.activeAgents = m.activeAgents[:len(m.activeAgents)-1]
+}
+
+func (m *TUIModel) subAgentStatusLine() string {
+	if len(m.activeAgents) > 0 {
+		a := m.activeAgents[len(m.activeAgents)-1]
+		task := strings.TrimSpace(a.Task)
+		if len(task) > 64 {
+			task = task[:64] + "…"
+		}
+		return fmt.Sprintf("current: %s  %s  steps<=%d  %s",
+			shortRunID(a.RunID), a.Model, a.MaxSteps, task)
+	}
+	if m.lastAgentNote != "" {
+		return "last: " + m.lastAgentNote
+	}
+	return "last: none"
 }
 
 func radioTickCmd() tea.Cmd {
