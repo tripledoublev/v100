@@ -1246,11 +1246,11 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			MaxCostUSD: maxCost,
 		})
 
-		callShort := params.CallID
-		if len(callShort) > 8 {
-			callShort = callShort[:8]
+		callIDForRun := strings.TrimSpace(params.CallID)
+		if callIDForRun == "" {
+			callIDForRun = fmt.Sprintf("anon-%x", randBytes(4))
 		}
-		childRunID := fmt.Sprintf("agent-%s", callShort)
+		childRunID := fmt.Sprintf("agent-%s", callIDForRun)
 		childRun := &core.Run{
 			ID:  childRunID,
 			Dir: workspace,

@@ -1208,8 +1208,8 @@ func clampInt(v, lo, hi int) int {
 }
 
 func shortRunID(id string) string {
-	if len(id) > 12 {
-		return id[:12]
+	if len(id) > 16 {
+		return id[:8] + "…" + id[len(id)-6:]
 	}
 	if strings.TrimSpace(id) == "" {
 		return "agent"
