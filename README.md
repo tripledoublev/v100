@@ -82,6 +82,21 @@ ollama run qwen3.5:9b
 v100 run --provider ollama --model qwen3.5:9b
 ```
 
+### Provider matrix
+
+| Provider | Auth | Default model | Local state | Best for |
+|----------|------|---------------|-------------|----------|
+| `codex` | `~/.config/v100/oauth_credentials.json` + `v100 login` | `gpt-5.3-codex` | `~/.config/v100/auth.json` | subscription-backed coding runs |
+| `gemini` | `~/.config/v100/oauth_credentials.json` + `v100 login --provider gemini` | `gemini-2.5-flash` | `~/.config/v100/gemini_auth.json` | subscription-backed Gemini comparison runs |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o` | none | API-driven experiments |
+| `ollama` | local Ollama daemon | `qwen3.5:2b` | none | fully local runs |
+
+### Known limitations
+
+- Provider behavior differs noticeably; the same prompt can produce very different tool-use patterns across Codex, Gemini, OpenAI, and Ollama.
+- Subscription providers require a local OAuth client config file before `v100 login` will work.
+- Underspecified prompts can still trigger over-eager exploration on some models. Use `--budget-steps`, `--budget-tokens`, and default dangerous-tool confirmation when evaluating a new provider or prompt style.
+
 ## Install
 
 ```bash
@@ -97,6 +112,9 @@ Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `p
 ```bash
 # Initialize config
 v100 config init
+
+# This writes ~/.config/v100/config.toml and, if missing,
+# ~/.config/v100/oauth_credentials.json as a blank template
 
 # Fill ~/.config/v100/oauth_credentials.json with your OAuth client values
 
@@ -124,6 +142,16 @@ v100 run --tui
 # Name and tag runs for later querying
 v100 run --name "parser refactor" --tag team=core --tag sprint=12
 ```
+
+## Files created
+
+`v100 config init` and the login flows create a small set of local files:
+
+- `~/.config/v100/config.toml` — main runtime config
+- `~/.config/v100/oauth_credentials.json` — local OAuth client config for Codex/Gemini
+- `~/.config/v100/auth.json` — Codex subscription token after `v100 login`
+- `~/.config/v100/gemini_auth.json` — Gemini subscription token after `v100 login --provider gemini`
+- `runs/<run_id>/` — trace, metadata, and artifacts for each run
 
 ## Commands
 
@@ -207,6 +235,11 @@ Default workspace is the current directory where `v100 run` is launched.
 
 Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
 
+Recommended defaults:
+- keep `confirm_tools = "dangerous"` for normal interactive use
+- avoid `--auto` when trying a new provider or prompt pattern
+- set step/token budgets when evaluating model behavior
+
 ## Config
 
 Default location: `~/.config/v100/config.toml`
@@ -276,6 +309,20 @@ v100 compare <run_a> <run_b> <run_c>
 
 # Query by metadata
 v100 query --tag team=core --score pass
+```
+
+### Debugging a run
+
+```bash
+# Verify auth, provider setup, and local tools
+v100 doctor
+v100 providers
+
+# Inspect one run in more detail
+v100 stats <run_id>
+v100 metrics <run_id>
+v100 replay <run_id>
+v100 replay --deterministic <run_id>
 ```
 
 ## Multi-agent quick examples
