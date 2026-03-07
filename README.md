@@ -25,7 +25,7 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Two providers** — ChatGPT subscription (no API billing) or OpenAI API
+- **Three providers** — ChatGPT subscription (Codex), OpenAI API, or local Ollama
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea 3-pane TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
@@ -48,6 +48,15 @@ Standard pay-as-you-go API access.
 ```bash
 export OPENAI_API_KEY=sk-...
 v100 run --provider openai --model gpt-4o
+```
+
+### Ollama (local)
+
+Run fully local models via Ollama (no API key required).
+
+```bash
+ollama run qwen3.5:9b
+v100 run --provider ollama --model qwen3.5:9b
 ```
 
 ## Install
@@ -80,6 +89,9 @@ v100 run --budget-steps 10
 
 # Use OpenAI API instead
 v100 run --provider openai
+
+# Use local Ollama instead
+v100 run --provider ollama --model qwen3.5:9b
 
 # Enable TUI
 v100 run --tui
@@ -126,7 +138,7 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 ### `v100 run` flags
 
 ```
---provider string       Provider name (codex, openai)
+--provider string       Provider name (codex, openai, ollama)
 --model string          Model override
 --budget-steps int      Max steps before halting
 --budget-tokens int     Max tokens before halting
@@ -184,6 +196,11 @@ type = "openai"
 default_model = "gpt-4o"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
+
+[providers.ollama]
+type = "ollama"
+default_model = "qwen3.5:9b"
+base_url = "http://localhost:11434"
 
 [agents.researcher]
 system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
