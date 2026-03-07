@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"os/exec"
 	"time"
 )
@@ -49,15 +50,17 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 	}
 
 	rgArgs := []string{"--line-number", "--with-filename"}
+	// Avoid runaway self-referential searches over trace/cache/git internals.
+	rgArgs = append(rgArgs,
+		"--glob", "!.git/**",
+		"--glob", "!runs/**",
+		"--glob", "!.gocache/**",
+	)
 	if !a.CaseSensitive {
 		rgArgs = append(rgArgs, "--ignore-case")
 	}
 	if a.Glob != "" {
 		rgArgs = append(rgArgs, "--glob", a.Glob)
-	}
-	if a.MaxResults > 0 {
-		rgArgs = append(rgArgs, "--max-count", "1")
-		// We limit total lines via head-like truncation after
 	}
 	rgArgs = append(rgArgs, a.Pattern)
 
@@ -90,6 +93,12 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 	out := stdout.String()
 	if len(out) == 0 {
 		out = "(no matches)"
+	} else if a.MaxResults > 0 {
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if len(lines) > a.MaxResults {
+			out = strings.Join(lines[:a.MaxResults], "\n") +
+				"\n... truncated to max_results"
+		}
 	}
 	return ToolResult{
 		OK:         true,
