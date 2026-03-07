@@ -49,7 +49,7 @@ func rootCmd() *cobra.Command {
 	root.AddCommand(
 		runCmd(&cfgPath),
 		resumeCmd(&cfgPath),
-		replayCmd(),
+		replayCmd(&cfgPath),
 		toolsCmd(&cfgPath),
 		providersCmd(&cfgPath),
 		configInitCmd(),
@@ -551,9 +551,11 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 // agent replay
 // ─────────────────────────────────────────
 
-func replayCmd() *cobra.Command {
+func replayCmd(cfgPath *string) *cobra.Command {
 	var deterministic bool
 	var stepMode bool
+	var replaceModel string
+	var injectTool []string
 
 	cmd := &cobra.Command{
 		Use:   "replay <run_id>",
@@ -572,7 +574,19 @@ func replayCmd() *cobra.Command {
 			}
 
 			if deterministic {
-				return deterministicReplay(events, stepMode)
+				cfg, err := loadConfig(*cfgPath)
+				if err != nil {
+					return err
+				}
+				injected, err := parseInjectedToolOutputs(injectTool)
+				if err != nil {
+					return err
+				}
+				return deterministicReplay(cmd.Context(), cfg, events, deterministicReplayOptions{
+					StepMode:     stepMode,
+					ReplaceModel: strings.TrimSpace(replaceModel),
+					InjectTools:  injected,
+				})
 			}
 
 			for _, ev := range events {
@@ -583,18 +597,36 @@ func replayCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&deterministic, "deterministic", false, "replay recorded model/tool events deterministically")
 	cmd.Flags().BoolVar(&stepMode, "step", false, "pause between deterministic replay events")
+	cmd.Flags().StringVar(&replaceModel, "replace-model", "", "run recorded model.call events against this model and show counterfactual responses")
+	cmd.Flags().StringArrayVar(&injectTool, "inject-tool", nil, "inject tool output during deterministic replay: name=output (repeatable)")
 	return cmd
 }
 
-func deterministicReplay(events []core.Event, stepMode bool) error {
+type deterministicReplayOptions struct {
+	StepMode     bool
+	ReplaceModel string
+	InjectTools  map[string]string
+}
+
+func deterministicReplay(ctx context.Context, cfg *config.Config, events []core.Event, opts deterministicReplayOptions) error {
 	fmt.Println(ui.Header("Deterministic Replay"))
 	fmt.Println(ui.Dim("model/tool outputs are sourced from trace records only"))
+	if opts.ReplaceModel != "" {
+		fmt.Println(ui.Info("counterfactual model override: " + opts.ReplaceModel))
+	}
+	if len(opts.InjectTools) > 0 {
+		fmt.Println(ui.Info(fmt.Sprintf("tool injections active: %d", len(opts.InjectTools))))
+	}
 
 	hasModelCall := false
 	reader := bufio.NewReader(os.Stdin)
+	var prov providers.Provider
+	var providerName string
+	var counterfactualQ []providers.CompleteResponse
+	var counterfactualErrQ []error
 
 	pause := func(label string) error {
-		if !stepMode {
+		if !opts.StepMode {
 			return nil
 		}
 		fmt.Print(ui.Dim("Press Enter to continue (" + label + ")..."))
@@ -604,13 +636,22 @@ func deterministicReplay(events []core.Event, stepMode bool) error {
 
 	for i, ev := range events {
 		switch ev.Type {
+		case core.EventRunStart:
+			var p core.RunStartPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if strings.TrimSpace(p.Provider) != "" {
+				providerName = p.Provider
+			}
+			ui.PrintReplayEvent(ev)
+
 		case core.EventModelCall:
 			hasModelCall = true
 			var p core.ModelCallPayload
 			_ = json.Unmarshal(ev.Payload, &p)
 			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] MODEL CALL  step=%s", i+1, shortID(ev.StepID))))
 			fmt.Printf("%s\n", ui.Dim(fmt.Sprintf("tools=%d  max_tool_calls=%d", len(p.ToolNames), p.MaxToolCalls)))
-			for _, m := range p.Messages {
+			msgs := applyInjectedToolOutputs(p.Messages, opts.InjectTools)
+			for _, m := range msgs {
 				content := strings.TrimSpace(m.Content)
 				if len(content) > 200 {
 					content = content[:200] + "…"
@@ -620,6 +661,36 @@ func deterministicReplay(events []core.Event, stepMode bool) error {
 					content = fmt.Sprintf("[assistant tool-calls: %d]", len(m.ToolCalls))
 				}
 				fmt.Printf("  %s: %s\n", m.Role, content)
+			}
+
+			if opts.ReplaceModel != "" {
+				if prov == nil {
+					pn := providerName
+					if strings.TrimSpace(pn) == "" {
+						pn = cfg.Defaults.Provider
+					}
+					var err error
+					prov, err = buildProvider(cfg, pn)
+					if err != nil {
+						counterfactualQ = append(counterfactualQ, providers.CompleteResponse{})
+						counterfactualErrQ = append(counterfactualErrQ, err)
+					}
+				}
+				if prov != nil {
+					toolSpecs := replayToolSpecs(cfg, p.ToolNames)
+					resp, err := prov.Complete(ctx, providers.CompleteRequest{
+						RunID:    ev.RunID,
+						StepID:   ev.StepID,
+						Messages: msgs,
+						Tools:    toolSpecs,
+						Model:    opts.ReplaceModel,
+						Hints: providers.Hints{
+							MaxToolCalls: p.MaxToolCalls,
+						},
+					})
+					counterfactualQ = append(counterfactualQ, resp)
+					counterfactualErrQ = append(counterfactualErrQ, err)
+				}
 			}
 			if err := pause("model.call"); err != nil {
 				return err
@@ -634,6 +705,25 @@ func deterministicReplay(events []core.Event, stepMode bool) error {
 			}
 			if len(p.ToolCalls) > 0 {
 				fmt.Println(ui.Dim(fmt.Sprintf("tool_calls=%d", len(p.ToolCalls))))
+			}
+			if opts.ReplaceModel != "" && len(counterfactualQ) > 0 && len(counterfactualErrQ) > 0 {
+				cf := counterfactualQ[0]
+				cerr := counterfactualErrQ[0]
+				counterfactualQ = counterfactualQ[1:]
+				counterfactualErrQ = counterfactualErrQ[1:]
+				fmt.Printf("\n%s\n", styleReplayTitle("COUNTERFACTUAL RESPONSE"))
+				if cerr != nil {
+					fmt.Println(ui.Fail("counterfactual model call failed: " + cerr.Error()))
+				} else {
+					if strings.TrimSpace(cf.AssistantText) != "" {
+						fmt.Println(cf.AssistantText)
+					} else {
+						fmt.Println(ui.Dim("(empty assistant text)"))
+					}
+					if len(cf.ToolCalls) > 0 {
+						fmt.Println(ui.Dim(fmt.Sprintf("counterfactual tool_calls=%d", len(cf.ToolCalls))))
+					}
+				}
 			}
 			if err := pause("model.response"); err != nil {
 				return err
@@ -653,6 +743,10 @@ func deterministicReplay(events []core.Event, stepMode bool) error {
 			_ = json.Unmarshal(ev.Payload, &p)
 			fmt.Printf("\n%s\n", styleReplayTitle(fmt.Sprintf("[%d] TOOL RESULT (recorded) %s  ok=%t", i+1, p.Name, p.OK)))
 			out := p.Output
+			if inj, ok := opts.InjectTools[p.Name]; ok {
+				out = inj
+				fmt.Println(ui.Warn("injected tool output override applied"))
+			}
 			if len(out) > 500 {
 				out = out[:500] + "…"
 			}
@@ -671,6 +765,60 @@ func deterministicReplay(events []core.Event, stepMode bool) error {
 		fmt.Println(ui.Warn("trace has no model.call events; rerun with newer v100 to capture deterministic prompts"))
 	}
 	return nil
+}
+
+func replayToolSpecs(cfg *config.Config, names []string) []providers.ToolSpec {
+	if len(names) == 0 {
+		return nil
+	}
+	reg := buildToolRegistry(cfg)
+	out := make([]providers.ToolSpec, 0, len(names))
+	for _, n := range names {
+		t, ok := reg.Get(n)
+		if !ok {
+			continue
+		}
+		out = append(out, providers.ToolSpec{
+			Name:         t.Name(),
+			Description:  t.Description(),
+			InputSchema:  t.InputSchema(),
+			OutputSchema: t.OutputSchema(),
+		})
+	}
+	return out
+}
+
+func parseInjectedToolOutputs(raw []string) (map[string]string, error) {
+	m := map[string]string{}
+	for _, v := range raw {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid --inject-tool %q (want name=output)", v)
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			return nil, fmt.Errorf("invalid --inject-tool %q (empty tool name)", v)
+		}
+		m[name] = parts[1]
+	}
+	return m, nil
+}
+
+func applyInjectedToolOutputs(msgs []providers.Message, injected map[string]string) []providers.Message {
+	if len(injected) == 0 {
+		return msgs
+	}
+	out := make([]providers.Message, len(msgs))
+	copy(out, msgs)
+	for i := range out {
+		if out[i].Role != "tool" {
+			continue
+		}
+		if v, ok := injected[out[i].Name]; ok {
+			out[i].Content = v
+		}
+	}
+	return out
 }
 
 func styleReplayTitle(s string) string {

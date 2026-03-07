@@ -77,3 +77,39 @@ func TestExtractLastAssistantText(t *testing.T) {
 		t.Fatalf("expected empty from nil messages, got %q", v)
 	}
 }
+
+func TestParseInjectedToolOutputs(t *testing.T) {
+	m, err := parseInjectedToolOutputs([]string{"project_search=parser.go:42", "fs_read=mocked file"})
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if got := m["project_search"]; got != "parser.go:42" {
+		t.Fatalf("unexpected project_search value: %q", got)
+	}
+	if got := m["fs_read"]; got != "mocked file" {
+		t.Fatalf("unexpected fs_read value: %q", got)
+	}
+
+	if _, err := parseInjectedToolOutputs([]string{"bad-format"}); err == nil {
+		t.Fatalf("expected parse error for missing '='")
+	}
+}
+
+func TestApplyInjectedToolOutputs(t *testing.T) {
+	msgs := []providers.Message{
+		{Role: "user", Content: "find parser"},
+		{Role: "tool", Name: "project_search", Content: "old"},
+		{Role: "tool", Name: "fs_read", Content: "keep"},
+	}
+	injected := map[string]string{"project_search": "new-value"}
+	got := applyInjectedToolOutputs(msgs, injected)
+	if got[1].Content != "new-value" {
+		t.Fatalf("expected injected tool content, got %q", got[1].Content)
+	}
+	if got[2].Content != "keep" {
+		t.Fatalf("expected untouched tool content, got %q", got[2].Content)
+	}
+	if msgs[1].Content != "old" {
+		t.Fatalf("input slice should not be mutated")
+	}
+}

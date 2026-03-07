@@ -108,10 +108,14 @@ v100 run --name "parser refactor" --tag team=core --tag sprint=12
 ```bash
 v100 replay --deterministic <run_id>
 v100 replay --deterministic --step <run_id>
+v100 replay --deterministic --replace-model gpt-4o <run_id>
+v100 replay --deterministic --inject-tool project_search="parser.go:123" <run_id>
 ```
 
 In deterministic mode, model responses and tool outputs are replayed from trace records.
 `--step` pauses between model/tool events for debugger-style inspection.
+`--replace-model` runs recorded `model.call` prompts against a different model and prints a counterfactual response.
+`--inject-tool` overrides recorded tool outputs in replayed prompts for what-if experiments.
 
 ### `v100 run` flags
 
