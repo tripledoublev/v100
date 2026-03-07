@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,8 +15,10 @@ type projectSearchTool struct{}
 
 func ProjectSearch() Tool { return &projectSearchTool{} }
 
-func (t *projectSearchTool) Name() string        { return "project_search" }
-func (t *projectSearchTool) Description() string { return "Search for a pattern in project files using ripgrep (rg)." }
+func (t *projectSearchTool) Name() string { return "project_search" }
+func (t *projectSearchTool) Description() string {
+	return "Search for a pattern in project files using ripgrep (rg)."
+}
 func (t *projectSearchTool) DangerLevel() DangerLevel { return Safe }
 
 func (t *projectSearchTool) InputSchema() json.RawMessage {
@@ -51,11 +55,9 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 
 	rgArgs := []string{"--line-number", "--with-filename"}
 	// Avoid runaway self-referential searches over trace/cache/git internals.
-	rgArgs = append(rgArgs,
-		"--glob", "!.git/**",
-		"--glob", "!runs/**",
-		"--glob", "!.gocache/**",
-	)
+	for _, ex := range defaultSearchExcludes(call.WorkspaceDir) {
+		rgArgs = append(rgArgs, "--glob", "!"+ex)
+	}
 	if !a.CaseSensitive {
 		rgArgs = append(rgArgs, "--ignore-case")
 	}
@@ -106,4 +108,79 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 		Stdout:     out,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func defaultSearchExcludes(workspaceDir string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+
+	// Hard safety defaults.
+	add(".git/**")
+	add("runs/**")
+	add(".gocache/**")
+
+	if workspaceDir == "" {
+		return out
+	}
+	gi := filepath.Join(workspaceDir, ".gitignore")
+	b, err := os.ReadFile(gi)
+	if err != nil {
+		return out
+	}
+	for _, p := range parseGitignoreExcludes(string(b)) {
+		add(p)
+	}
+	return out
+}
+
+func parseGitignoreExcludes(content string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "./")
+		line = strings.TrimPrefix(line, "/")
+		if line == "" {
+			continue
+		}
+		// Directory rules.
+		if strings.HasSuffix(line, "/") {
+			base := strings.TrimSuffix(line, "/")
+			if base == "" {
+				continue
+			}
+			add(base + "/**")
+			add("**/" + base + "/**")
+			continue
+		}
+		// Bare names in .gitignore match anywhere.
+		if !strings.Contains(line, "/") && !strings.ContainsAny(line, "*?[]") {
+			add(line)
+			add("**/" + line)
+			add("**/" + line + "/**")
+			continue
+		}
+		// Fallback for path/glob entries.
+		add(line)
+	}
+	return out
 }
