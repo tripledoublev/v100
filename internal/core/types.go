@@ -11,18 +11,19 @@ import (
 type EventType string
 
 const (
-	EventRunStart    EventType = "run.start"
-	EventUserMsg     EventType = "user.message"
-	EventModelCall   EventType = "model.call"
-	EventModelResp   EventType = "model.response"
-	EventToolCall    EventType = "tool.call"
-	EventToolResult  EventType = "tool.result"
-	EventRunError    EventType = "run.error"
-	EventRunEnd      EventType = "run.end"
-	EventAgentStart  EventType = "agent.start"
-	EventAgentEnd    EventType = "agent.end"
-	EventCompress    EventType = "context.compress"
-	EventStepSummary EventType = "step.summary"
+	EventRunStart      EventType = "run.start"
+	EventUserMsg       EventType = "user.message"
+	EventModelCall     EventType = "model.call"
+	EventModelResp     EventType = "model.response"
+	EventToolCall      EventType = "tool.call"
+	EventToolResult    EventType = "tool.result"
+	EventRunError      EventType = "run.error"
+	EventRunEnd        EventType = "run.end"
+	EventAgentStart    EventType = "agent.start"
+	EventAgentDispatch EventType = "agent.dispatch"
+	EventAgentEnd      EventType = "agent.end"
+	EventCompress      EventType = "context.compress"
+	EventStepSummary   EventType = "step.summary"
 )
 
 // Event is a single entry in the trace log.
@@ -76,9 +77,9 @@ type Run struct {
 
 // RunStartPayload is the Payload for EventRunStart.
 type RunStartPayload struct {
-	Policy   string `json:"policy"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Policy    string `json:"policy"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
 	Workspace string `json:"workspace,omitempty"`
 }
 
@@ -160,6 +161,15 @@ type AgentStartPayload struct {
 	Model        string   `json:"model"`
 	Tools        []string `json:"tools"`
 	MaxSteps     int      `json:"max_steps"`
+}
+
+// AgentDispatchPayload is the Payload for EventAgentDispatch.
+type AgentDispatchPayload struct {
+	Agent        string `json:"agent,omitempty"`
+	Pattern      string `json:"pattern,omitempty"`
+	ParentCallID string `json:"parent_call_id"`
+	AgentRunID   string `json:"agent_run_id"`
+	Task         string `json:"task"`
 }
 
 // AgentEndPayload is the Payload for EventAgentEnd.

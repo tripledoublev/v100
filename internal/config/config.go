@@ -81,9 +81,9 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir",
-				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch",
+				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
 		},
 		Policies: map[string]PolicyConfig{
 			"default": {
@@ -143,8 +143,8 @@ base_url = "https://api.openai.com/v1"
 env = "OPENAI_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"]
 
 [agents.researcher]
 system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
@@ -200,6 +200,11 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Dangerous, "agent")
 	ensureString(&cfg.Tools.Enabled, "dispatch")
 	ensureString(&cfg.Tools.Dangerous, "dispatch")
+	ensureString(&cfg.Tools.Enabled, "orchestrate")
+	ensureString(&cfg.Tools.Dangerous, "orchestrate")
+	ensureString(&cfg.Tools.Enabled, "blackboard_read")
+	ensureString(&cfg.Tools.Enabled, "blackboard_write")
+	ensureString(&cfg.Tools.Dangerous, "blackboard_write")
 	return &cfg, nil
 }
 

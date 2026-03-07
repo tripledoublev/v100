@@ -18,6 +18,8 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
 - **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
+- **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
+- **Shared run state** — blackboard tools provide cross-agent coordination via `runs/<id>/blackboard.md`
 - **Tool execution** — file system, shell, git, patch, curl, ripgrep search
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
@@ -161,6 +163,9 @@ Default workspace is the current directory where `v100 run` is launched.
 | `curl_fetch` | safe | Fetch URL content |
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
 | `dispatch` | **dangerous** | Dispatch a task to a named agent role from config |
+| `orchestrate` | **dangerous** | Coordinate multiple dispatches with fanout/pipeline patterns |
+| `blackboard_read` | safe | Read shared run blackboard |
+| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard |
 
 Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
 
@@ -202,6 +207,8 @@ context_limit = 80000
 runs/<run_id>/
   trace.jsonl     # append-only event log
   meta.json       # run metadata: name/tags/provider/model/score
+  blackboard.md   # shared scratchpad for multi-agent coordination
+  artifacts/      # per-run artifact files
   tui.debug.log   # optional, if --tui-debug
 ```
 

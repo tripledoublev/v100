@@ -136,6 +136,11 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if err := os.MkdirAll(runDir, 0o755); err != nil {
 				return fmt.Errorf("create run dir: %w", err)
 			}
+			_ = os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o755)
+			blackboardPath := filepath.Join(runDir, "blackboard.md")
+			if _, err := os.Stat(blackboardPath); os.IsNotExist(err) {
+				_ = os.WriteFile(blackboardPath, []byte("# Blackboard\n\n"), 0o644)
+			}
 
 			// Write meta.json
 			tags := parseTags(tagFlags)
@@ -1121,6 +1126,8 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
 	reg.Register(tools.FSMkdir())
+	reg.Register(tools.BlackboardRead())
+	reg.Register(tools.BlackboardWrite())
 	reg.Register(tools.Sh())
 	reg.Register(tools.GitStatus())
 	reg.Register(tools.GitDiff())
@@ -1283,6 +1290,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 		emitAgentEvent(trace, childOutputFn, params.RunID, params.StepID,
 			params.CallID+"-astart", core.EventAgentStart, startPayload)
+		emitAgentEvent(trace, childOutputFn, params.RunID, params.StepID,
+			params.CallID+"-adispatch", core.EventAgentDispatch, core.AgentDispatchPayload{
+				Agent:        params.Agent,
+				Pattern:      params.Pattern,
+				ParentCallID: params.CallID,
+				AgentRunID:   childRunID,
+				Task:         params.Task,
+			})
 
 		childLoop := &core.Loop{
 			Run:       childRun,
@@ -1358,6 +1373,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 
 	reg.Register(tools.NewAgent(runFn))
 	reg.Register(tools.NewDispatch(runFn, func() []string {
+		names := make([]string, 0, len(cfg.Agents))
+		for k := range cfg.Agents {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		return names
+	}))
+	reg.Register(tools.NewOrchestrate(runFn, func() []string {
 		names := make([]string, 0, len(cfg.Agents))
 		for k := range cfg.Agents {
 			names = append(names, k)
@@ -1711,11 +1734,11 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					}
 
 					meta := core.RunMeta{
-						RunID:    runID,
-						Name:     bc.Name,
-						Tags:     map[string]string{"experiment": bc.Name, "variant": variant.Name},
-						Provider: variant.Provider,
-						Model:    variant.Model,
+						RunID:     runID,
+						Name:      bc.Name,
+						Tags:      map[string]string{"experiment": bc.Name, "variant": variant.Name},
+						Provider:  variant.Provider,
+						Model:     variant.Model,
 						CreatedAt: time.Now().UTC(),
 					}
 					_ = core.WriteMeta(runDir, meta)

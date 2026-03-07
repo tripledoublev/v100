@@ -109,6 +109,20 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		fmt.Printf("\n%s  %s  task: %s  model: %s\n",
 			ts, styleInfo.Render("◆ agent"), task, styleMuted.Render(p.Model))
 
+	case core.EventAgentDispatch:
+		var p core.AgentDispatchPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		task := p.Task
+		if len(task) > 60 {
+			task = task[:60] + "…"
+		}
+		pat := ""
+		if p.Pattern != "" {
+			pat = " " + styleMuted.Render("["+p.Pattern+"]")
+		}
+		fmt.Printf("\n%s  %s  role=%s%s  task: %s\n",
+			ts, styleInfo.Render("◆ dispatch"), p.Agent, pat, task)
+
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
@@ -275,6 +289,21 @@ func PrintReplayEvent(ev core.Event) {
 		}
 		fmt.Printf("\n  %s  task: %s  model: %s  max_steps: %d\n",
 			styleInfo.Render("◆ agent start"), task, styleMuted.Render(p.Model), p.MaxSteps)
+
+	case core.EventAgentDispatch:
+		var p core.AgentDispatchPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		task := p.Task
+		if len(task) > 80 {
+			task = task[:80] + "…"
+		}
+		if p.Pattern != "" {
+			fmt.Printf("  %s  role=%s pattern=%s task: %s\n",
+				styleInfo.Render("◆ dispatch"), p.Agent, p.Pattern, styleMuted.Render(task))
+		} else {
+			fmt.Printf("  %s  role=%s task: %s\n",
+				styleInfo.Render("◆ dispatch"), p.Agent, styleMuted.Render(task))
+		}
 
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload

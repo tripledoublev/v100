@@ -17,6 +17,7 @@ type AgentRunParams struct {
 	RunID        string
 	StepID       string
 	Agent        string
+	Pattern      string
 	Task         string
 	Model        string
 	Tools        []string
@@ -44,8 +45,8 @@ func NewAgent(runFn AgentRunFn) Tool {
 }
 
 func (t *agentTool) Name() string             { return "agent" }
-func (t *agentTool) Description() string       { return "Spawn a sub-agent to handle a focused task." }
-func (t *agentTool) DangerLevel() DangerLevel  { return Dangerous }
+func (t *agentTool) Description() string      { return "Spawn a sub-agent to handle a focused task." }
+func (t *agentTool) DangerLevel() DangerLevel { return Dangerous }
 
 func (t *agentTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

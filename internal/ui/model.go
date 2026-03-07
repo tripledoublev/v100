@@ -1059,6 +1059,12 @@ func toolGlyph(name string) string {
 		return " ◆"
 	case "dispatch":
 		return " ↗"
+	case "orchestrate":
+		return " ⊕"
+	case "blackboard_read":
+		return " b<"
+	case "blackboard_write":
+		return " b>"
 	default:
 		return "::"
 	}
