@@ -72,9 +72,9 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir",
-				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply",
+				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent"},
 		},
 		Policies: map[string]PolicyConfig{
 			"default": {
@@ -114,8 +114,8 @@ base_url = "https://api.openai.com/v1"
 env = "OPENAI_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -149,6 +149,8 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "git_push")
 	ensureString(&cfg.Tools.Dangerous, "git_push")
 	ensureString(&cfg.Tools.Enabled, "curl_fetch")
+	ensureString(&cfg.Tools.Enabled, "agent")
+	ensureString(&cfg.Tools.Dangerous, "agent")
 	return &cfg, nil
 }
 

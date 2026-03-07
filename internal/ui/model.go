@@ -79,7 +79,10 @@ type TUIModel struct {
 	radioTitle    string
 	radioLastPoll time.Time
 
-	copyTargets []copyTarget
+	copyTargets    []copyTarget
+	plainBuf       strings.Builder // plain-text transcript for full-copy
+	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
+	traceStepCount int             // running step count for trace pane
 
 	// callbacks
 	SubmitFn func(string)
@@ -273,6 +276,13 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showStatus && m.focus == focusStatus {
 				m.focus = focusTrace
 			}
+		case "ctrl+a":
+			if err := copyToClipboard(m.plainBuf.String()); err != nil {
+				m.statusLine = "copy failed: " + err.Error()
+				m.statusMode = "error"
+			} else {
+				m.statusLine = "full transcript copied to clipboard"
+			}
 		case "ctrl+r":
 			m.toggleRadio()
 		case "]":
@@ -376,12 +386,12 @@ func (m *TUIModel) View() string {
 	}
 
 	// Header bar with responsive width to avoid terminal soft-wrap.
-	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+C:quit"
+	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+A:copy all  Ctrl+C:quit"
 	if m.width < 130 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+C:quit"
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+A:copy all  Ctrl+C:quit"
 	}
 	if m.width < 100 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+C:quit"
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+A:copy  Ctrl+C:quit"
 	}
 	header := tuiHeaderStyle.Render("v100") + tuiHeaderDimStyle.Render(headerHint)
 
@@ -479,32 +489,54 @@ func (m *TUIModel) View() string {
 func (m *TUIModel) appendEvent(ev core.Event) {
 	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
 	m.updateStatusFromEvent(ev)
+	sub := m.inSubAgent > 0
 
 	switch ev.Type {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		m.transcriptBuf.WriteString(
-			stylePrimary.Render("v100") +
-				styleMuted.Render("  run "+ev.RunID[:8]+"  "+p.Provider+" · "+p.Model) +
-				"\n\n",
-		)
+		if !sub {
+			m.transcriptBuf.WriteString(
+				stylePrimary.Render("v100") +
+					styleMuted.Render("  run "+ev.RunID[:8]+"  "+p.Provider+" · "+p.Model) +
+					"\n\n",
+			)
+			m.plainBuf.WriteString(fmt.Sprintf("v100  run %s  %s · %s\n\n", ev.RunID[:8], p.Provider, p.Model))
+		}
 
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		wrapped := m.wrapPlainForTranscript(p.Content)
-		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s  %s  %s\n",
-			ts, styleUser.Render("you"), wrapped,
-		))
-		iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-		m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-		m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Content})
+		if !sub {
+			wrapped := m.wrapPlainForTranscript(p.Content)
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"\n%s  %s  %s\n",
+				ts, styleUser.Render("you"), wrapped,
+			))
+			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Content})
+			m.plainBuf.WriteString(fmt.Sprintf("\nyou: %s\n", p.Content))
+		}
 
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		if sub {
+			// Sub-agent model response: show only a compact summary line
+			if p.Text != "" {
+				summary := p.Text
+				if len(summary) > 120 {
+					summary = summary[:120] + "…"
+				}
+				summary = strings.ReplaceAll(summary, "\n", " ")
+				m.transcriptBuf.WriteString(fmt.Sprintf(
+					"       %s  %s\n",
+					styleMuted.Render("◆"), styleMuted.Render(summary),
+				))
+			}
+			break
+		}
 		m.focus = focusTranscript
 		m.input.Blur()
 		if p.Text != "" {
@@ -516,6 +548,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
 			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Text})
+			m.plainBuf.WriteString(fmt.Sprintf("\nv100: %s\n", p.Text))
 		}
 		for _, tc := range p.ToolCalls {
 			args := m.wrapPlainForTranscript(tc.ArgsJSON)
@@ -527,9 +560,36 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			))
 		}
 
+	case core.EventToolCall:
+		if sub {
+			// Sub-agent tool calls: single compact line
+			var p core.ToolCallPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"       %s %s %s\n",
+				styleMuted.Render("◆"),
+				styleTool.Render(p.Name),
+				styleMuted.Render("…"),
+			))
+		}
+
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		if sub {
+			// Sub-agent tool results: one short status line
+			icon := styleOK.Render("✓")
+			if !p.OK {
+				icon = styleFail.Render("✗")
+			}
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"       %s %s %s\n",
+				styleMuted.Render("◆"),
+				icon,
+				styleMuted.Render(p.Name),
+			))
+			break
+		}
 		icon, nameStr := styleOK.Render("✓"), styleOK.Render(p.Name)
 		if !p.OK {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
@@ -550,20 +610,78 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s\n",
-			styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d",
-				p.Reason, p.UsedSteps, p.UsedTokens)),
-		))
+		if !sub {
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"\n%s\n",
+				styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d",
+					p.Reason, p.UsedSteps, p.UsedTokens)),
+			))
+			m.plainBuf.WriteString(fmt.Sprintf("\n■ run ended: %s  steps=%d  tokens=%d\n", p.Reason, p.UsedSteps, p.UsedTokens))
+		}
 
 	case core.EventRunError:
 		var p core.RunErrorPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		if sub {
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"       %s %s\n",
+				styleMuted.Render("◆"), styleFail.Render("error: "+p.Error),
+			))
+		} else {
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"\n%s  %s\n",
+				styleFail.Render("✗ error"),
+				styleFail.Render(p.Error),
+			))
+			m.plainBuf.WriteString(fmt.Sprintf("\nerror: %s\n", p.Error))
+		}
+
+	case core.EventAgentStart:
+		m.inSubAgent++
+		var p core.AgentStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		task := p.Task
+		if len(task) > 80 {
+			task = task[:80] + "…"
+		}
 		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s  %s\n",
-			styleFail.Render("✗ error"),
-			styleFail.Render(p.Error),
+			"\n%s  %s  %s\n",
+			ts, styleInfo.Render("◆ agent▸"), styleMuted.Render(task),
 		))
+		m.plainBuf.WriteString(fmt.Sprintf("\n◆ agent: %s\n", task))
+
+	case core.EventAgentEnd:
+		if m.inSubAgent > 0 {
+			m.inSubAgent--
+		}
+		var p core.AgentEndPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.OK {
+			// Show a trimmed result summary
+			result := p.Result
+			if len(result) > 200 {
+				result = result[:200] + "…"
+			}
+			result = strings.ReplaceAll(result, "\n", " ")
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"%s  %s  %s  %s\n",
+				ts, styleOK.Render("◆ done"),
+				styleMuted.Render(fmt.Sprintf("steps=%d tok=%d", p.UsedSteps, p.UsedTokens)),
+				styleMuted.Render(result),
+			))
+			m.plainBuf.WriteString(fmt.Sprintf("◆ agent done (steps=%d tokens=%d): %s\n", p.UsedSteps, p.UsedTokens, result))
+		} else {
+			result := p.Result
+			if len(result) > 120 {
+				result = result[:120] + "…"
+			}
+			result = strings.ReplaceAll(result, "\n", " ")
+			m.transcriptBuf.WriteString(fmt.Sprintf(
+				"%s  %s  %s\n",
+				ts, styleFail.Render("◆ agent failed"), styleMuted.Render(result),
+			))
+			m.plainBuf.WriteString(fmt.Sprintf("◆ agent failed: %s\n", result))
+		}
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.
@@ -782,67 +900,115 @@ func (m *TUIModel) statusView(width, height int) string {
 }
 
 func (m *TUIModel) renderTraceEvent(ev core.Event) string {
-	t := styleMuted.Render(ev.TS.Format(time.TimeOnly))
+	sep := styleMuted.Render("┊")
+	indent := ""
+	if m.inSubAgent > 0 && ev.Type != core.EventAgentStart && ev.Type != core.EventAgentEnd {
+		indent = styleMuted.Render("· ")
+	}
+
 	switch ev.Type {
 	case core.EventRunStart:
-		return t + "  " + styleInfo.Render("🚀 run.start")
+		return sep + "  " + indent + styleInfo.Render("▶▶") + "  " + styleMuted.Render("run")
 	case core.EventUserMsg:
-		return t + "  " + styleUser.Render("🧑 user.message")
+		return sep + "  " + indent + styleUser.Render(">>") + "  " + styleUser.Render("you")
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		if len(p.ToolCalls) > 0 {
-			return t + "  " + styleAssistant.Render(fmt.Sprintf("🧠 model.response (%d tool calls)", len(p.ToolCalls)))
+		latStr := ""
+		if p.DurationMS > 0 {
+			latStr = "  " + latencyStyle(p.DurationMS).Render(fmt.Sprintf("[%dms]", p.DurationMS))
 		}
-		return t + "  " + styleAssistant.Render("🧠 model.response")
+		if len(p.ToolCalls) > 0 {
+			return sep + "  " + indent + styleAssistant.Render("~~") + "  " + styleAssistant.Render(fmt.Sprintf("model  +%d", len(p.ToolCalls))) + latStr
+		}
+		return sep + "  " + indent + styleAssistant.Render("~~") + "  " + styleAssistant.Render("model") + latStr
 	case core.EventToolCall:
 		var p core.ToolCallPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		return t + "  " + styleWarn.Render(fmt.Sprintf("%s tool.call %s", toolEmoji(p.Name), p.Name))
+		return sep + "  " + indent + styleWarn.Render(toolGlyph(p.Name)) + "  " + styleWarn.Render(p.Name)
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		dur := styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS))
 		if p.OK {
-			return t + "  " + styleOK.Render(fmt.Sprintf("✅ tool.result %s", p.Name))
+			return sep + "  " + indent + styleOK.Render("✓") + "  " + styleOK.Render(p.Name) + "  " + dur
 		}
-		return t + "  " + styleFail.Render(fmt.Sprintf("❌ tool.result %s", p.Name))
+		return sep + "  " + indent + styleFail.Render("✗") + "  " + styleFail.Render(p.Name) + "  " + dur + "  " + styleFail.Render("[err]")
 	case core.EventRunError:
-		return t + "  " + styleFail.Render("💥 run.error")
+		return sep + "  " + indent + styleFail.Render("!!") + "  " + styleFail.Render("error")
 	case core.EventRunEnd:
-		return t + "  " + styleInfo.Render("🏁 run.end")
+		return sep + "  " + styleMuted.Render("■■") + "  " + styleMuted.Render("end")
+	case core.EventAgentStart:
+		return sep + "  " + styleInfo.Render("◆▶") + "  " + styleInfo.Render("agent")
+	case core.EventAgentEnd:
+		var p core.AgentEndPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.OK {
+			return sep + "  " + styleOK.Render("◆■") + "  " + styleOK.Render("agent done")
+		}
+		return sep + "  " + styleFail.Render("◆■") + "  " + styleFail.Render("agent fail")
+	case core.EventStepSummary:
+		var p core.StepSummaryPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.traceStepCount = p.StepNumber
+		hdr := sep + "  " + stylePrimary.Render(fmt.Sprintf("── step %d ──────────────────────", p.StepNumber))
+		detail := sep + "     " + styleMuted.Render(fmt.Sprintf("tok=%dk  $%.4f  %d tools  %dms",
+			p.InputTokens/1000, p.CostUSD, p.ToolCalls, p.DurationMS))
+		return hdr + "\n" + detail
+	case core.EventCompress:
+		var p core.CompressPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		return sep + "  " + styleInfo.Render("⊘⊘") + "  " + styleInfo.Render(
+			fmt.Sprintf("compress  %d→%d msgs  ~%dk→%dk tok",
+				p.MessagesBefore, p.MessagesAfter,
+				p.TokensBefore/1000, p.TokensAfter/1000))
 	default:
-		return t + "  " + styleRunID.Render(string(ev.Type))
+		return sep + "  " + indent + styleMuted.Render("::") + "  " + styleMuted.Render(string(ev.Type))
 	}
 }
 
-func toolEmoji(name string) string {
+// latencyStyle returns a style colored by latency bracket.
+func latencyStyle(ms int64) lipgloss.Style {
+	if ms < 500 {
+		return styleLatFast
+	}
+	if ms <= 2000 {
+		return styleLatMed
+	}
+	return styleLatSlow
+}
+
+// toolGlyph returns a short, non-emoji Unicode label for a tool name.
+func toolGlyph(name string) string {
 	switch name {
 	case "fs_list":
-		return "📁"
+		return "ls"
 	case "fs_read":
-		return "📖"
+		return " <"
 	case "fs_write":
-		return "📝"
+		return " >"
 	case "fs_mkdir":
-		return "📂"
+		return " +"
 	case "project_search":
-		return "🔎"
+		return "//"
 	case "patch_apply":
-		return "🩹"
+		return "~~"
 	case "git_status":
-		return "🌿"
+		return "g?"
 	case "git_diff":
-		return "🧾"
+		return "g~"
 	case "git_commit":
-		return "✅"
+		return "g+"
 	case "git_push":
-		return "🚀"
+		return "g^"
 	case "curl_fetch":
-		return "🌐"
+		return " @"
 	case "sh":
-		return "🖥"
+		return " $"
+	case "agent":
+		return " ◆"
 	default:
-		return "⚙"
+		return "::"
 	}
 }
 
@@ -905,6 +1071,21 @@ func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
 	case core.EventRunEnd:
 		m.statusMode = "idle"
 		m.statusLine = "run ended"
+	case core.EventAgentStart:
+		m.statusMode = "tooling"
+		m.statusLine = "sub-agent working on task"
+	case core.EventAgentEnd:
+		m.statusMode = "thinking"
+		m.statusLine = "sub-agent completed"
+	case core.EventStepSummary:
+		var p core.StepSummaryPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.statusMode = "idle"
+		m.statusLine = fmt.Sprintf("step %d done — %d tools, %dms, $%.4f",
+			p.StepNumber, p.ToolCalls, p.DurationMS, p.CostUSD)
+	case core.EventCompress:
+		m.statusMode = "thinking"
+		m.statusLine = "context compressed"
 	}
 }
 
