@@ -79,6 +79,11 @@ func DefaultConfig() *Config {
 				BaseURL:      "https://api.openai.com/v1",
 				Auth:         AuthConfig{Env: "OPENAI_API_KEY"},
 			},
+			"ollama": {
+				Type:         "ollama",
+				DefaultModel: "qwen3.5:2b",
+				BaseURL:      "http://localhost:11434",
+			},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
@@ -146,6 +151,12 @@ default_model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
+
+# ── Ollama local provider (no API key required) ────────────────────────────
+[providers.ollama]
+type = "ollama"
+default_model = "qwen3.5:2b"
+base_url = "http://localhost:11434"
 
 [tools]
 enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write"]
