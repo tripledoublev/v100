@@ -995,20 +995,35 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 
 		var result string
+		var lastErr error
 		ok := true
-		if stepErr := childLoop.Step(ctx, params.Task); stepErr != nil {
-			ok = false
-			result = "sub-agent error: " + stepErr.Error()
-		} else {
-			// Extract last assistant message
-			for i := len(childLoop.Messages) - 1; i >= 0; i-- {
-				if childLoop.Messages[i].Role == "assistant" && childLoop.Messages[i].Content != "" {
-					result = childLoop.Messages[i].Content
-					break
-				}
+		taskPrompt := buildSubAgentTask(params.Task, "", 1)
+		if stepErr := childLoop.Step(ctx, taskPrompt); stepErr != nil {
+			lastErr = stepErr
+		}
+		result = extractLastAssistantText(childLoop.Messages)
+
+		if !isCompliantAgentHandoff(result) && childBudget.RemainingSteps() != 0 {
+			retryPrompt := buildSubAgentTask(params.Task, result, 2)
+			if stepErr := childLoop.Step(ctx, retryPrompt); stepErr != nil {
+				lastErr = stepErr
 			}
-			if result == "" {
-				result = "(sub-agent produced no text response)"
+			result = extractLastAssistantText(childLoop.Messages)
+		}
+
+		if !isCompliantAgentHandoff(result) {
+			ok = false
+			if lastErr != nil {
+				result = fmt.Sprintf("sub-agent failed to produce a compliant handoff after 2 attempts: %v", lastErr)
+			} else {
+				preview := strings.TrimSpace(result)
+				if len(preview) > 240 {
+					preview = preview[:240] + "…"
+				}
+				if preview == "" {
+					preview = "(empty)"
+				}
+				result = "sub-agent failed to produce a compliant handoff after 2 attempts; partial output: " + preview
 			}
 		}
 
@@ -1040,6 +1055,61 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 	}
 
 	reg.Register(tools.NewAgent(runFn))
+}
+
+func buildSubAgentTask(task, priorOutput string, attempt int) string {
+	base := strings.TrimSpace(task)
+	if base == "" {
+		base = "(no task provided)"
+	}
+	contract := `
+Return a final handoff with this exact structure:
+## Summary
+<2-4 sentences>
+
+## Findings
+- [P1|P2|P3] <issue> — <why it matters> — <file refs if available>
+- [P1|P2|P3] ...
+
+## Next Steps
+1. <first action>
+2. <second action>
+
+Rules:
+- Never return an empty response.
+- If tools fail, still return the handoff and explain what failed.
+- Keep total length under 350 words.
+`
+	if attempt <= 1 {
+		return base + "\n\n" + strings.TrimSpace(contract)
+	}
+	return base + "\n\nYour previous response was not compliant or empty.\nPrevious output:\n" +
+		strings.TrimSpace(priorOutput) + "\n\n" + strings.TrimSpace(contract)
+}
+
+func extractLastAssistantText(msgs []providers.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" {
+			v := strings.TrimSpace(msgs[i].Content)
+			if v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func isCompliantAgentHandoff(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if len(s) < 80 {
+		return false
+	}
+	return strings.Contains(s, "## Summary") &&
+		strings.Contains(s, "## Findings") &&
+		strings.Contains(s, "## Next Steps")
 }
 
 func emitAgentEvent(trace *core.TraceWriter, outputFn core.OutputFn,
