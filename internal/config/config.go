@@ -205,6 +205,9 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "blackboard_read")
 	ensureString(&cfg.Tools.Enabled, "blackboard_write")
 	ensureString(&cfg.Tools.Dangerous, "blackboard_write")
+	if len(cfg.Agents) == 0 {
+		cfg.Agents = DefaultConfig().Agents
+	}
 	return &cfg, nil
 }
 
