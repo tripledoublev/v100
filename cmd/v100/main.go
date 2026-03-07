@@ -1147,24 +1147,45 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 	}
 
 	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
+		var roleCfg config.AgentConfig
+		if strings.TrimSpace(params.Agent) != "" {
+			cfgRole, ok := cfg.Agents[params.Agent]
+			if !ok {
+				return tools.AgentRunResult{OK: false, Result: "unknown agent role: " + params.Agent}
+			}
+			roleCfg = cfgRole
+		}
+
+		modelOverride := strings.TrimSpace(params.Model)
+		if modelOverride == "" {
+			modelOverride = strings.TrimSpace(roleCfg.Model)
+		}
+
 		// Build provider
-		prov, err := providerBuilder(params.Model)
+		prov, err := providerBuilder(modelOverride)
 		if err != nil {
 			return tools.AgentRunResult{OK: false, Result: "build provider: " + err.Error()}
 		}
 
-		// Build child tool registry: all parent tools except "agent"
+		// Build child tool registry.
 		parentTools := reg.EnabledTools()
 		wantTools := make(map[string]bool)
-		if len(params.Tools) > 0 {
+		switch {
+		case len(params.Tools) > 0:
 			for _, tn := range params.Tools {
-				if tn != "agent" {
+				if tn != "agent" && tn != "dispatch" {
 					wantTools[tn] = true
 				}
 			}
-		} else {
+		case len(roleCfg.Tools) > 0:
+			for _, tn := range roleCfg.Tools {
+				if tn != "agent" && tn != "dispatch" {
+					wantTools[tn] = true
+				}
+			}
+		default:
 			for _, pt := range parentTools {
-				if pt.Name() != "agent" {
+				if pt.Name() != "agent" && pt.Name() != "dispatch" {
 					wantTools[pt.Name()] = true
 				}
 			}
@@ -1183,6 +1204,12 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 
 		// Cap child budget by parent's remaining budget
 		maxSteps := params.MaxSteps
+		if maxSteps <= 0 {
+			maxSteps = roleCfg.BudgetSteps
+		}
+		if maxSteps <= 0 {
+			maxSteps = 10
+		}
 		if rem := budget.RemainingSteps(); rem > 0 && maxSteps > rem {
 			maxSteps = rem
 		}
@@ -1201,15 +1228,27 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			MaxCostUSD: maxCost,
 		})
 
-		childRunID := fmt.Sprintf("agent-%s", params.CallID[:8])
+		callShort := params.CallID
+		if len(callShort) > 8 {
+			callShort = callShort[:8]
+		}
+		childRunID := fmt.Sprintf("agent-%s", callShort)
 		childRun := &core.Run{
 			ID:  childRunID,
 			Dir: workspace,
 		}
 
+		systemPrompt := strings.TrimSpace(roleCfg.SystemPrompt)
+		if systemPrompt == "" {
+			systemPrompt = "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you."
+		}
+		policyName := "sub-agent"
+		if strings.TrimSpace(params.Agent) != "" {
+			policyName = "sub-agent:" + params.Agent
+		}
 		childPolicy := &policy.Policy{
-			Name:         "sub-agent",
-			SystemPrompt: "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you.",
+			Name:         policyName,
+			SystemPrompt: systemPrompt,
 		}
 		childPolicy.MaxToolCallsPerStep = parentMaxToolCalls
 		if childPolicy.MaxToolCallsPerStep <= 0 {
@@ -1228,9 +1267,13 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		// Emit agent.start event
 		modelName := params.Model
 		if modelName == "" {
+			modelName = modelOverride
+		}
+		if modelName == "" {
 			modelName = prov.Name()
 		}
 		startPayload := core.AgentStartPayload{
+			Agent:        params.Agent,
 			ParentCallID: params.CallID,
 			AgentRunID:   childRunID,
 			Task:         params.Task,
@@ -1292,6 +1335,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 
 		// Emit agent.end event
 		endPayload := core.AgentEndPayload{
+			Agent:        params.Agent,
 			ParentCallID: params.CallID,
 			AgentRunID:   childRunID,
 			OK:           ok,
@@ -1313,6 +1357,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 	}
 
 	reg.Register(tools.NewAgent(runFn))
+	reg.Register(tools.NewDispatch(runFn, func() []string {
+		names := make([]string, 0, len(cfg.Agents))
+		for k := range cfg.Agents {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		return names
+	}))
 }
 
 func buildSubAgentTask(task, priorOutput string, attempt int) string {

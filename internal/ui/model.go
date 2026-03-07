@@ -1057,6 +1057,8 @@ func toolGlyph(name string) string {
 		return " $"
 	case "agent":
 		return " ◆"
+	case "dispatch":
+		return " ↗"
 	default:
 		return "::"
 	}

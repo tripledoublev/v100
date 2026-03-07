@@ -14,6 +14,7 @@ type Config struct {
 	Providers map[string]ProviderConfig `toml:"providers"`
 	Tools     ToolsConfig               `toml:"tools"`
 	Policies  map[string]PolicyConfig   `toml:"policies"`
+	Agents    map[string]AgentConfig    `toml:"agents"`
 	Defaults  DefaultsConfig            `toml:"defaults"`
 }
 
@@ -40,6 +41,14 @@ type ToolsConfig struct {
 type PolicyConfig struct {
 	SystemPromptPath    string `toml:"system_prompt_path"`
 	MaxToolCallsPerStep int    `toml:"max_tool_calls_per_step"`
+}
+
+// AgentConfig defines a named specialist agent role.
+type AgentConfig struct {
+	SystemPrompt string   `toml:"system_prompt"`
+	Tools        []string `toml:"tools"`
+	Model        string   `toml:"model"`
+	BudgetSteps  int      `toml:"budget_steps"`
 }
 
 // DefaultsConfig holds run-level defaults.
@@ -72,14 +81,34 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir",
-				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent",
+				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch"},
 		},
 		Policies: map[string]PolicyConfig{
 			"default": {
 				SystemPromptPath:    "~/.config/v100/policies/default.md",
 				MaxToolCallsPerStep: 50,
+			},
+		},
+		Agents: map[string]AgentConfig{
+			"researcher": {
+				SystemPrompt: "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files.",
+				Tools:        []string{"fs_read", "fs_list", "project_search"},
+				Model:        "",
+				BudgetSteps:  15,
+			},
+			"implementer": {
+				SystemPrompt: "You are an implementation agent. Read files first, then make focused code changes.",
+				Tools:        []string{"fs_read", "fs_write", "patch_apply", "sh"},
+				Model:        "",
+				BudgetSteps:  30,
+			},
+			"reviewer": {
+				SystemPrompt: "You are a review agent. Review diffs for bugs, regressions, and risks.",
+				Tools:        []string{"fs_read", "git_diff", "project_search"},
+				Model:        "",
+				BudgetSteps:  10,
 			},
 		},
 		Defaults: DefaultsConfig{
@@ -114,8 +143,26 @@ base_url = "https://api.openai.com/v1"
 env = "OPENAI_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch"]
+
+[agents.researcher]
+system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
+tools = ["fs_read", "fs_list", "project_search"]
+model = ""
+budget_steps = 15
+
+[agents.implementer]
+system_prompt = "You are an implementation agent. Read files first, then make focused code changes."
+tools = ["fs_read", "fs_write", "patch_apply", "sh"]
+model = ""
+budget_steps = 30
+
+[agents.reviewer]
+system_prompt = "You are a review agent. Review diffs for bugs, regressions, and risks."
+tools = ["fs_read", "git_diff", "project_search"]
+model = ""
+budget_steps = 10
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -151,6 +198,8 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "curl_fetch")
 	ensureString(&cfg.Tools.Enabled, "agent")
 	ensureString(&cfg.Tools.Dangerous, "agent")
+	ensureString(&cfg.Tools.Enabled, "dispatch")
+	ensureString(&cfg.Tools.Dangerous, "dispatch")
 	return &cfg, nil
 }
 

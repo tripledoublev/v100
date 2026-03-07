@@ -153,6 +153,7 @@ type RunEndPayload struct {
 
 // AgentStartPayload is the Payload for EventAgentStart.
 type AgentStartPayload struct {
+	Agent        string   `json:"agent,omitempty"`
 	ParentCallID string   `json:"parent_call_id"`
 	AgentRunID   string   `json:"agent_run_id"`
 	Task         string   `json:"task"`
@@ -163,6 +164,7 @@ type AgentStartPayload struct {
 
 // AgentEndPayload is the Payload for EventAgentEnd.
 type AgentEndPayload struct {
+	Agent        string  `json:"agent,omitempty"`
 	ParentCallID string  `json:"parent_call_id"`
 	AgentRunID   string  `json:"agent_run_id"`
 	OK           bool    `json:"ok"`

@@ -17,6 +17,7 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Evaluation tooling** — per-run stats, run comparisons, and batch bench execution
 - **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
+- **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
 - **Tool execution** — file system, shell, git, patch, curl, ripgrep search
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
@@ -159,6 +160,7 @@ Default workspace is the current directory where `v100 run` is launched.
 | `project_search` | safe | Ripgrep search |
 | `curl_fetch` | safe | Fetch URL content |
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
+| `dispatch` | **dangerous** | Dispatch a task to a named agent role from config |
 
 Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
 
@@ -176,6 +178,12 @@ type = "openai"
 default_model = "gpt-4o"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
+
+[agents.researcher]
+system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
+tools = ["fs_read", "fs_list", "project_search"]
+model = ""
+budget_steps = 15
 
 [defaults]
 provider = "codex"

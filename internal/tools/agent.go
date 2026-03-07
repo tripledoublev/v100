@@ -16,6 +16,7 @@ type AgentRunParams struct {
 	CallID       string
 	RunID        string
 	StepID       string
+	Agent        string
 	Task         string
 	Model        string
 	Tools        []string
