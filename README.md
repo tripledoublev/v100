@@ -2,8 +2,13 @@
 
 v100 is an experimental agent harness for studying long-horizon LLM behavior.
 
-It provides instrumentation, replayable traces, evaluation tooling, and
-delegated sub-agents with explicit execution budgets.
+It provides a modular runtime for tool-using language model agents where every run is treated as an observable experiment. Model calls, tool execution, context compression, and delegation events are emitted as structured traces that can be replayed and analyzed.
+
+The goal is to make agent behavior measurable and reproducible so different prompting strategies, tool policies, and orchestration approaches can be systematically evaluated.
+
+## Architecture
+
+v100 runs a core agent loop that orchestrates model calls, tool execution, and optional sub-agent delegation, while emitting structured events into an append-only trace.
 
 ## Features
 
