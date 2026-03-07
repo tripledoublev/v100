@@ -38,6 +38,8 @@ func TestComputeMetricsBasic(t *testing.T) {
 		ev(t, now.Add(20*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "project_search", CallID: "c1"}),
 		ev(t, now.Add(30*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c1", OK: true, DurationMS: 100}),
 		ev(t, now.Add(40*time.Millisecond), EventCompress, "s1", CompressPayload{TokensBefore: 4000, TokensAfter: 1000}),
+		ev(t, now.Add(45*time.Millisecond), EventAgentDispatch, "s1", AgentDispatchPayload{Agent: "researcher", Pattern: "pipeline"}),
+		ev(t, now.Add(46*time.Millisecond), EventAgentEnd, "s1", AgentEndPayload{Agent: "researcher", OK: true, UsedTokens: 300, CostUSD: 0.02}),
 		ev(t, now.Add(50*time.Millisecond), EventStepSummary, "s1", StepSummaryPayload{StepNumber: 1, DurationMS: 2000}),
 		ev(t, now.Add(60*time.Millisecond), EventRunEnd, "s1", RunEndPayload{Reason: "completed"}),
 	}
@@ -54,6 +56,9 @@ func TestComputeMetricsBasic(t *testing.T) {
 	}
 	if m.CompressionFrequency != 1.0 {
 		t.Fatalf("expected compression frequency 1.0, got %.2f", m.CompressionFrequency)
+	}
+	if m.DispatchCalls != 1 || m.DispatchSuccessRate != 1.0 {
+		t.Fatalf("expected dispatch metrics to be populated, got calls=%d success=%.2f", m.DispatchCalls, m.DispatchSuccessRate)
 	}
 }
 

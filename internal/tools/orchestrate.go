@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -102,6 +104,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 			if !res.OK {
 				ok = false
 			}
+			_ = appendBlackboardDispatch(call.RunID, a.Pattern, task.Agent, task.Task, res)
 		}
 	} else {
 		sem := make(chan struct{}, a.MaxParallel)
@@ -125,6 +128,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 					WorkspaceDir: call.WorkspaceDir,
 				})
 				results[i] = res
+				_ = appendBlackboardDispatch(call.RunID, a.Pattern, task.Agent, task.Task, res)
 			}()
 		}
 		wg.Wait()
@@ -153,10 +157,52 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 		b.WriteString(fmt.Sprintf("%d. [%s] %s  steps=%d tok=%d cost=$%.4f\n   %s\n",
 			i+1, status, task.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, out))
 	}
+	jsonResults := make([]map[string]any, 0, len(a.Tasks))
+	for i, task := range a.Tasks {
+		r := results[i]
+		jsonResults = append(jsonResults, map[string]any{
+			"agent":       task.Agent,
+			"ok":          r.OK,
+			"used_steps":  r.UsedSteps,
+			"used_tokens": r.UsedTokens,
+			"cost_usd":    r.CostUSD,
+			"result":      r.Result,
+		})
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"ok":      ok,
+		"pattern": a.Pattern,
+		"results": jsonResults,
+	})
+	b.WriteString("\njson=" + string(payload) + "\n")
 
 	return ToolResult{
 		OK:         ok,
 		Output:     b.String(),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func appendBlackboardDispatch(runID, pattern, agent, task string, res AgentRunResult) error {
+	path := blackboardPath(runID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	st := "ok"
+	if !res.OK {
+		st = "fail"
+	}
+	out := strings.TrimSpace(res.Result)
+	if len(out) > 240 {
+		out = out[:240] + "…"
+	}
+	_, err = fmt.Fprintf(f,
+		"\n## Dispatch (%s)\n- agent: %s\n- status: %s\n- steps: %d\n- tokens: %d\n- cost: $%.4f\n- task: %s\n- result: %s\n",
+		pattern, agent, st, res.UsedSteps, res.UsedTokens, res.CostUSD, strings.TrimSpace(task), out)
+	return err
 }

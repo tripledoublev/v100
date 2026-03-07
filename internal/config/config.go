@@ -45,10 +45,12 @@ type PolicyConfig struct {
 
 // AgentConfig defines a named specialist agent role.
 type AgentConfig struct {
-	SystemPrompt string   `toml:"system_prompt"`
-	Tools        []string `toml:"tools"`
-	Model        string   `toml:"model"`
-	BudgetSteps  int      `toml:"budget_steps"`
+	SystemPrompt  string   `toml:"system_prompt"`
+	Tools         []string `toml:"tools"`
+	Model         string   `toml:"model"`
+	BudgetSteps   int      `toml:"budget_steps"`
+	BudgetTokens  int      `toml:"budget_tokens"`
+	BudgetCostUSD float64  `toml:"budget_cost_usd"`
 }
 
 // DefaultsConfig holds run-level defaults.
@@ -97,18 +99,21 @@ func DefaultConfig() *Config {
 				Tools:        []string{"fs_read", "fs_list", "project_search"},
 				Model:        "",
 				BudgetSteps:  15,
+				BudgetTokens: 20000,
 			},
 			"implementer": {
 				SystemPrompt: "You are an implementation agent. Read files first, then make focused code changes.",
 				Tools:        []string{"fs_read", "fs_write", "patch_apply", "sh"},
 				Model:        "",
 				BudgetSteps:  30,
+				BudgetTokens: 50000,
 			},
 			"reviewer": {
 				SystemPrompt: "You are a review agent. Review diffs for bugs, regressions, and risks.",
 				Tools:        []string{"fs_read", "git_diff", "project_search"},
 				Model:        "",
 				BudgetSteps:  10,
+				BudgetTokens: 15000,
 			},
 		},
 		Defaults: DefaultsConfig{
@@ -151,18 +156,24 @@ system_prompt = "You are a researcher agent. Find and read relevant code and ret
 tools = ["fs_read", "fs_list", "project_search"]
 model = ""
 budget_steps = 15
+budget_tokens = 20000
+budget_cost_usd = 0.0
 
 [agents.implementer]
 system_prompt = "You are an implementation agent. Read files first, then make focused code changes."
 tools = ["fs_read", "fs_write", "patch_apply", "sh"]
 model = ""
 budget_steps = 30
+budget_tokens = 50000
+budget_cost_usd = 0.0
 
 [agents.reviewer]
 system_prompt = "You are a review agent. Review diffs for bugs, regressions, and risks."
 tools = ["fs_read", "git_diff", "project_search"]
 model = ""
 budget_steps = 10
+budget_tokens = 15000
+budget_cost_usd = 0.0
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"

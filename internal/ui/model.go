@@ -671,10 +671,14 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if len(task) > 80 {
 			task = task[:80] + "…"
 		}
+		label := "◆ agent▸"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "◆ dispatch▸ " + p.Agent
+		}
 		m.transcriptBuf.WriteString(fmt.Sprintf(
 			"\n%s  %s  %s  %s\n",
 			ts,
-			styleInfo.Render("◆ agent▸"),
+			styleInfo.Render(label),
 			styleMuted.Render(shortRunID(p.AgentRunID)),
 			styleMuted.Render(fmt.Sprintf("%s  tools=%d max_steps=%d", p.Model, len(p.Tools), p.MaxSteps)),
 		))
@@ -689,6 +693,12 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		m.removeActiveAgent(p.AgentRunID)
 		m.inSubAgent = len(m.activeAgents)
+		okLabel := "◆ done"
+		failLabel := "◆ agent failed"
+		if strings.TrimSpace(p.Agent) != "" {
+			okLabel = "◆ dispatch done"
+			failLabel = "◆ dispatch failed"
+		}
 		if p.OK {
 			m.agentDoneCount++
 			// Show a trimmed result summary
@@ -700,7 +710,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			m.lastAgentNote = fmt.Sprintf("%s ok  steps=%d tok=%d", shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens)
 			m.transcriptBuf.WriteString(fmt.Sprintf(
 				"%s  %s  %s  %s  %s  %s\n",
-				ts, styleOK.Render("◆ done"),
+				ts, styleOK.Render(okLabel),
 				styleMuted.Render(shortRunID(p.AgentRunID)),
 				styleMuted.Render(fmt.Sprintf("steps=%d tok=%d", p.UsedSteps, p.UsedTokens)),
 				styleMuted.Render(fmt.Sprintf("$%.4f", p.CostUSD)),
@@ -717,7 +727,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			m.lastAgentNote = fmt.Sprintf("%s failed", shortRunID(p.AgentRunID))
 			m.transcriptBuf.WriteString(fmt.Sprintf(
 				"%s  %s  %s  %s\n",
-				ts, styleFail.Render("◆ agent failed"),
+				ts, styleFail.Render(failLabel),
 				styleMuted.Render(shortRunID(p.AgentRunID)),
 				styleMuted.Render(result),
 			))
@@ -986,17 +996,25 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		label := "agent"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "dispatch:" + p.Agent
+		}
 		return sep + "  " + styleInfo.Render("◆▶") + "  " + styleInfo.Render(
-			fmt.Sprintf("agent %s  %s  max=%d", shortRunID(p.AgentRunID), p.Model, p.MaxSteps))
+			fmt.Sprintf("%s %s  %s  max=%d", label, shortRunID(p.AgentRunID), p.Model, p.MaxSteps))
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		label := "agent"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "dispatch:" + p.Agent
+		}
 		if p.OK {
 			return sep + "  " + styleOK.Render("◆■") + "  " + styleOK.Render(
-				fmt.Sprintf("agent %s done  steps=%d tok=%d", shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens))
+				fmt.Sprintf("%s %s done  steps=%d tok=%d", label, shortRunID(p.AgentRunID), p.UsedSteps, p.UsedTokens))
 		}
 		return sep + "  " + styleFail.Render("◆■") + "  " + styleFail.Render(
-			fmt.Sprintf("agent %s fail", shortRunID(p.AgentRunID)))
+			fmt.Sprintf("%s %s fail", label, shortRunID(p.AgentRunID)))
 	case core.EventStepSummary:
 		var p core.StepSummaryPayload
 		_ = json.Unmarshal(ev.Payload, &p)

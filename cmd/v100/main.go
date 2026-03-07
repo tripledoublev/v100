@@ -1223,13 +1223,20 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		// Token cap: inherit parent remaining budget first; fall back to configured default.
 		// 0 means unlimited in BudgetTracker semantics.
 		maxTokens := 0
-		if rem := budget.RemainingTokens(); rem > 0 {
-			maxTokens = rem
-		} else if cfg.Defaults.BudgetTokens > 0 {
+		if roleCfg.BudgetTokens > 0 {
+			maxTokens = roleCfg.BudgetTokens
+		}
+		if maxTokens <= 0 && cfg.Defaults.BudgetTokens > 0 {
 			maxTokens = cfg.Defaults.BudgetTokens
 		}
+		if rem := budget.RemainingTokens(); rem > 0 && (maxTokens == 0 || maxTokens > rem) {
+			maxTokens = rem
+		}
 		maxCost := 0.0
-		if rem := budget.RemainingCost(); rem > 0 {
+		if roleCfg.BudgetCostUSD > 0 {
+			maxCost = roleCfg.BudgetCostUSD
+		}
+		if rem := budget.RemainingCost(); rem > 0 && (maxCost == 0 || maxCost > rem) {
 			maxCost = rem
 		}
 
@@ -1317,21 +1324,21 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		var result string
 		var lastErr error
 		ok := true
-		taskPrompt := buildSubAgentTask(params.Task, "", 1)
+		taskPrompt := buildSubAgentTask(params.Agent, params.Task, "", 1)
 		if stepErr := childLoop.Step(ctx, taskPrompt); stepErr != nil {
 			lastErr = stepErr
 		}
 		result = extractLastAssistantText(childLoop.Messages)
 
-		if !isCompliantAgentHandoff(result) && childBudget.RemainingSteps() != 0 {
-			retryPrompt := buildSubAgentTask(params.Task, result, 2)
+		if !isCompliantAgentHandoff(params.Agent, result) && childBudget.RemainingSteps() != 0 {
+			retryPrompt := buildSubAgentTask(params.Agent, params.Task, result, 2)
 			if stepErr := childLoop.Step(ctx, retryPrompt); stepErr != nil {
 				lastErr = stepErr
 			}
 			result = extractLastAssistantText(childLoop.Messages)
 		}
 
-		if !isCompliantAgentHandoff(result) {
+		if !isCompliantAgentHandoff(params.Agent, result) {
 			ok = false
 			if lastErr != nil {
 				result = fmt.Sprintf("sub-agent failed to produce a compliant handoff after 2 attempts: %v", lastErr)
@@ -1394,7 +1401,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 	}))
 }
 
-func buildSubAgentTask(task, priorOutput string, attempt int) string {
+func buildSubAgentTask(agent, task, priorOutput string, attempt int) string {
 	base := strings.TrimSpace(task)
 	if base == "" {
 		base = "(no task provided)"
@@ -1417,6 +1424,33 @@ Rules:
 - If tools fail, still return the handoff and explain what failed.
 - Keep total length under 350 words.
 `
+	if strings.EqualFold(strings.TrimSpace(agent), "researcher") {
+		contract = `
+Return a final handoff with this exact structure:
+## Summary
+<2-4 sentences>
+
+## Key Files
+- <path> — <why this file matters for the task>
+- <path> — <why this file matters for the task>
+
+## Findings
+- <finding with file reference and short evidence>
+- <finding with file reference and short evidence>
+
+## Next Steps
+1. <first action>
+2. <second action>
+
+## JSON
+{"agent":"researcher","files":["path1","path2"],"findings":["..."],"confidence":"low|medium|high"}
+
+Rules:
+- Never return an empty response.
+- If tools fail, still return the handoff and explain what failed.
+- Keep total length under 350 words.
+`
+	}
 	if attempt <= 1 {
 		return base + "\n\n" + strings.TrimSpace(contract)
 	}
@@ -1436,13 +1470,19 @@ func extractLastAssistantText(msgs []providers.Message) string {
 	return ""
 }
 
-func isCompliantAgentHandoff(s string) bool {
+func isCompliantAgentHandoff(agent, s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return false
 	}
 	if len(s) < 80 {
 		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(agent), "researcher") {
+		return strings.Contains(s, "## Summary") &&
+			strings.Contains(s, "## Key Files") &&
+			strings.Contains(s, "## Findings") &&
+			strings.Contains(s, "## Next Steps")
 	}
 	return strings.Contains(s, "## Summary") &&
 		strings.Contains(s, "## Findings") &&

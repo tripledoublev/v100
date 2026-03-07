@@ -106,8 +106,12 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		if len(task) > 60 {
 			task = task[:60] + "…"
 		}
+		label := "◆ agent"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "◆ dispatch:" + p.Agent
+		}
 		fmt.Printf("\n%s  %s  task: %s  model: %s\n",
-			ts, styleInfo.Render("◆ agent"), task, styleMuted.Render(p.Model))
+			ts, styleInfo.Render(label), task, styleMuted.Render(p.Model))
 
 	case core.EventAgentDispatch:
 		var p core.AgentDispatchPayload
@@ -126,16 +130,20 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		label := "◆ agent"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "◆ dispatch:" + p.Agent
+		}
 		if p.OK {
 			fmt.Printf("%s  %s  done  steps=%d tokens=%d cost=$%.4f\n",
-				ts, styleOK.Render("◆ agent"), p.UsedSteps, p.UsedTokens, p.CostUSD)
+				ts, styleOK.Render(label), p.UsedSteps, p.UsedTokens, p.CostUSD)
 		} else {
 			result := p.Result
 			if len(result) > 80 {
 				result = result[:80] + "…"
 			}
 			fmt.Printf("%s  %s  failed: %s\n",
-				ts, styleFail.Render("◆ agent"), result)
+				ts, styleFail.Render(label), result)
 		}
 
 	case core.EventCompress:
@@ -287,8 +295,12 @@ func PrintReplayEvent(ev core.Event) {
 		if len(task) > 80 {
 			task = task[:80] + "…"
 		}
+		label := "◆ agent start"
+		if strings.TrimSpace(p.Agent) != "" {
+			label = "◆ dispatch start (" + p.Agent + ")"
+		}
 		fmt.Printf("\n  %s  task: %s  model: %s  max_steps: %d\n",
-			styleInfo.Render("◆ agent start"), task, styleMuted.Render(p.Model), p.MaxSteps)
+			styleInfo.Render(label), task, styleMuted.Render(p.Model), p.MaxSteps)
 
 	case core.EventAgentDispatch:
 		var p core.AgentDispatchPayload
@@ -308,12 +320,18 @@ func PrintReplayEvent(ev core.Event) {
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		okLabel := "◆ agent done"
+		failLabel := "◆ agent failed"
+		if strings.TrimSpace(p.Agent) != "" {
+			okLabel = "◆ dispatch done (" + p.Agent + ")"
+			failLabel = "◆ dispatch failed (" + p.Agent + ")"
+		}
 		if p.OK {
 			fmt.Printf("  %s  steps=%d tokens=%d cost=$%.4f\n",
-				styleOK.Render("◆ agent done"), p.UsedSteps, p.UsedTokens, p.CostUSD)
+				styleOK.Render(okLabel), p.UsedSteps, p.UsedTokens, p.CostUSD)
 		} else {
 			fmt.Printf("  %s  %s\n",
-				styleFail.Render("◆ agent failed"), styleFail.Render(p.Result))
+				styleFail.Render(failLabel), styleFail.Render(p.Result))
 		}
 
 	case core.EventCompress:

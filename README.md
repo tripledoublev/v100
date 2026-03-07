@@ -20,6 +20,7 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
 - **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
 - **Shared run state** — blackboard tools provide cross-agent coordination via `runs/<id>/blackboard.md`
+- **Dispatch telemetry** — per-role dispatch success/cost/tokens appear in `v100 metrics`
 - **Tool execution** — file system, shell, git, patch, curl, ripgrep search
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
@@ -189,6 +190,8 @@ system_prompt = "You are a researcher agent. Find and read relevant code and ret
 tools = ["fs_read", "fs_list", "project_search"]
 model = ""
 budget_steps = 15
+budget_tokens = 20000
+budget_cost_usd = 0.0
 
 [defaults]
 provider = "codex"
@@ -220,12 +223,21 @@ v100 score <run_id> pass "completed task without manual fixes"
 
 # Inspect one run
 v100 stats <run_id>
+v100 metrics <run_id>
 
 # Compare several runs
 v100 compare <run_a> <run_b> <run_c>
 
 # Query by metadata
 v100 query --tag team=core --score pass
+```
+
+## Multi-agent quick examples
+
+```text
+Call dispatch with {"agent":"researcher","task":"Find replay implementation and list key files."}
+Call orchestrate with {"pattern":"fanout","tasks":[{"agent":"researcher","task":"Map replay"},{"agent":"reviewer","task":"List risks"}]}
+Call blackboard_read with {}
 ```
 
 ## Bench config example

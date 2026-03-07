@@ -23,6 +23,13 @@ type RunMetrics struct {
 	LatencyP50MS                 int64
 	LatencyP95MS                 int64
 	EfficiencyScore              float64
+	DispatchCalls                int
+	DispatchFailures             int
+	DispatchSuccessRate          float64
+	DispatchTokens               int
+	DispatchCostUSD              float64
+	DispatchByRole               map[string]int
+	DispatchFailuresByRole       map[string]int
 }
 
 // RunClassification is an automatic diagnosis from trace behavior.
@@ -35,12 +42,14 @@ type RunClassification struct {
 func ComputeMetrics(events []Event) RunMetrics {
 	s := ComputeStats(events)
 	m := RunMetrics{
-		RunID:        s.RunID,
-		StepsPerRun:  s.TotalSteps,
-		TokensPerRun: s.TokensIn + s.TokensOut,
-		CostPerRunUSD: s.TotalCostUSD,
-		LatencyP50MS: Percentile(s.ModelLatencyMS, 50),
-		LatencyP95MS: Percentile(s.ModelLatencyMS, 95),
+		RunID:                  s.RunID,
+		StepsPerRun:            s.TotalSteps,
+		TokensPerRun:           s.TokensIn + s.TokensOut,
+		CostPerRunUSD:          s.TotalCostUSD,
+		LatencyP50MS:           Percentile(s.ModelLatencyMS, 50),
+		LatencyP95MS:           Percentile(s.ModelLatencyMS, 95),
+		DispatchByRole:         map[string]int{},
+		DispatchFailuresByRole: map[string]int{},
 	}
 
 	var (
@@ -58,6 +67,15 @@ func ComputeMetrics(events []Event) RunMetrics {
 
 	for _, ev := range events {
 		switch ev.Type {
+		case EventAgentDispatch:
+			var p AgentDispatchPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			m.DispatchCalls++
+			role := strings.TrimSpace(p.Agent)
+			if role == "" {
+				role = "anonymous"
+			}
+			m.DispatchByRole[role]++
 		case EventToolCall:
 			var p ToolCallPayload
 			_ = json.Unmarshal(ev.Payload, &p)
@@ -93,6 +111,19 @@ func ComputeMetrics(events []Event) RunMetrics {
 			if p.DurationMS > 0 {
 				reasonDurationSum += p.DurationMS
 			}
+		case EventAgentEnd:
+			var p AgentEndPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			m.DispatchTokens += p.UsedTokens
+			m.DispatchCostUSD += p.CostUSD
+			if !p.OK {
+				m.DispatchFailures++
+				role := strings.TrimSpace(p.Agent)
+				if role == "" {
+					role = "anonymous"
+				}
+				m.DispatchFailuresByRole[role]++
+			}
 		}
 	}
 
@@ -119,6 +150,9 @@ func ComputeMetrics(events []Event) RunMetrics {
 	if len(successfulToolSteps) > 0 {
 		m.TokensPerSuccessfulToolStep = float64(m.TokensPerRun) / float64(len(successfulToolSteps))
 		m.CostPerSuccessfulToolStepUSD = m.CostPerRunUSD / float64(len(successfulToolSteps))
+	}
+	if m.DispatchCalls > 0 {
+		m.DispatchSuccessRate = float64(m.DispatchCalls-m.DispatchFailures) / float64(m.DispatchCalls)
 	}
 
 	m.EfficiencyScore = computeEfficiencyScore(s, m)
@@ -307,6 +341,20 @@ func FormatMetrics(m RunMetrics, c RunClassification) string {
 	b.WriteString(fmt.Sprintf("  latency_p50_ms:             %d\n", m.LatencyP50MS))
 	b.WriteString(fmt.Sprintf("  latency_p95_ms:             %d\n", m.LatencyP95MS))
 	b.WriteString(fmt.Sprintf("  tool_vs_reasoning_time_ratio: %.2f\n", m.ToolVsReasoningTimeRatio))
+	if m.DispatchCalls > 0 {
+		b.WriteString("\nDispatch metrics:\n")
+		b.WriteString(fmt.Sprintf("  dispatch_calls:              %d\n", m.DispatchCalls))
+		b.WriteString(fmt.Sprintf("  dispatch_success_rate:       %.2f\n", m.DispatchSuccessRate))
+		b.WriteString(fmt.Sprintf("  dispatch_tokens:             %d\n", m.DispatchTokens))
+		b.WriteString(fmt.Sprintf("  dispatch_cost_usd:           %.4f\n", m.DispatchCostUSD))
+		if len(m.DispatchByRole) > 0 {
+			b.WriteString("  dispatch_by_role:\n")
+			for role, n := range m.DispatchByRole {
+				fail := m.DispatchFailuresByRole[role]
+				b.WriteString(fmt.Sprintf("    - %s: calls=%d failures=%d\n", role, n, fail))
+			}
+		}
+	}
 
 	return b.String()
 }
@@ -349,6 +397,7 @@ func FormatMetricCompare(metrics []RunMetrics) string {
 	row("TimePerStep", vals(func(m RunMetrics) string { return fmt.Sprintf("%.1fms", m.TimePerStepMS) }))
 	row("Tok/SuccessStep", vals(func(m RunMetrics) string { return fmt.Sprintf("%.0f", m.TokensPerSuccessfulToolStep) }))
 	row("Cost/Run", vals(func(m RunMetrics) string { return fmt.Sprintf("$%.4f", m.CostPerRunUSD) }))
+	row("DispatchSR", vals(func(m RunMetrics) string { return fmt.Sprintf("%.2f", m.DispatchSuccessRate) }))
 
 	return b.String()
 }

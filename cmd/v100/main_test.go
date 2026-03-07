@@ -18,7 +18,7 @@ Short summary.
 ## Next Steps
 1. Do thing.
 `
-	if !isCompliantAgentHandoff(valid) {
+	if !isCompliantAgentHandoff("", valid) {
 		t.Fatalf("expected valid handoff to be compliant")
 	}
 
@@ -32,15 +32,29 @@ Short summary.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if isCompliantAgentHandoff(tc.in) {
+			if isCompliantAgentHandoff("", tc.in) {
 				t.Fatalf("expected non-compliant handoff for case %q", tc.name)
 			}
 		})
 	}
+
+	researcher := strings.Repeat("x", 90) + `
+## Summary
+short
+## Key Files
+- cmd/v100/main.go — replay wiring
+## Findings
+- deterministic replay in replayCmd
+## Next Steps
+1. add tests
+`
+	if !isCompliantAgentHandoff("researcher", researcher) {
+		t.Fatalf("expected researcher handoff to be compliant")
+	}
 }
 
 func TestBuildSubAgentTask(t *testing.T) {
-	first := buildSubAgentTask("analyze codebase", "", 1)
+	first := buildSubAgentTask("", "analyze codebase", "", 1)
 	if !strings.Contains(first, "analyze codebase") {
 		t.Fatalf("first attempt prompt missing task")
 	}
@@ -51,12 +65,17 @@ func TestBuildSubAgentTask(t *testing.T) {
 		t.Fatalf("first attempt prompt missing output contract")
 	}
 
-	second := buildSubAgentTask("analyze codebase", "bad output", 2)
+	second := buildSubAgentTask("", "analyze codebase", "bad output", 2)
 	if !strings.Contains(second, "Your previous response was not compliant or empty.") {
 		t.Fatalf("retry prompt missing retry guidance")
 	}
 	if !strings.Contains(second, "Previous output:\nbad output") {
 		t.Fatalf("retry prompt missing previous output context")
+	}
+
+	researcher := buildSubAgentTask("researcher", "find replay files", "", 1)
+	if !strings.Contains(researcher, "## Key Files") {
+		t.Fatalf("researcher contract should include key files section")
 	}
 }
 

@@ -19,8 +19,10 @@ func NewDispatch(runFn AgentRunFn, listAgents func() []string) Tool {
 	return &dispatchTool{runFn: runFn, listAgents: listAgents}
 }
 
-func (t *dispatchTool) Name() string            { return "dispatch" }
-func (t *dispatchTool) Description() string      { return "Dispatch a task to a named specialist agent role." }
+func (t *dispatchTool) Name() string { return "dispatch" }
+func (t *dispatchTool) Description() string {
+	return "Dispatch a task to a named specialist agent role."
+}
 func (t *dispatchTool) DangerLevel() DangerLevel { return Dangerous }
 
 func (t *dispatchTool) InputSchema() json.RawMessage {
@@ -101,8 +103,16 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 		output = "(dispatch produced no output)"
 	}
 
-	summary := fmt.Sprintf("[dispatch %s done: steps=%d tokens=%d cost=$%.4f]\n\n%s",
-		a.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, output)
+	payload, _ := json.Marshal(map[string]any{
+		"ok":          res.OK,
+		"agent":       a.Agent,
+		"used_steps":  res.UsedSteps,
+		"used_tokens": res.UsedTokens,
+		"cost_usd":    res.CostUSD,
+		"result":      output,
+	})
+	summary := fmt.Sprintf("[dispatch %s done: steps=%d tokens=%d cost=$%.4f]\njson=%s\n\n%s",
+		a.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, string(payload), output)
 
 	return ToolResult{
 		OK:         res.OK,
