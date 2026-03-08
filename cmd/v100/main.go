@@ -94,6 +94,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiDebugFlag     bool
 		nameFlag         string
 		tagFlags         []string
+		solverFlag       string
 		temperatureFlag  float64
 		topPFlag         float64
 		topKFlag         int
@@ -131,6 +132,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if confirmToolsFlag != "" {
 				cfg.Defaults.ConfirmTools = confirmToolsFlag
+			}
+			if solverFlag != "" {
+				cfg.Defaults.Solver = solverFlag
 			}
 
 			// Build run directory
@@ -235,10 +239,21 @@ func runCmd(cfgPath *string) *cobra.Command {
 			// Build generation params from flags and config defaults
 			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
 
-			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams)
+			// Build solver
+			var solver core.Solver
+			switch cfg.Defaults.Solver {
+			case "plan_execute":
+				solver = &core.PlanExecuteSolver{MaxReplans: 3}
+			case "react", "":
+				solver = &core.ReactSolver{}
+			default:
+				return fmt.Errorf("unknown solver %q", cfg.Defaults.Solver)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams)
+
+			if tuiFlag {
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver)
+			}
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver)
 		},
 	}
 
@@ -261,6 +276,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
+	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute (default: react)")
 	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
 	cmd.Flags().Float64Var(&topPFlag, "top-p", 0, "nucleus sampling top-p (0=provider default)")
 	cmd.Flags().IntVar(&topKFlag, "top-k", 0, "top-k sampling (0=provider default)")
@@ -271,7 +287,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver) error {
 
 	renderer := ui.NewCLIRenderer()
 
@@ -290,6 +306,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		ConfirmFn: confirmFn,
 		OutputFn:  outputFn,
 		GenParams: genParams,
+		Solver:    solver,
 	}
 
 	// Override workspace for tool execution
@@ -343,7 +360,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 }
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver) error {
 
 	run.Dir = workspace
 
@@ -411,6 +428,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		ConfirmFn: confirmFn,
 		OutputFn:  tuiOutputFn,
 		GenParams: genParams,
+		Solver:    solver,
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.

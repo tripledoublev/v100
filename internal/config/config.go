@@ -56,6 +56,7 @@ type AgentConfig struct {
 // DefaultsConfig holds run-level defaults.
 type DefaultsConfig struct {
 	Provider            string   `toml:"provider"`
+	Solver              string   `toml:"solver"` // react | plan_execute
 	ConfirmTools        string   `toml:"confirm_tools"` // always | dangerous | never
 	BudgetSteps         int      `toml:"budget_steps"`
 	BudgetTokens        int      `toml:"budget_tokens"`

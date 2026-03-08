@@ -25,6 +25,8 @@ const (
 	EventAgentEnd      EventType = "agent.end"
 	EventCompress      EventType = "context.compress"
 	EventStepSummary   EventType = "step.summary"
+	EventSolverPlan    EventType = "solver.plan"
+	EventSolverReplan  EventType = "solver.replan"
 )
 
 // Event is a single entry in the trace log.
