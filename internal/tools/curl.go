@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/core/executor"
 )
 
 type curlFetchTool struct{}
@@ -69,6 +71,9 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	if a.MaxBytes <= 0 || a.MaxBytes > 2*1024*1024 {
 		a.MaxBytes = 128 * 1024
 	}
+	if call.Session != nil && call.Session.Type() == "docker" {
+		return t.execInSession(ctx, call, start, url, a.MaxBytes)
+	}
 
 	timeout := 20 * time.Second
 	if call.TimeoutMS > 0 {
@@ -111,6 +116,90 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		Stdout:     output,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func (t *curlFetchTool) execInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (ToolResult, error) {
+	timeout := 20 * time.Second
+	if call.TimeoutMS > 0 {
+		timeout = time.Duration(call.TimeoutMS) * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	const bodyMarker = "__V100_CURL_BODY__"
+	script := `
+set -eu
+headers="$(mktemp)"
+body="$(mktemp)"
+meta="$(mktemp)"
+trap 'rm -f "$headers" "$body" "$meta"' EXIT
+curl -sS -L --max-time "$V100_TIMEOUT_SECONDS" -A "$V100_UA" -D "$headers" -o "$body" -w '%{http_code}\n%{content_type}\n' "$V100_URL" >"$meta"
+cat "$meta"
+printf '\n` + bodyMarker + `\n'
+head -c "$V100_MAX_BYTES" "$body"
+`
+
+	res, err := call.Session.Run(ctx, executor.RunRequest{
+		Command: "sh",
+		Args:    []string{"-lc", script},
+		Dir:     ".",
+		Env: []string{
+			"V100_URL=" + url,
+			fmt.Sprintf("V100_MAX_BYTES=%d", maxBytes),
+			fmt.Sprintf("V100_TIMEOUT_SECONDS=%d", int(timeout/time.Second)),
+			"V100_UA=v100/1.0 (+https://github.com/tripledoublev/v100)",
+		},
+	})
+	if err != nil {
+		return failResult(start, "request failed: "+err.Error()), nil
+	}
+	if res.ExitCode != 0 {
+		out := strings.TrimSpace(res.Stderr)
+		if out == "" {
+			out = strings.TrimSpace(res.Stdout)
+		}
+		return failResult(start, "request failed: "+out), nil
+	}
+
+	status, contentType, text, err := parseCurlSessionOutput(res.Stdout, bodyMarker)
+	if err != nil {
+		return failResult(start, "parse failed: "+err.Error()), nil
+	}
+	if strings.Contains(contentType, "text/html") || looksLikeHTML(text) {
+		text = htmlToText(text)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = "(empty response body)"
+	}
+
+	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, status, contentType, text)
+	return ToolResult{
+		OK:         status >= 200 && status < 400,
+		Output:     output,
+		Stdout:     output,
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+func parseCurlSessionOutput(stdout, bodyMarker string) (int, string, string, error) {
+	idx := strings.Index(stdout, "\n"+bodyMarker+"\n")
+	if idx == -1 {
+		return 0, "", "", fmt.Errorf("missing body marker")
+	}
+	meta := strings.TrimSpace(stdout[:idx])
+	body := stdout[idx+len("\n"+bodyMarker+"\n"):]
+	lines := strings.Split(meta, "\n")
+	if len(lines) < 2 {
+		return 0, "", "", fmt.Errorf("missing curl metadata")
+	}
+	statusLine := strings.TrimSpace(lines[len(lines)-2])
+	contentType := strings.TrimSpace(lines[len(lines)-1])
+	var status int
+	if _, err := fmt.Sscanf(statusLine, "%d", &status); err != nil {
+		return 0, "", "", fmt.Errorf("invalid status %q", statusLine)
+	}
+	return status, strings.ToLower(contentType), body, nil
 }
 
 var (

@@ -258,7 +258,10 @@ context_limit = 80000        # estimated token threshold; compress history when 
 [sandbox]
 enabled = false
 backend = "host"            # host | docker
+image = "google/gemini-v100-research:latest"
 network_tier = "off"        # off | research | open
+memory_mb = 512
+cpus = 1.0
 apply_back = "manual"       # manual | on_success | never
 `
 }
@@ -294,6 +297,7 @@ func Load(path string) (*Config, error) {
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}
+	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	return &cfg, nil
 }
 
@@ -321,4 +325,25 @@ func ensureString(items *[]string, want string) {
 		}
 	}
 	*items = append(*items, want)
+}
+
+func applySandboxDefaults(dst *SandboxConfig, defaults SandboxConfig) {
+	if strings.TrimSpace(dst.Backend) == "" {
+		dst.Backend = defaults.Backend
+	}
+	if strings.TrimSpace(dst.Image) == "" {
+		dst.Image = defaults.Image
+	}
+	if strings.TrimSpace(dst.NetworkTier) == "" {
+		dst.NetworkTier = defaults.NetworkTier
+	}
+	if dst.MemoryMB <= 0 {
+		dst.MemoryMB = defaults.MemoryMB
+	}
+	if dst.CPUs <= 0 {
+		dst.CPUs = defaults.CPUs
+	}
+	if strings.TrimSpace(dst.ApplyBack) == "" {
+		dst.ApplyBack = defaults.ApplyBack
+	}
 }

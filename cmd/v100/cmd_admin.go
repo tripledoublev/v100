@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -245,6 +246,31 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				fmt.Println(ui.Fail("Config parse error: " + err.Error()))
 				return nil
 			}
+			if sandboxBackendNeedsDocker(cfg) {
+				if p, err := findInPath("docker"); err == nil && p != "" {
+					fmt.Println(ui.OK("docker: " + p))
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					version, err := dockerServerVersion(ctx)
+					cancel()
+					if err != nil {
+						fmt.Println(ui.Fail("Docker daemon unavailable: " + err.Error()))
+						ok = false
+					} else {
+						fmt.Println(ui.OK("Sandbox backend: docker (" + version + ")"))
+					}
+				} else {
+					fmt.Println(ui.Fail("docker not found — sandbox backend docker will fail"))
+					ok = false
+				}
+				if strings.TrimSpace(cfg.Sandbox.Image) == "" {
+					fmt.Println(ui.Fail("Sandbox image not configured for docker backend"))
+					ok = false
+				} else {
+					fmt.Println(ui.OK("Sandbox image: " + cfg.Sandbox.Image))
+				}
+			} else {
+				fmt.Println(ui.OK("Sandbox backend: host"))
+			}
 
 			printOAuthConfigStatus := func(name string, err error) {
 				credsPath := auth.DefaultCredentialsPath()
@@ -381,4 +407,27 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func sandboxBackendNeedsDocker(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(cfg.Sandbox.Backend), "docker")
+}
+
+func dockerServerVersion(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}").CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+	version := strings.TrimSpace(string(out))
+	if version == "" {
+		return "", fmt.Errorf("empty docker server version response")
+	}
+	return version, nil
 }

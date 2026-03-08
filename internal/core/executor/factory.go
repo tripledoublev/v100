@@ -16,7 +16,7 @@ func NewExecutor(cfg config.SandboxConfig, baseDir string) (Executor, error) {
 	case "host", "":
 		return NewHostExecutor(baseDir), nil
 	case "docker":
-		return nil, fmt.Errorf("docker backend not yet implemented; use 'host' for Phase 3a foundation")
+		return NewDockerExecutor(cfg, baseDir), nil
 	default:
 		return nil, fmt.Errorf("unknown sandbox backend %q", cfg.Backend)
 	}

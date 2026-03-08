@@ -133,6 +133,52 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, `network_tier = "off"`) {
 		t.Error("default TOML should default sandbox network_tier to off")
 	}
+	if !contains(toml, `image = "google/gemini-v100-research:latest"`) {
+		t.Error("default TOML should contain sandbox image")
+	}
+	if !contains(toml, `memory_mb = 512`) {
+		t.Error("default TOML should contain sandbox memory limit")
+	}
+	if !contains(toml, `cpus = 1.0`) {
+		t.Error("default TOML should contain sandbox cpu limit")
+	}
+}
+
+func TestLoadConfigAppliesSandboxDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	toml := `
+[providers.openai]
+type = "openai"
+default_model = "gpt-4o"
+[providers.openai.auth]
+env = "OPENAI_API_KEY"
+
+[tools]
+enabled = ["fs_read"]
+dangerous = []
+
+[defaults]
+provider = "openai"
+
+[sandbox]
+backend = "docker"
+`
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sandbox.Backend != "docker" {
+		t.Fatalf("sandbox backend = %q, want docker", cfg.Sandbox.Backend)
+	}
+	if cfg.Sandbox.Image == "" || cfg.Sandbox.NetworkTier == "" || cfg.Sandbox.MemoryMB <= 0 || cfg.Sandbox.CPUs <= 0 || cfg.Sandbox.ApplyBack == "" {
+		t.Fatalf("sandbox defaults not applied: %+v", cfg.Sandbox)
+	}
 }
 
 func contains(s, substr string) bool {
