@@ -20,10 +20,19 @@ type Experiment struct {
 
 // ExperimentConfig defines the dataset and variants for an experiment.
 type ExperimentConfig struct {
-	DatasetPath string         `json:"dataset_path,omitempty"`
-	Variants    []Variant      `json:"variants"`
-	Repeats     int            `json:"repeats"` // N trials per prompt/variant combination
-	Scorer      string         `json:"scorer"`
+	DatasetPath string              `json:"dataset_path,omitempty"`
+	Variants    []Variant           `json:"variants"`
+	Repeats     int                 `json:"repeats"` // N trials per prompt/variant combination
+	Scorer      string              `json:"scorer"`
+	Invariants  []SuccessInvariant  `json:"invariants,omitempty"`
+}
+
+// SuccessInvariant defines a physical condition that must be true for a run to "pass".
+type SuccessInvariant struct {
+	Type    string `json:"type"`    // "file_exists", "file_contains", "file_sha256", "no_file"
+	Path    string `json:"path"`    // path relative to /workspace
+	Pattern string `json:"pattern,omitempty"`
+	Hash    string `json:"hash,omitempty"`
 }
 
 // Variant is a specific combination of model, solver, and parameters.

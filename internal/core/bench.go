@@ -12,6 +12,15 @@ type BenchConfig struct {
 	Name     string         `toml:"name"`
 	Prompts  []BenchPrompt  `toml:"prompts"`
 	Variants []BenchVariant `toml:"variants"`
+	Invariants []SuccessInvariant `toml:"invariants"`
+}
+
+// SuccessInvariant defines a physical condition that must be true for a run to "pass".
+type SuccessInvariant struct {
+	Type    string `toml:"type"`    // "file_exists", "file_contains", "file_sha256", "no_file"
+	Path    string `toml:"path"`    // path relative to /workspace
+	Pattern string `toml:"pattern"`
+	Hash    string `toml:"hash"`
 }
 
 // BenchPrompt is a single prompt in a bench config.

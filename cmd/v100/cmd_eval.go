@@ -191,55 +191,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						return err
 					}
 
-					// Build provider from variant config
-					pc, ok := cfg.Providers[variant.Provider]
-					if !ok {
-						trace.Close()
-						return fmt.Errorf("provider %q not configured", variant.Provider)
-					}
-					if variant.Model != "" {
-						pc.DefaultModel = variant.Model
-					}
-					prov, err := buildProviderFromConfig(pc)
-					if err != nil {
-						trace.Close()
-						return err
-					}
-
-					reg := buildToolRegistry(cfg)
-					pol := loadPolicy(cfg, "default")
-
-					// Resolve solver
-					var solver core.Solver
-					solverName := variant.Solver
-					if solverName == "" {
-						solverName = cfg.Defaults.Solver
-					}
-					switch solverName {
-					case "plan_execute":
-						maxReplans := cfg.Defaults.MaxReplans
-						if maxReplans <= 0 {
-							maxReplans = 3
-						}
-						solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
-					case "react", "":
-						solver = &core.ReactSolver{}
-					default:
-						trace.Close()
-						return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
-					}
-
-					budgetSteps := variant.BudgetSteps
-					if budgetSteps == 0 {
-						budgetSteps = cfg.Defaults.BudgetSteps
-					}
-					budget := core.NewBudgetTracker(&core.Budget{
-						MaxSteps:   budgetSteps,
-						MaxTokens:  cfg.Defaults.BudgetTokens,
-						MaxCostUSD: cfg.Defaults.BudgetCostUSD,
-					})
-
-					run := &core.Run{ID: runID, Dir: runDir, TraceFile: tracePath}
+					coreRun := &core.Run{ID: runID, Dir: runDir, TraceFile: tracePath}
 
 					// Build sandbox session
 					var s_session executor.Session
@@ -254,32 +206,43 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						defer s_session.Close()
 					}
 
+					reg := buildToolRegistry(cfg)
+					pol := loadPolicy(cfg, "default")
+
+					budgetSteps := variant.BudgetSteps
+					if budgetSteps == 0 {
+						budgetSteps = cfg.Defaults.BudgetSteps
+					}
+					budget := core.NewBudgetTracker(&core.Budget{
+						MaxSteps:   budgetSteps,
+						MaxTokens:  cfg.Defaults.BudgetTokens,
+						MaxCostUSD: cfg.Defaults.BudgetCostUSD,
+					})
+
 					renderer := ui.NewCLIRenderer()
 					confirmFn := func(_, _ string) bool { return true } // auto-approve
 					outputFn := core.OutputFn(renderer.RenderEvent)
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
-						Run:         run,
-						Provider:    prov,
-						Tools:       reg,
-						Policy:      pol,
-						Trace:       trace,
-						Budget:      budget,
-						ConfirmFn:   confirmFn,
-						OutputFn:    outputFn,
-						GenParams:   genParams,
-						Solver:      solver,
-						Session:     s_session,
-						Mapper:      s_mapper,
+						Run:       run,
+						Provider:  prov,
+						Tools:     reg,
+						Policy:    pol,
+						Trace:     trace,
+						Budget:    budget,
+						ConfirmFn: confirmFn,
+						OutputFn:  outputFn,
+						GenParams: genParams,
+						Solver:    &core.ReactSolver{},
+						Session:   s_session,
+						Mapper:    s_mapper,
 						NetworkTier: loopNetworkTier(cfg),
 						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
 					metadata, _ := prov.Metadata(ctx, variant.Model)
 					loop.ModelMetadata = metadata
-					meta.ModelMetadata = metadata
-					_ = core.WriteMeta(runDir, meta)
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
 						Policy:        pol.Name,
@@ -328,11 +291,6 @@ func queryCmd() *cobra.Command {
 				if err != nil {
 					continue
 				}
-				if meta.ModelMetadata == (providers.ModelMetadata{}) {
-					if events, err := core.ReadAll(filepath.Join(dir, "trace.jsonl")); err == nil {
-						meta.ModelMetadata = core.ComputeStats(events).ModelMetadata
-					}
-				}
 
 				// Filter by score
 				if scoreFilter != "" && meta.Score != scoreFilter {
@@ -355,15 +313,8 @@ func queryCmd() *cobra.Command {
 				if score == "" {
 					score = "-"
 				}
-				fmt.Printf("%-28s  %-10s %-18s %-8s %-14s %-8s %s\n",
-					meta.RunID,
-					meta.Provider,
-					meta.Model,
-					core.FormatContextSize(meta.ModelMetadata.ContextSize),
-					core.FormatModelPricing(meta.ModelMetadata),
-					score,
-					meta.Name,
-				)
+				fmt.Printf("%-28s  %-10s %-8s %-12s %s\n",
+					meta.RunID, meta.Provider, meta.Model, score, meta.Name)
 			}
 			return nil
 		},
@@ -455,7 +406,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 				model := variant.Model
 				if model == "" {
 					if pc, ok := cfg.Providers[provName]; ok {
-						model = normalizedProviderConfig(pc).DefaultModel
+						model = pc.DefaultModel
 					}
 				}
 
@@ -543,26 +494,24 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
-						Run:         coreRun,
-						Provider:    prov,
-						Tools:       reg,
-						Policy:      pol,
-						Trace:       trace,
-						Budget:      budget,
-						ConfirmFn:   confirmFn,
-						OutputFn:    outputFn,
-						Solver:      solver,
-						GenParams:   providers.GenParams{},
-						Session:     s_session,
-						Mapper:      s_mapper,
+						Run:       coreRun,
+						Provider:  prov,
+						Tools:     reg,
+						Policy:    pol,
+						Trace:     trace,
+						Budget:    budget,
+						ConfirmFn: confirmFn,
+						OutputFn:  outputFn,
+						Solver:    solver,
+						GenParams: providers.GenParams{},
+						Session:   s_session,
+						Mapper:    s_mapper,
 						NetworkTier: loopNetworkTier(cfg),
 						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
 					metadata, _ := prov.Metadata(context.Background(), model)
 					loop.ModelMetadata = metadata
-					meta.ModelMetadata = metadata
-					_ = core.WriteMeta(runDir, meta)
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
 						Policy:        "default",
@@ -721,6 +670,115 @@ func diffCmd() *cobra.Command {
 			fmt.Printf("Evidence:        %s\n", diff.DiffEvidence)
 
 			return nil
+		},
+	}
+}
+
+func verifyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify <run_id> [bench.toml|experiment.json]",
+		Short: "Automatically verify a run result against success invariants",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			var invariants []eval.SuccessInvariant
+
+			// 1. Try to load invariants from bench or experiment config if provided
+			if len(args) > 1 {
+				configPath := args[1]
+				if strings.HasSuffix(configPath, ".toml") {
+					bc, err := core.LoadBenchConfig(configPath)
+					if err == nil {
+						for _, inv := range bc.Invariants {
+							invariants = append(invariants, eval.SuccessInvariant{
+								Type:    inv.Type,
+								Path:    inv.Path,
+								Pattern: inv.Pattern,
+								Hash:    inv.Hash,
+							})
+						}
+					}
+				} else if strings.HasSuffix(configPath, ".json") {
+					exp, err := eval.LoadExperiment("runs", configPath)
+					if err == nil {
+						invariants = exp.Config.Invariants
+					}
+				}
+			}
+
+			if len(invariants) == 0 {
+				return fmt.Errorf("no invariants provided and none found in run metadata")
+			}
+
+			fmt.Printf("Verifying %s against %d invariants...\n", ui.Info(runID), len(invariants))
+
+			meta, err := core.ReadMeta(runDir)
+			if err != nil {
+				return err
+			}
+
+			// 2. Load workspace path from meta
+			workspace := meta.SourceWorkspace
+			if workspace == "" {
+				workspace = "."
+			}
+
+			// 3. Perform physical verification
+			passed := true
+			var evidence []string
+
+			for _, inv := range invariants {
+				fullPath := filepath.Join(workspace, inv.Path)
+				switch inv.Type {
+				case "file_exists":
+					if _, err := os.Stat(fullPath); err != nil {
+						passed = false
+						evidence = append(evidence, fmt.Sprintf("FAIL: file %s does not exist", inv.Path))
+					} else {
+						evidence = append(evidence, fmt.Sprintf("PASS: file %s exists", inv.Path))
+					}
+				case "no_file":
+					if _, err := os.Stat(fullPath); err == nil {
+						passed = false
+						evidence = append(evidence, fmt.Sprintf("FAIL: file %s exists but should not", inv.Path))
+					} else {
+						evidence = append(evidence, fmt.Sprintf("PASS: file %s is absent", inv.Path))
+					}
+				case "file_contains":
+					data, err := os.ReadFile(fullPath)
+					if err != nil {
+						passed = false
+						evidence = append(evidence, fmt.Sprintf("FAIL: could not read %s: %v", inv.Path, err))
+					} else if !strings.Contains(string(data), inv.Pattern) {
+						passed = false
+						evidence = append(evidence, fmt.Sprintf("FAIL: %s does not contain pattern %q", inv.Path, inv.Pattern))
+					} else {
+						evidence = append(evidence, fmt.Sprintf("PASS: %s contains pattern %q", inv.Path, inv.Pattern))
+					}
+				}
+			}
+
+			// 4. Update score
+			score := "fail"
+			if passed {
+				score = "pass"
+				fmt.Println(ui.OK("Verification PASSED"))
+			} else {
+				fmt.Println(ui.Fail("Verification FAILED"))
+			}
+
+			for _, e := range evidence {
+				fmt.Println("  " + e)
+			}
+
+			meta.Score = score
+			meta.ScoreNotes = strings.Join(evidence, " | ")
+			return core.WriteMeta(runDir, meta)
 		},
 	}
 }
