@@ -34,7 +34,12 @@ func loadConfig(cfgPath string) (*config.Config, error) {
 func buildProvider(cfg *config.Config, providerName string) (providers.Provider, error) {
 	pc, ok := cfg.Providers[providerName]
 	if !ok {
-		return nil, fmt.Errorf("provider %q not configured", providerName)
+		// Fall back to built-in defaults (e.g. minimax after login)
+		defaults := config.DefaultConfig()
+		pc, ok = defaults.Providers[providerName]
+		if !ok {
+			return nil, fmt.Errorf("provider %q not configured", providerName)
+		}
 	}
 	return buildProviderFromConfig(pc)
 }
