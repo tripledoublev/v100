@@ -19,6 +19,7 @@ import (
 	"github.com/tripledoublev/v100/internal/auth"
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/eval"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -93,6 +94,11 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiDebugFlag     bool
 		nameFlag         string
 		tagFlags         []string
+		temperatureFlag  float64
+		topPFlag         float64
+		topKFlag         int
+		maxTokensFlag    int
+		seedFlag         int
 	)
 
 	cmd := &cobra.Command{
@@ -226,10 +232,13 @@ func runCmd(cfgPath *string) *cobra.Command {
 				}
 			}
 
+			// Build generation params from flags and config defaults
+			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
+
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag)
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams)
 		},
 	}
 
@@ -252,12 +261,17 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
+	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
+	cmd.Flags().Float64Var(&topPFlag, "top-p", 0, "nucleus sampling top-p (0=provider default)")
+	cmd.Flags().IntVar(&topKFlag, "top-k", 0, "top-k sampling (0=provider default)")
+	cmd.Flags().IntVar(&maxTokensFlag, "max-tokens", 0, "max output tokens (0=provider default)")
+	cmd.Flags().IntVar(&seedFlag, "seed", 0, "random seed for reproducibility (0=none)")
 
 	return cmd
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams) error {
 
 	renderer := ui.NewCLIRenderer()
 
@@ -275,6 +289,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Budget:    budget,
 		ConfirmFn: confirmFn,
 		OutputFn:  outputFn,
+		GenParams: genParams,
 	}
 
 	// Override workspace for tool execution
@@ -328,7 +343,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 }
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams) error {
 
 	run.Dir = workspace
 
@@ -395,6 +410,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Budget:    budget,
 		ConfirmFn: confirmFn,
 		OutputFn:  tuiOutputFn,
+		GenParams: genParams,
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.
@@ -989,13 +1005,36 @@ func loginCmd() *cobra.Command {
 				fmt.Println(ui.OK("Logged in to Gemini successfully"))
 				fmt.Println(ui.Dim("Token saved to: ") + path)
 
+			case "anthropic":
+				fmt.Println(ui.Info("Anthropic uses API keys (no OAuth flow available)."))
+				fmt.Println(ui.Info("Get your key from: https://console.anthropic.com/settings/keys"))
+				fmt.Print("Paste your API key: ")
+				scanner := bufio.NewScanner(os.Stdin)
+				if !scanner.Scan() {
+					return fmt.Errorf("login: no input")
+				}
+				apiKey := strings.TrimSpace(scanner.Text())
+				if apiKey == "" {
+					return fmt.Errorf("login: empty API key")
+				}
+				if !strings.HasPrefix(apiKey, "sk-ant-") {
+					fmt.Println(ui.Warn("Key doesn't start with sk-ant- — are you sure this is correct?"))
+				}
+				path := auth.DefaultClaudeTokenPath()
+				ct := &auth.ClaudeToken{APIKey: apiKey}
+				if err := auth.SaveClaude(path, ct); err != nil {
+					return fmt.Errorf("login: save key: %w", err)
+				}
+				fmt.Println(ui.OK("API key saved"))
+				fmt.Println(ui.Dim("Stored at: ") + path)
+
 			default:
-				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini)", provider)
+				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini, anthropic)", provider)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini, anthropic)")
 	return cmd
 }
 
@@ -1015,8 +1054,10 @@ func logoutCmd() *cobra.Command {
 				path = auth.DefaultTokenPath()
 			case "gemini":
 				path = auth.DefaultGeminiTokenPath()
+			case "anthropic":
+				path = auth.DefaultClaudeTokenPath()
 			default:
-				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini)", provider)
+				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini, anthropic)", provider)
 			}
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
@@ -1029,7 +1070,7 @@ func logoutCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "provider (codex, gemini, anthropic)")
 	return cmd
 }
 
@@ -1117,6 +1158,25 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable at %s", name, baseURL)))
 					} else {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode)))
+						ok = false
+					}
+				case "anthropic":
+					authEnv := pc.Auth.Env
+					if authEnv == "" {
+						authEnv = "ANTHROPIC_API_KEY"
+					}
+					// Check stored key first, then env var
+					tokenPath := auth.DefaultClaudeTokenPath()
+					if ct, err := auth.LoadClaude(tokenPath); err == nil && ct.Valid() {
+						hint := ct.APIKey
+						if len(hint) > 12 {
+							hint = hint[:8] + "..." + hint[len(hint)-4:]
+						}
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: stored key at %s (%s)", name, tokenPath, hint)))
+					} else if key := os.Getenv(authEnv); key != "" {
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
+					} else {
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv)))
 						ok = false
 					}
 				default:
@@ -1221,6 +1281,12 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 		return providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel)
 	case "gemini":
 		return providers.NewGeminiProvider("", pc.DefaultModel)
+	case "anthropic":
+		authEnv := pc.Auth.Env
+		if authEnv == "" {
+			authEnv = "ANTHROPIC_API_KEY"
+		}
+		return providers.NewAnthropicProvider(authEnv, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
@@ -1643,6 +1709,43 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	return p
 }
 
+func buildGenParams(cfg *config.Config, temperature, topP float64, topK, maxTokens, seed int, cmd *cobra.Command) providers.GenParams {
+	gp := providers.GenParams{}
+	// Apply config defaults first
+	if cfg.Defaults.Temperature != nil {
+		gp.Temperature = cfg.Defaults.Temperature
+	}
+	if cfg.Defaults.TopP != nil {
+		gp.TopP = cfg.Defaults.TopP
+	}
+	if cfg.Defaults.TopK != nil {
+		gp.TopK = cfg.Defaults.TopK
+	}
+	if cfg.Defaults.MaxTokens > 0 {
+		gp.MaxTokens = cfg.Defaults.MaxTokens
+	}
+	if cfg.Defaults.Seed != nil {
+		gp.Seed = cfg.Defaults.Seed
+	}
+	// Override with CLI flags (only if explicitly set)
+	if cmd.Flags().Changed("temperature") {
+		gp.Temperature = &temperature
+	}
+	if cmd.Flags().Changed("top-p") {
+		gp.TopP = &topP
+	}
+	if cmd.Flags().Changed("top-k") {
+		gp.TopK = &topK
+	}
+	if cmd.Flags().Changed("max-tokens") {
+		gp.MaxTokens = maxTokens
+	}
+	if cmd.Flags().Changed("seed") {
+		gp.Seed = &seed
+	}
+	return gp
+}
+
 func buildConfirmFn(mode string) core.ConfirmFn {
 	switch mode {
 	case "always":
@@ -1884,8 +1987,18 @@ func benchCmd(cfgPath *string) *cobra.Command {
 			}
 
 			var allStats []core.RunStats
+			ctx := context.Background()
 
 			for _, variant := range bc.Variants {
+				// Build GenParams from variant
+				genParams := providers.GenParams{
+					Temperature: variant.Temperature,
+					TopP:        variant.TopP,
+					TopK:        variant.TopK,
+					MaxTokens:   variant.MaxTokens,
+					Seed:        variant.Seed,
+				}
+
 				for pi, prompt := range bc.Prompts {
 					fmt.Printf("\n%s  variant=%s  prompt=%d\n",
 						ui.Info("bench"), variant.Name, pi+1)
@@ -1955,6 +2068,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						Budget:    budget,
 						ConfirmFn: confirmFn,
 						OutputFn:  outputFn,
+						GenParams: genParams,
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
@@ -1963,7 +2077,6 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						Model:    variant.Model,
 					})
 
-					ctx := context.Background()
 					reason := "completed"
 					if err := loop.Step(ctx, prompt.Message); err != nil {
 						reason = "error"
@@ -1974,7 +2087,29 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					// Compute stats
 					events, _ := core.ReadAll(tracePath)
 					s := core.ComputeStats(events)
-					s.Score = meta.Score
+
+					// Auto-score if scorer is specified
+					scorerName := prompt.Scorer
+					if scorerName != "" && prompt.Expected != "" {
+						scorer, serr := eval.LookupScorer(scorerName, prov, variant.Model)
+						if serr != nil {
+							fmt.Printf("  scorer error: %v\n", serr)
+						} else {
+							result, serr := scorer.Score(ctx, events, prompt.Expected)
+							if serr != nil {
+								fmt.Printf("  scorer error: %v\n", serr)
+							} else {
+								s.Score = result.Score
+								meta.Score = result.Score
+								meta.ScoreNotes = result.Notes
+								_ = core.WriteMeta(runDir, meta)
+								fmt.Printf("  auto-score: %s (%.1f) %s\n", result.Score, result.Value, result.Notes)
+							}
+						}
+					}
+					if s.Score == "" {
+						s.Score = meta.Score
+					}
 					allStats = append(allStats, s)
 				}
 			}

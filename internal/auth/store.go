@@ -94,6 +94,53 @@ func SaveGemini(path string, t *GeminiToken) error {
 	return nil
 }
 
+// ClaudeToken holds a stored Anthropic API key.
+type ClaudeToken struct {
+	APIKey string `json:"api_key"`
+}
+
+// Valid reports whether the Claude token has a non-empty API key.
+func (t *ClaudeToken) Valid() bool {
+	return t != nil && t.APIKey != ""
+}
+
+// DefaultClaudeTokenPath returns ~/.config/v100/anthropic_auth.json.
+func DefaultClaudeTokenPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "v100", "anthropic_auth.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "v100", "anthropic_auth.json")
+}
+
+// LoadClaude reads a ClaudeToken from path.
+func LoadClaude(path string) (*ClaudeToken, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("auth: read %s: %w", path, err)
+	}
+	var t ClaudeToken
+	if err := json.Unmarshal(data, &t); err != nil {
+		return nil, fmt.Errorf("auth: parse %s: %w", path, err)
+	}
+	return &t, nil
+}
+
+// SaveClaude writes a ClaudeToken to path (creates parent directories as needed).
+func SaveClaude(path string, t *ClaudeToken) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("auth: mkdir: %w", err)
+	}
+	data, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return fmt.Errorf("auth: marshal: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("auth: write %s: %w", path, err)
+	}
+	return nil
+}
+
 // Save writes a Token to path (creates parent directories as needed).
 func Save(path string, t *Token) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
