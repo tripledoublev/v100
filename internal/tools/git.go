@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/core/executor"
 )
 
 // ─────────────────────────────────────────
@@ -194,6 +196,23 @@ func runGit(ctx context.Context, call ToolCallContext, gitArgs ...string) (ToolR
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	if call.Session != nil {
+		res, err := call.Session.Run(ctx, executor.RunRequest{
+			Command: "git",
+			Args:    gitArgs,
+			Dir:     ".",
+		})
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			return ToolResult{OK: false, Output: "exec error: " + err.Error(), DurationMS: dur}, nil
+		}
+		combined := res.Stdout + res.Stderr
+		if res.ExitCode != 0 {
+			return ToolResult{OK: false, Output: combined, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}, nil
+		}
+		return ToolResult{OK: true, Output: res.Stdout, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}, nil
+	}
 
 	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	if call.WorkspaceDir != "" {
