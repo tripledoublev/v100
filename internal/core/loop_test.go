@@ -278,3 +278,32 @@ func TestLoopGenParamsThreaded(t *testing.T) {
 		t.Error("expected seed 42 in request")
 	}
 }
+
+func TestEmitRunEndIdempotency(t *testing.T) {
+	prov := &mockProvider{}
+	loop, trace := newTestLoop(t, prov, nil)
+	defer trace.Close()
+
+	if err := loop.EmitRunEnd("reason1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := loop.EmitRunEnd("reason2"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, _ := core.ReadAll(trace.Path())
+	endCount := 0
+	for _, ev := range events {
+		if ev.Type == core.EventRunEnd {
+			endCount++
+			var p core.RunEndPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p.Reason != "reason1" {
+				t.Errorf("expected reason1, got %s", p.Reason)
+			}
+		}
+	}
+	if endCount != 1 {
+		t.Errorf("expected exactly 1 run.end event, got %d", endCount)
+	}
+}
