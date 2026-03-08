@@ -142,7 +142,10 @@ func (p *CodexProvider) Complete(ctx context.Context, req CompleteRequest) (Comp
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(httpResp.Body)
+		raw, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			return CompleteResponse{}, fmt.Errorf("read error body: %w", err)
+		}
 		baseErr := fmt.Errorf("codex: HTTP %d: %s", httpResp.StatusCode, raw)
 		if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
 			return CompleteResponse{}, &RetryableError{

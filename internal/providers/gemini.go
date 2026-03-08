@@ -129,7 +129,10 @@ func (p *GeminiProvider) loadCodeAssist(ctx context.Context, access string) (pro
 		return "", "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("read body: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("loadCodeAssist HTTP %d: %s", resp.StatusCode, raw)
@@ -326,8 +329,11 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		return resp, err
 	}
 
-	raw, _ := io.ReadAll(httpResp.Body)
+	raw, err := io.ReadAll(httpResp.Body)
 	httpResp.Body.Close()
+	if err != nil {
+		return CompleteResponse{}, fmt.Errorf("read body: %w", err)
+	}
 
 	baseErr := fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
 	if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {

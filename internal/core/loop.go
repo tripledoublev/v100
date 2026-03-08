@@ -355,11 +355,16 @@ func (l *Loop) buildMessages() []providers.Message {
 
 	// 2. Dynamic persistent memory — re-read on every call so in-run writes are visible
 	if l.Policy != nil && l.Policy.MemoryPath != "" {
-		if mem, err := os.ReadFile(l.Policy.MemoryPath); err == nil && len(mem) > 0 {
-			msgs = append(msgs, providers.Message{
-				Role:    "system",
-				Content: "## Persistent Memory\n\n" + string(mem),
-			})
+		if mem, err := os.ReadFile(l.Policy.MemoryPath); err == nil {
+			if len(mem) > 0 {
+				msgs = append(msgs, providers.Message{
+					Role:    "system",
+					Content: "## Persistent Memory\n\n" + string(mem),
+				})
+			}
+		} else if !os.IsNotExist(err) {
+			// Log error if it's something other than 'file not found'
+			fmt.Printf("loop: warning: could not read memory file %s: %v\n", l.Policy.MemoryPath, err)
 		}
 	}
 

@@ -209,6 +209,41 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					reg := buildToolRegistry(cfg)
 					pol := loadPolicy(cfg, "default")
 
+					// Build provider from variant config
+					pc, ok := cfg.Providers[variant.Provider]
+					if !ok {
+						trace.Close()
+						return fmt.Errorf("provider %q not configured", variant.Provider)
+					}
+					if variant.Model != "" {
+						pc.DefaultModel = variant.Model
+					}
+					prov, err := buildProviderFromConfig(pc)
+					if err != nil {
+						trace.Close()
+						return err
+					}
+
+					// Resolve solver
+					var solver core.Solver
+					solverName := variant.Solver
+					if solverName == "" {
+						solverName = cfg.Defaults.Solver
+					}
+					switch solverName {
+					case "plan_execute":
+						maxReplans := cfg.Defaults.MaxReplans
+						if maxReplans <= 0 {
+							maxReplans = 3
+						}
+						solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
+					case "react", "":
+						solver = &core.ReactSolver{}
+					default:
+						trace.Close()
+						return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
+					}
+
 					budgetSteps := variant.BudgetSteps
 					if budgetSteps == 0 {
 						budgetSteps = cfg.Defaults.BudgetSteps
@@ -225,7 +260,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
-						Run:       run,
+						Run:       coreRun,
 						Provider:  prov,
 						Tools:     reg,
 						Policy:    pol,
@@ -234,7 +269,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						ConfirmFn: confirmFn,
 						OutputFn:  outputFn,
 						GenParams: genParams,
-						Solver:    &core.ReactSolver{},
+						Solver:    solver,
 						Session:   s_session,
 						Mapper:    s_mapper,
 						NetworkTier: loopNetworkTier(cfg),
@@ -313,8 +348,15 @@ func queryCmd() *cobra.Command {
 				if score == "" {
 					score = "-"
 				}
-				fmt.Printf("%-28s  %-10s %-8s %-12s %s\n",
-					meta.RunID, meta.Provider, meta.Model, score, meta.Name)
+				fmt.Printf("%-28s  %-10s %-12s %-8s %-10s %-12s %s\n",
+					meta.RunID,
+					meta.Provider,
+					meta.Model,
+					core.FormatContextSize(meta.ModelMetadata.ContextSize),
+					core.FormatModelPricing(meta.ModelMetadata),
+					score,
+					meta.Name,
+				)
 			}
 			return nil
 		},

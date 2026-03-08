@@ -64,10 +64,13 @@ func (t *gitDiffTool) OutputSchema() json.RawMessage {
 }
 
 func (t *gitDiffTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
 	var a struct {
 		Staged bool `json:"staged"`
 	}
-	_ = json.Unmarshal(args, &a)
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
 	if a.Staged {
 		return runGit(ctx, call, "diff", "--cached")
 	}

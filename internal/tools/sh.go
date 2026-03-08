@@ -96,11 +96,14 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		return failResult(start, "exec error: "+err.Error()), nil
 	}
 
-	out, _ := json.Marshal(map[string]interface{}{
+	out, err := json.Marshal(map[string]interface{}{
 		"stdout":    res.Stdout,
 		"stderr":    res.Stderr,
 		"exit_code": res.ExitCode,
 	})
+	if err != nil {
+		return failResult(start, "marshal result: "+err.Error()), nil
+	}
 	return sanitizeToolResult(call, ToolResult{
 		OK:         res.ExitCode == 0,
 		Output:     string(out),

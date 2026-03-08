@@ -50,7 +50,7 @@ func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string
 			return res, err
 		}
 		if restoreErr := l.RestoreWithContext(ctx, cp); restoreErr != nil {
-			return SolveResult{}, fmt.Errorf("restore checkpoint after execution failure: %w (original: %v)", restoreErr, err)
+			return SolveResult{}, fmt.Errorf("restore checkpoint after execution failure: %w (original failure: %w)", restoreErr, err)
 		}
 		plan, err = s.replan(ctx, l, stepID, userInput, plan, err, replanCount+1)
 		if err != nil {

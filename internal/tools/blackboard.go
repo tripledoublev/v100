@@ -168,7 +168,10 @@ func (t *blackboardSearchTool) Exec(ctx context.Context, call ToolCallContext, a
 	// 3. Search
 	results := s.Search(embResp.Embedding, a.Limit)
 
-	b, _ := json.Marshal(map[string]any{"results": results})
+	b, err := json.Marshal(map[string]any{"results": results})
+	if err != nil {
+		return failResult(start, "marshal results: "+err.Error()), nil
+	}
 	return ToolResult{
 		OK:         true,
 		Output:     string(b),

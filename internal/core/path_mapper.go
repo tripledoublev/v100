@@ -39,14 +39,20 @@ func (m *PathMapper) ToSandbox(path string) string {
 // ToVirtual takes a host path (source or sandbox) and returns the stable /workspace path.
 func (m *PathMapper) ToVirtual(path string) string {
 	if m.SandboxRoot != "" && strings.HasPrefix(path, m.SandboxRoot) {
-		rel, _ := filepath.Rel(m.SandboxRoot, path)
+		rel, err := filepath.Rel(m.SandboxRoot, path)
+		if err != nil {
+			return path
+		}
 		if rel == "." {
 			return m.VirtualRoot
 		}
 		return filepath.Join(m.VirtualRoot, rel)
 	}
 	if m.HostRoot != "" && strings.HasPrefix(path, m.HostRoot) {
-		rel, _ := filepath.Rel(m.HostRoot, path)
+		rel, err := filepath.Rel(m.HostRoot, path)
+		if err != nil {
+			return path
+		}
 		if rel == "." {
 			return m.VirtualRoot
 		}

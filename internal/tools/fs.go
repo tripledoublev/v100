@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -240,20 +239,6 @@ func (t *fsMkdirTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	}, nil
 }
 
-// ─────────────────────────────────────────
-// helpers
-// ─────────────────────────────────────────
-
-func resolvePath(workspaceDir, path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-	if workspaceDir != "" {
-		return filepath.Clean(filepath.Join(workspaceDir, path))
-	}
-	return filepath.Clean(path)
-}
-
 func failResult(start time.Time, msg string) ToolResult {
 	return ToolResult{
 		OK:         false,
@@ -261,24 +246,3 @@ func failResult(start time.Time, msg string) ToolResult {
 		DurationMS: time.Since(start).Milliseconds(),
 	}
 }
-
-// safeInWorkspace returns true if path is inside any of the allowed dirs.
-func safeInWorkspace(path string, allowedDirs []string) bool {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	for _, dir := range allowedDirs {
-		adir, err := filepath.Abs(dir)
-		if err != nil {
-			continue
-		}
-		if strings.HasPrefix(abs, adir+string(filepath.Separator)) || abs == adir {
-			return true
-		}
-	}
-	return false
-}
-
-// suppress unused warning — safeInWorkspace is available for callers.
-var _ = safeInWorkspace

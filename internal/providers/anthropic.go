@@ -206,7 +206,10 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(httpResp.Body)
+		raw, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			return CompleteResponse{}, fmt.Errorf("read error body: %w", err)
+		}
 		baseErr := fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
 		var apiErr anthropicError
 		if json.Unmarshal(raw, &apiErr) == nil && apiErr.Error.Message != "" {
@@ -390,8 +393,11 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(httpResp.Body)
+		raw, err := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read error body: %w", err)
+		}
 		baseErr := fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
 		if httpResp.StatusCode == 429 || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
 			return nil, &RetryableError{

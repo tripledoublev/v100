@@ -96,7 +96,7 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, a.MaxBytes))
 	if err != nil {
-		return failResult(start, "read failed: "+err.Error()), nil
+		return failResult(start, "read body: "+err.Error()), nil
 	}
 
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))

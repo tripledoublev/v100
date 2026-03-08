@@ -61,7 +61,10 @@ func (t *fsOutlineTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
 
-	path := resolvePath(call.WorkspaceDir, a.Path)
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return failResult(start, "read file: "+err.Error()), nil

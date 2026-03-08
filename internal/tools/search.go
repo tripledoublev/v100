@@ -69,7 +69,11 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 
 	searchPath := call.WorkspaceDir
 	if a.Path != "" {
-		searchPath = resolvePath(call.WorkspaceDir, a.Path)
+		p, ok := call.Mapper.SecurePath(a.Path)
+		if !ok {
+			return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+		}
+		searchPath = p
 	}
 	if searchPath != "" {
 		rgArgs = append(rgArgs, searchPath)
