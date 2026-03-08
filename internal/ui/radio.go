@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const radioIPCSocket = "/tmp/v100-radio.sock"
 
 func radioTickCmd() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return radioTickMsg{} })
@@ -50,8 +53,20 @@ func (m *TUIModel) toggleRadio() {
 
 func (m *TUIModel) adjustRadioVolume(delta int) {
 	m.radioVolume = clampInt(m.radioVolume+delta, 0, 100)
-	// Volume change takes effect on next radio start/toggle.
-	// TODO: Implement IPC (e.g. mpv socket) for dynamic volume control without restart.
+	if !m.radioPlaying || m.radioPlayer != "mpv" {
+		return
+	}
+
+	// Send volume update via IPC socket for mpv
+	go func(vol int) {
+		conn, err := net.Dial("unix", radioIPCSocket)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		cmd := fmt.Sprintf(`{"command": ["set_property", "volume", %d]}`, vol)
+		_, _ = conn.Write([]byte(cmd + "\n"))
+	}(m.radioVolume)
 }
 
 func (m *TUIModel) radioStateLine() string {
@@ -78,7 +93,14 @@ func (m *TUIModel) startRadio() {
 	var args []string
 	switch m.radioPlayer {
 	case "mpv":
-		args = []string{"--no-video", "--no-terminal", "--really-quiet", fmt.Sprintf("--volume=%d", m.radioVolume), m.radioURL}
+		args = []string{
+			"--no-video",
+			"--no-terminal",
+			"--really-quiet",
+			fmt.Sprintf("--volume=%d", m.radioVolume),
+			fmt.Sprintf("--input-ipc-server=%s", radioIPCSocket),
+			m.radioURL,
+		}
 	case "ffplay":
 		args = []string{"-nodisp", "-loglevel", "quiet", "-volume", strconv.Itoa(m.radioVolume), m.radioURL}
 	default:
@@ -106,6 +128,7 @@ func (m *TUIModel) stopRadio() {
 	m.radioCmd = nil
 	m.radioPlaying = false
 	m.radioWave = ""
+	_ = os.Remove(radioIPCSocket)
 }
 
 func detectRadioPlayer() string {
