@@ -143,7 +143,15 @@ func (p *CodexProvider) Complete(ctx context.Context, req CompleteRequest) (Comp
 
 	if httpResp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(httpResp.Body)
-		return CompleteResponse{}, fmt.Errorf("codex: HTTP %d: %s", httpResp.StatusCode, raw)
+		baseErr := fmt.Errorf("codex: HTTP %d: %s", httpResp.StatusCode, raw)
+		if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+			return CompleteResponse{}, &RetryableError{
+				Err:        baseErr,
+				StatusCode: httpResp.StatusCode,
+				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
+			}
+		}
+		return CompleteResponse{}, baseErr
 	}
 
 	return codexParseStream(httpResp.Body)

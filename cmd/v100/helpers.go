@@ -48,28 +48,34 @@ func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
 
 func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
 	pc = normalizedProviderConfig(pc)
+	var raw providers.Provider
+	var err error
 	switch pc.Type {
 	case "codex":
-		return providers.NewCodexProvider("", pc.DefaultModel)
+		raw, err = providers.NewCodexProvider("", pc.DefaultModel)
 	case "openai":
 		authEnv := pc.Auth.Env
 		if authEnv == "" {
 			authEnv = "OPENAI_API_KEY"
 		}
-		return providers.NewOpenAIProvider(authEnv, pc.BaseURL, pc.DefaultModel)
+		raw, err = providers.NewOpenAIProvider(authEnv, pc.BaseURL, pc.DefaultModel)
 	case "ollama":
-		return providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel)
+		raw, err = providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel)
 	case "gemini":
-		return providers.NewGeminiProvider("", pc.DefaultModel)
+		raw, err = providers.NewGeminiProvider("", pc.DefaultModel)
 	case "anthropic":
 		authEnv := pc.Auth.Env
 		if authEnv == "" {
 			authEnv = "ANTHROPIC_API_KEY"
 		}
-		return providers.NewAnthropicProvider(authEnv, pc.DefaultModel)
+		raw, err = providers.NewAnthropicProvider(authEnv, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return providers.WithRetry(raw, providers.DefaultRetryConfig()), nil
 }
 
 func buildToolRegistry(cfg *config.Config) *tools.Registry {

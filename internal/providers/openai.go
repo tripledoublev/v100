@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -117,7 +118,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 
 	resp, err := p.client.CreateChatCompletion(ctx, creq)
 	if err != nil {
-		return CompleteResponse{}, fmt.Errorf("openai: complete: %w", err)
+		return CompleteResponse{}, wrapOpenAIError("openai: complete", err)
 	}
 
 	if len(resp.Choices) == 0 {
@@ -165,7 +166,7 @@ func (p *OpenAIProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 
 	resp, err := p.client.CreateEmbeddings(ctx, ereq)
 	if err != nil {
-		return EmbedResponse{}, fmt.Errorf("openai: embed: %w", err)
+		return EmbedResponse{}, wrapOpenAIError("openai: embed", err)
 	}
 
 	if len(resp.Data) == 0 {
@@ -241,7 +242,7 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 
 	stream, err := p.client.CreateChatCompletionStream(ctx, oReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: stream: %w", err)
+		return nil, wrapOpenAIError("openai: stream", err)
 	}
 
 	ch := make(chan StreamEvent, 100)
@@ -304,6 +305,22 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	}()
 
 	return ch, nil
+}
+
+func wrapOpenAIError(prefix string, err error) error {
+	baseErr := fmt.Errorf("%s: %w", prefix, err)
+
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) && isRetryableStatus(apiErr.HTTPStatusCode) {
+		return &RetryableError{Err: baseErr, StatusCode: apiErr.HTTPStatusCode}
+	}
+
+	var reqErr *openai.RequestError
+	if errors.As(err, &reqErr) && isRetryableStatus(reqErr.HTTPStatusCode) {
+		return &RetryableError{Err: baseErr, StatusCode: reqErr.HTTPStatusCode}
+	}
+
+	return baseErr
 }
 
 // estimateCost returns a rough USD cost estimate.

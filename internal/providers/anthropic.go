@@ -83,16 +83,16 @@ func (p *AnthropicProvider) Capabilities() Capabilities {
 // Anthropic request/response types
 
 type anthropicRequest struct {
-	Model         string               `json:"model"`
-	MaxTokens     int                  `json:"max_tokens"`
-	System        string               `json:"system,omitempty"`
-	Messages      []anthropicMessage   `json:"messages"`
-	Tools         []anthropicToolDef   `json:"tools,omitempty"`
-	Temperature   *float64             `json:"temperature,omitempty"`
-	TopP          *float64             `json:"top_p,omitempty"`
-	TopK          *int                 `json:"top_k,omitempty"`
-	StopSequences []string             `json:"stop_sequences,omitempty"`
-	Stream        bool                 `json:"stream,omitempty"`
+	Model         string             `json:"model"`
+	MaxTokens     int                `json:"max_tokens"`
+	System        string             `json:"system,omitempty"`
+	Messages      []anthropicMessage `json:"messages"`
+	Tools         []anthropicToolDef `json:"tools,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	TopP          *float64           `json:"top_p,omitempty"`
+	TopK          *int               `json:"top_k,omitempty"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -207,11 +207,19 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (
 
 	if httpResp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(httpResp.Body)
+		baseErr := fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
 		var apiErr anthropicError
-		if err := json.Unmarshal(raw, &apiErr); err == nil && apiErr.Error.Message != "" {
-			return CompleteResponse{}, fmt.Errorf("anthropic: %s: %s", apiErr.Error.Type, apiErr.Error.Message)
+		if json.Unmarshal(raw, &apiErr) == nil && apiErr.Error.Message != "" {
+			baseErr = fmt.Errorf("anthropic: %s: %s", apiErr.Error.Type, apiErr.Error.Message)
 		}
-		return CompleteResponse{}, fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
+		if httpResp.StatusCode == 429 || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+			return CompleteResponse{}, &RetryableError{
+				Err:        baseErr,
+				StatusCode: httpResp.StatusCode,
+				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
+			}
+		}
+		return CompleteResponse{}, baseErr
 	}
 
 	var resp anthropicResponse
@@ -362,7 +370,15 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 	if httpResp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
-		return nil, fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
+		baseErr := fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
+		if httpResp.StatusCode == 429 || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+			return nil, &RetryableError{
+				Err:        baseErr,
+				StatusCode: httpResp.StatusCode,
+				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
+			}
+		}
+		return nil, baseErr
 	}
 
 	ch := make(chan StreamEvent, 100)
@@ -381,8 +397,8 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 			data := strings.TrimPrefix(line, "data: ")
 
 			var event struct {
-				Type         string                `json:"type"`
-				Message      *anthropicResponse    `json:"message"`
+				Type         string                 `json:"type"`
+				Message      *anthropicResponse     `json:"message"`
 				ContentBlock *anthropicContentBlock `json:"content_block"`
 				Delta        *struct {
 					Type string `json:"type"`

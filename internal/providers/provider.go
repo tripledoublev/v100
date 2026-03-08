@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 )
 
 // Capabilities describes what a provider supports.
@@ -128,3 +130,16 @@ type Provider interface {
 type Streamer interface {
 	StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error)
 }
+
+// RetryableError signals that a provider call failed with a retryable status.
+type RetryableError struct {
+	Err        error
+	StatusCode int
+	RetryAfter time.Duration // 0 = use default backoff
+}
+
+func (e *RetryableError) Error() string {
+	return fmt.Sprintf("retryable HTTP %d: %v", e.StatusCode, e.Err)
+}
+
+func (e *RetryableError) Unwrap() error { return e.Err }

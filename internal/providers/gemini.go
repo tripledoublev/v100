@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	geminiBaseURL     = "https://cloudcode-pa.googleapis.com"
+	geminiBaseURL      = "https://cloudcode-pa.googleapis.com"
 	geminiDefaultModel = "gemini-2.5-flash" // also: gemini-2.5-pro, gemini-3-pro-preview, gemini-3-flash-preview
 )
 
@@ -305,52 +305,44 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		return CompleteResponse{}, err
 	}
 
-	// Retry loop for 429/5xx (up to 3 attempts)
-	for attempt := 0; attempt < 3; attempt++ {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			geminiBaseURL+"/v1internal:streamGenerateContent?alt=sse",
-			bytes.NewReader(body))
-		if err != nil {
-			return CompleteResponse{}, err
-		}
-		httpReq.Header.Set("Authorization", "Bearer "+access)
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		geminiBaseURL+"/v1internal:streamGenerateContent?alt=sse",
+		bytes.NewReader(body))
+	if err != nil {
+		return CompleteResponse{}, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+access)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
 
-		httpResp, err := p.client.Do(httpReq)
-		if err != nil {
-			return CompleteResponse{}, fmt.Errorf("gemini: request: %w", err)
-		}
-
-		if httpResp.StatusCode == http.StatusOK {
-			resp, err := geminiParseSSE(httpResp.Body)
-			httpResp.Body.Close()
-			return resp, err
-		}
-
-		raw, _ := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
-
-		retryable := httpResp.StatusCode == http.StatusTooManyRequests ||
-			(httpResp.StatusCode >= 500 && httpResp.StatusCode < 600)
-		if retryable && attempt < 2 {
-			wait := geminiParseRetryWait(raw)
-			if httpResp.StatusCode >= 500 {
-				wait = time.Duration(attempt+1) * time.Second
-			}
-			fmt.Printf("gemini: HTTP %d, retrying in %v…\n", httpResp.StatusCode, wait)
-			select {
-			case <-time.After(wait):
-				continue
-			case <-ctx.Done():
-				return CompleteResponse{}, ctx.Err()
-			}
-		}
-
-		return CompleteResponse{}, fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return CompleteResponse{}, fmt.Errorf("gemini: request: %w", err)
 	}
 
-	return CompleteResponse{}, fmt.Errorf("gemini: exhausted retries")
+	if httpResp.StatusCode == http.StatusOK {
+		resp, err := geminiParseSSE(httpResp.Body)
+		httpResp.Body.Close()
+		return resp, err
+	}
+
+	raw, _ := io.ReadAll(httpResp.Body)
+	httpResp.Body.Close()
+
+	baseErr := fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+	if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+		retryAfter := retryAfterFromHeader(httpResp.Header.Get("Retry-After"))
+		if retryAfter == 0 && httpResp.StatusCode == http.StatusTooManyRequests {
+			retryAfter = geminiParseRetryWait(raw)
+		}
+		return CompleteResponse{}, &RetryableError{
+			Err:        baseErr,
+			StatusCode: httpResp.StatusCode,
+			RetryAfter: retryAfter,
+		}
+	}
+
+	return CompleteResponse{}, baseErr
 }
 
 // ─────────────────────────────────────────

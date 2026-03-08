@@ -97,6 +97,19 @@ func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	if err != nil {
 		return nil, fmt.Errorf("ollama: stream request: %w", err)
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		baseErr := fmt.Errorf("ollama: HTTP %d: %s", resp.StatusCode, string(raw))
+		if isRetryableStatus(resp.StatusCode) {
+			return nil, &RetryableError{
+				Err:        baseErr,
+				StatusCode: resp.StatusCode,
+				RetryAfter: retryAfterFromHeader(resp.Header.Get("Retry-After")),
+			}
+		}
+		return nil, baseErr
+	}
 
 	ch := make(chan StreamEvent, 100)
 	go func() {
@@ -107,9 +120,9 @@ func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest
 		var toolCallIdx int
 		for {
 			var chunk struct {
-				Done    bool                `json:"done"`
-				Message ollamaChatMessageIn `json:"message"`
-				ollamaChatResponse          // usage fields
+				Done               bool                `json:"done"`
+				Message            ollamaChatMessageIn `json:"message"`
+				ollamaChatResponse                     // usage fields
 			}
 			if err := dec.Decode(&chunk); err != nil {
 				if err == io.EOF {
@@ -301,7 +314,15 @@ func (p *OllamaProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return CompleteResponse{}, fmt.Errorf("ollama: HTTP %d: %s", resp.StatusCode, string(raw))
+		baseErr := fmt.Errorf("ollama: HTTP %d: %s", resp.StatusCode, string(raw))
+		if isRetryableStatus(resp.StatusCode) {
+			return CompleteResponse{}, &RetryableError{
+				Err:        baseErr,
+				StatusCode: resp.StatusCode,
+				RetryAfter: retryAfterFromHeader(resp.Header.Get("Retry-After")),
+			}
+		}
+		return CompleteResponse{}, baseErr
 	}
 
 	var parsed ollamaChatResponse
@@ -358,6 +379,19 @@ func (p *OllamaProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 		return EmbedResponse{}, fmt.Errorf("ollama: embed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(resp.Body)
+		baseErr := fmt.Errorf("ollama: embed HTTP %d: %s", resp.StatusCode, string(raw))
+		if isRetryableStatus(resp.StatusCode) {
+			return EmbedResponse{}, &RetryableError{
+				Err:        baseErr,
+				StatusCode: resp.StatusCode,
+				RetryAfter: retryAfterFromHeader(resp.Header.Get("Retry-After")),
+			}
+		}
+		return EmbedResponse{}, baseErr
+	}
 
 	var result struct {
 		Embedding []float32 `json:"embedding"`
