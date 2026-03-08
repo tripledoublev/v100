@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -147,11 +149,11 @@ func (t *semBlameTool) Exec(ctx context.Context, call ToolCallContext, args json
 func runSem(ctx context.Context, call ToolCallContext, semArgs ...string) (ToolResult, error) {
 	start := time.Now()
 
-	// Check if sem is installed first
-	if _, err := exec.LookPath("sem"); err != nil {
+	// Check if the expected semantic-diff `sem` tool is installed first.
+	if err := ensureSemanticSem(ctx); err != nil {
 		return ToolResult{
 			OK:     false,
-			Output: "Tool 'sem' (Semantic Version Control) is not installed on this system.\nTo use semantic diffing, please install it from: https://github.com/Ataraxy-Labs/sem\n\nInstallation:\n  git clone https://github.com/Ataraxy-Labs/sem.git\n  cd sem/crates && cargo build --release\n  cp target/release/sem /usr/local/bin/sem",
+			Output: err.Error(),
 		}, nil
 	}
 
@@ -182,3 +184,25 @@ func runSem(ctx context.Context, call ToolCallContext, semArgs ...string) (ToolR
 
 	return ToolResult{OK: true, Output: output, Stdout: output, Stderr: stderr.String(), DurationMS: dur}, nil
 }
+
+func ensureSemanticSem(ctx context.Context) error {
+	if _, err := exec.LookPath("sem"); err != nil {
+		return fmt.Errorf(semanticSemHelp)
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(checkCtx, "sem", "--help")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(semanticSemHelp)
+	}
+	help := string(out)
+	if strings.Contains(help, "Semantic version control") && strings.Contains(help, "Show semantic diff of changes") {
+		return nil
+	}
+	return fmt.Errorf("%s\n\nFound a different 'sem' binary on PATH. Please install https://github.com/Ataraxy-Labs/sem and ensure it is first on PATH.", semanticSemHelp)
+}
+
+const semanticSemHelp = "Tool 'sem' (Semantic Version Control) is not installed on this system.\nTo use semantic diffing, please install it from: https://github.com/Ataraxy-Labs/sem\n\nInstallation:\n  git clone https://github.com/Ataraxy-Labs/sem.git\n  cd sem/crates && cargo build --release\n  cp target/release/sem /usr/local/bin/sem"

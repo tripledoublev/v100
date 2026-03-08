@@ -72,6 +72,9 @@ func statsCmd() *cobra.Command {
 			// Enrich with meta score if available
 			if meta, err := core.ReadMeta(runDir); err == nil {
 				stats.Score = meta.Score
+				if stats.ModelMetadata == (providers.ModelMetadata{}) {
+					stats.ModelMetadata = meta.ModelMetadata
+				}
 			}
 			fmt.Print(core.FormatStats(stats))
 			return nil
@@ -120,6 +123,9 @@ func compareCmd() *cobra.Command {
 				s := core.ComputeStats(events)
 				if meta, err := core.ReadMeta(runDir); err == nil {
 					s.Score = meta.Score
+					if s.ModelMetadata == (providers.ModelMetadata{}) {
+						s.ModelMetadata = meta.ModelMetadata
+					}
 				}
 				allStats = append(allStats, s)
 			}
@@ -272,6 +278,8 @@ func benchCmd(cfgPath *string) *cobra.Command {
 
 					metadata, _ := prov.Metadata(ctx, variant.Model)
 					loop.ModelMetadata = metadata
+					meta.ModelMetadata = metadata
+					_ = core.WriteMeta(runDir, meta)
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
 						Policy:        pol.Name,
@@ -320,6 +328,11 @@ func queryCmd() *cobra.Command {
 				if err != nil {
 					continue
 				}
+				if meta.ModelMetadata == (providers.ModelMetadata{}) {
+					if events, err := core.ReadAll(filepath.Join(dir, "trace.jsonl")); err == nil {
+						meta.ModelMetadata = core.ComputeStats(events).ModelMetadata
+					}
+				}
 
 				// Filter by score
 				if scoreFilter != "" && meta.Score != scoreFilter {
@@ -342,8 +355,15 @@ func queryCmd() *cobra.Command {
 				if score == "" {
 					score = "-"
 				}
-				fmt.Printf("%-28s  %-10s %-8s %-12s %s\n",
-					meta.RunID, meta.Provider, meta.Model, score, meta.Name)
+				fmt.Printf("%-28s  %-10s %-18s %-8s %-14s %-8s %s\n",
+					meta.RunID,
+					meta.Provider,
+					meta.Model,
+					core.FormatContextSize(meta.ModelMetadata.ContextSize),
+					core.FormatModelPricing(meta.ModelMetadata),
+					score,
+					meta.Name,
+				)
 			}
 			return nil
 		},
@@ -432,12 +452,12 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 				}
 
 				// Resolve model
-					model := variant.Model
-					if model == "" {
-						if pc, ok := cfg.Providers[provName]; ok {
-							model = normalizedProviderConfig(pc).DefaultModel
-						}
+				model := variant.Model
+				if model == "" {
+					if pc, ok := cfg.Providers[provName]; ok {
+						model = normalizedProviderConfig(pc).DefaultModel
 					}
+				}
 
 				// Resolve solver
 				var solver core.Solver
@@ -541,6 +561,8 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 
 					metadata, _ := prov.Metadata(context.Background(), model)
 					loop.ModelMetadata = metadata
+					meta.ModelMetadata = metadata
+					_ = core.WriteMeta(runDir, meta)
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
 						Policy:        "default",

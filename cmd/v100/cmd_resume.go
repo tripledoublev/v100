@@ -124,6 +124,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Snapshots:     buildSnapshotManager(cfg, sandboxWorkspace),
 			}
 			loop.OutputFn = outputFn
+			persistModelMetadata(runDir, metadata)
 
 			fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", runID, len(events))))
 			fmt.Println(ui.Info(ui.Dim("workspace: ") + sandboxWorkspace))

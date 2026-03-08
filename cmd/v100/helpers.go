@@ -78,6 +78,18 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 	return providers.WithRetry(raw, providers.DefaultRetryConfig()), nil
 }
 
+func persistModelMetadata(runDir string, metadata providers.ModelMetadata) {
+	if metadata == (providers.ModelMetadata{}) {
+		return
+	}
+	meta, err := core.ReadMeta(runDir)
+	if err != nil {
+		return
+	}
+	meta.ModelMetadata = metadata
+	_ = core.WriteMeta(runDir, meta)
+}
+
 func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg := tools.NewRegistry(cfg.Tools.Enabled)
 	reg.Register(tools.FSRead())
@@ -676,7 +688,6 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 			model = p.Model
 			workspace = p.Workspace
 			metadata = p.ModelMetadata
-
 
 		case core.EventUserMsg:
 			var p core.UserMsgPayload

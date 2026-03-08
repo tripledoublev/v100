@@ -18,6 +18,8 @@ Initial release of v100, an experimental agent harness for studying long-horizon
 - **Gemini** — Google subscription via OAuth (`v100 login --provider gemini`)
 - **Ollama** — fully local models, no API key required
 - **Anthropic** — Claude API access (`ANTHROPIC_API_KEY` or `v100 login --provider anthropic`)
+- **Retry/backoff middleware** — unified retry handling across providers for 429 and 5xx responses
+- **Model metadata discovery** — providers expose context windows, pricing hints, and free/paid status to the harness
 
 All providers support tool calling and generation parameters (temperature, top_p, top_k, max_tokens, seed).
 
@@ -49,6 +51,7 @@ All providers support tool calling and generation parameters (temperature, top_p
 
 - **Run scoring** — `v100 score <run_id> pass|fail|partial`
 - **Run statistics** — `v100 stats`, `v100 metrics`, `v100 compare`
+- **Metadata-aware reporting** — `meta.json`, `stats`, `compare`, and `query` surface model context/pricing metadata
 - **Batch benchmarks** — `v100 bench <config.toml>` with provider/model/parameter variants
 - **Experiments** — `v100 experiment create|run|results` for multi-variant statistical testing
 - **Behavioral analysis** — `v100 analyze` with automatic failure classification
@@ -72,4 +75,4 @@ All providers support tool calling and generation parameters (temperature, top_p
 - **`v100 doctor`** — health check for providers, tools, and configuration
 - **`v100 dev`** — supervisor that rebuilds on `.v100-reload`
 - **`v100 config init`** — generates default config and OAuth credential templates
-- **CI** — GitHub Actions with `go test -race`, `go vet`, and `golangci-lint`
+- **CI** — GitHub Actions with `go test -race`, `go vet`, pinned `golangci-lint`, and hardened semantic tool detection

@@ -12,9 +12,8 @@ import (
 )
 
 func TestSemTools(t *testing.T) {
-	// Check if sem is installed in the test environment
-	if _, err := exec.LookPath("sem"); err != nil {
-		t.Skip("sem not found in PATH, skipping integration tests")
+	if !hasSemanticSem(t) {
+		t.Skip("semantic sem tool not found in PATH, skipping integration tests")
 	}
 
 	ctx := context.Background()
@@ -132,4 +131,19 @@ func TestSemGracefulFailure(t *testing.T) {
 	if !strings.Contains(res.Output, "not installed") {
 		t.Errorf("expected 'not installed' error message, got: %s", res.Output)
 	}
+}
+
+func hasSemanticSem(t *testing.T) bool {
+	t.Helper()
+
+	if _, err := exec.LookPath("sem"); err != nil {
+		return false
+	}
+	out, err := exec.Command("sem", "--help").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	help := string(out)
+	return strings.Contains(help, "Semantic version control") &&
+		strings.Contains(help, "Show semantic diff of changes")
 }

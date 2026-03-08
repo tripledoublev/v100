@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/tripledoublev/v100/internal/providers"
 )
 
 // RunStats holds computed statistics from a trace.
@@ -12,6 +14,7 @@ type RunStats struct {
 	RunID          string
 	Provider       string
 	Model          string
+	ModelMetadata  providers.ModelMetadata
 	TotalSteps     int
 	TokensIn       int
 	TokensOut      int
@@ -49,6 +52,7 @@ func ComputeStats(events []Event) RunStats {
 			s.RunID = ev.RunID
 			s.Provider = p.Provider
 			s.Model = p.Model
+			s.ModelMetadata = p.ModelMetadata
 
 		case EventModelResp:
 			var p ModelRespPayload
@@ -113,6 +117,12 @@ func FormatStats(s RunStats) string {
 	b.WriteString(fmt.Sprintf("Run:          %s\n", s.RunID))
 	b.WriteString(fmt.Sprintf("Provider:     %s\n", s.Provider))
 	b.WriteString(fmt.Sprintf("Model:        %s\n", s.Model))
+	if s.ModelMetadata.ContextSize > 0 {
+		b.WriteString(fmt.Sprintf("Context:      %s\n", FormatContextSize(s.ModelMetadata.ContextSize)))
+	}
+	if pricing := FormatModelPricing(s.ModelMetadata); pricing != "-" {
+		b.WriteString(fmt.Sprintf("Pricing:      %s\n", pricing))
+	}
 	b.WriteString(fmt.Sprintf("Steps:        %d\n", s.TotalSteps))
 	b.WriteString(fmt.Sprintf("Model calls:  %d\n", s.ModelCalls))
 	b.WriteString(fmt.Sprintf("Tokens in:    %d\n", s.TokensIn))
@@ -184,6 +194,10 @@ func FormatCompare(stats []RunStats) string {
 		return r
 	}
 
+	row("Provider", vals(func(s RunStats) string { return s.Provider }))
+	row("Model", vals(func(s RunStats) string { return s.Model }))
+	row("Context", vals(func(s RunStats) string { return FormatContextSize(s.ModelMetadata.ContextSize) }))
+	row("Pricing", vals(func(s RunStats) string { return FormatModelPricing(s.ModelMetadata) }))
 	row("Steps", vals(func(s RunStats) string { return fmt.Sprintf("%d", s.TotalSteps) }))
 	row("Tokens", vals(func(s RunStats) string { return fmt.Sprintf("%d/%d", s.TokensIn, s.TokensOut) }))
 	row("Cost", vals(func(s RunStats) string { return fmt.Sprintf("$%.4f", s.TotalCostUSD) }))
@@ -195,4 +209,34 @@ func FormatCompare(stats []RunStats) string {
 	row("End", vals(func(s RunStats) string { return s.EndReason }))
 
 	return b.String()
+}
+
+func FormatContextSize(size int) string {
+	if size <= 0 {
+		return "-"
+	}
+	switch {
+	case size >= 1_000_000:
+		return trimFloatSuffix(fmt.Sprintf("%.1fM", float64(size)/1_000_000))
+	case size >= 1_000:
+		return trimFloatSuffix(fmt.Sprintf("%.1fk", float64(size)/1_000))
+	default:
+		return fmt.Sprintf("%d", size)
+	}
+}
+
+func FormatModelPricing(m providers.ModelMetadata) string {
+	if m.IsFree {
+		return "free"
+	}
+	if m.CostPer1MIn <= 0 && m.CostPer1MOut <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("$%.2f/$%.2f", m.CostPer1MIn, m.CostPer1MOut)
+}
+
+func trimFloatSuffix(v string) string {
+	v = strings.Replace(v, ".0M", "M", 1)
+	v = strings.Replace(v, ".0k", "k", 1)
+	return v
 }

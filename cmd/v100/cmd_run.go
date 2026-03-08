@@ -115,7 +115,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 
 			// Write meta.json
 			tags := parseTags(tagFlags)
-			
+
 			// Build provider first to get name and capabilities
 			prov, err := buildProvider(cfg, cfg.Defaults.Provider)
 			if err != nil {
@@ -291,6 +291,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	ctx := context.Background()
 	metadata, _ := prov.Metadata(ctx, model)
 	loop.ModelMetadata = metadata
+	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:        pol.Name,
@@ -441,6 +442,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 	metadata, _ := prov.Metadata(ctx, model)
 	loop.ModelMetadata = metadata
+	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:        pol.Name,
