@@ -65,6 +65,7 @@ func rootCmd() *cobra.Command {
 		compareCmd(),
 		benchCmd(&cfgPath),
 		experimentCmd(&cfgPath),
+		analyzeCmd(),
 		queryCmd(),
 	)
 	return root
@@ -2363,4 +2364,40 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 
 	cmd.AddCommand(create, results)
 	return cmd
+}
+
+// ─────────────────────────────────────────
+// analyze command
+// ─────────────────────────────────────────
+
+func analyzeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "analyze <run_id>",
+		Short: "Perform automated behavioral analysis on a run trace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir := filepath.Join("runs", runID)
+			tracePath := filepath.Join(runDir, "trace.jsonl")
+
+			events, err := core.ReadAll(tracePath)
+			if err != nil {
+				return err
+			}
+
+			report := eval.AnalyzeTrajectory(events)
+
+			fmt.Printf("Analysis for Run: %s\n", ui.Info(runID))
+			fmt.Printf("Efficiency Score: %.2f\n", report.Efficiency)
+			fmt.Printf("Tool Errors:      %d\n", report.ToolErrors)
+			fmt.Println("\nBehavioral Labels:")
+			if len(report.Labels) == 0 {
+				fmt.Println("  (Normal behavior detected)")
+			}
+			for _, l := range report.Labels {
+				fmt.Printf("  [%s] %s (conf: %.2f)\n", ui.Warn(l.Name), l.Evidence, l.Confidence)
+			}
+			return nil
+		},
+	}
 }
