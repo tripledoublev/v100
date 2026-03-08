@@ -14,6 +14,9 @@ func (m *MockMapper) ToSandbox(path string) string {
 func (m *MockMapper) ToVirtual(path string) string {
 	return path
 }
+func (m *MockMapper) SanitizeText(text string) string {
+	return text
+}
 func (m *MockMapper) SecurePath(path string) (string, bool) {
 	return filepath.Join(m.Dir, path), true
 }

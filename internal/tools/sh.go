@@ -24,8 +24,10 @@ type shTool struct{}
 
 func Sh() Tool { return &shTool{} }
 
-func (t *shTool) Name() string        { return "sh" }
-func (t *shTool) Description() string { return "Execute a shell command with a timeout. Use carefully." }
+func (t *shTool) Name() string { return "sh" }
+func (t *shTool) Description() string {
+	return "Execute a shell command with a timeout. Use carefully."
+}
 func (t *shTool) DangerLevel() DangerLevel { return Dangerous }
 
 func (t *shTool) InputSchema() json.RawMessage {
@@ -94,11 +96,11 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		"stderr":    res.Stderr,
 		"exit_code": res.ExitCode,
 	})
-	return ToolResult{
+	return sanitizeToolResult(call, ToolResult{
 		OK:         res.ExitCode == 0,
 		Output:     string(out),
 		Stdout:     res.Stdout,
 		Stderr:     res.Stderr,
 		DurationMS: time.Since(start).Milliseconds(),
-	}, nil
+	}), nil
 }

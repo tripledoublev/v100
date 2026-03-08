@@ -32,6 +32,7 @@ type ToolCallContext struct {
 type PathTranslator interface {
 	ToSandbox(path string) string
 	ToVirtual(path string) string
+	SanitizeText(text string) string
 	SecurePath(path string) (string, bool)
 }
 
@@ -52,4 +53,14 @@ type Tool interface {
 	OutputSchema() json.RawMessage
 	DangerLevel() DangerLevel
 	Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error)
+}
+
+func sanitizeToolResult(call ToolCallContext, result ToolResult) ToolResult {
+	if call.Mapper == nil {
+		return result
+	}
+	result.Output = call.Mapper.SanitizeText(result.Output)
+	result.Stdout = call.Mapper.SanitizeText(result.Stdout)
+	result.Stderr = call.Mapper.SanitizeText(result.Stderr)
+	return result
 }
