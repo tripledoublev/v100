@@ -90,6 +90,43 @@ func persistModelMetadata(runDir string, metadata providers.ModelMetadata) {
 	_ = core.WriteMeta(runDir, meta)
 }
 
+func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
+	if solverName == "" {
+		solverName = cfg.Defaults.Solver
+	}
+
+	switch solverName {
+	case "plan_execute":
+		maxReplans := cfg.Defaults.MaxReplans
+		if maxReplans <= 0 {
+			maxReplans = 3
+		}
+		return &core.PlanExecuteSolver{MaxReplans: maxReplans}, nil
+	case "router":
+		cheapProvName := cfg.Defaults.CheapProvider
+		if cheapProvName == "" {
+			cheapProvName = "ollama" // default cheap
+		}
+		smartProvName := cfg.Defaults.SmartProvider
+		if smartProvName == "" {
+			smartProvName = cfg.Defaults.Provider
+		}
+		cheap, err := buildProvider(cfg, cheapProvName)
+		if err != nil {
+			return nil, fmt.Errorf("build cheap provider %q: %w", cheapProvName, err)
+		}
+		smart, err := buildProvider(cfg, smartProvName)
+		if err != nil {
+			return nil, fmt.Errorf("build smart provider %q: %w", smartProvName, err)
+		}
+		return &core.RouterSolver{Cheap: cheap, Smart: smart}, nil
+	case "react", "":
+		return &core.ReactSolver{}, nil
+	default:
+		return nil, fmt.Errorf("unknown solver %q", solverName)
+	}
+}
+
 func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg := tools.NewRegistry(cfg.Tools.Enabled)
 	reg.Register(tools.FSRead())
@@ -112,6 +149,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.SemImpact())
 	reg.Register(tools.SemBlame())
 	reg.Register(tools.FSOutline())
+	reg.Register(tools.InspectTool())
 	return reg
 }
 

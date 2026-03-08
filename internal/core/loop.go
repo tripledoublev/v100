@@ -231,6 +231,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		WorkspaceDir: l.Run.Dir,
 		TimeoutMS:    timeout,
 		Provider:     l.Provider,
+		Registry:     l.Tools,
 		Session:      l.Session,
 		Mapper:       l.Mapper,
 		EmitOutputDelta: func(stream, text string) error {

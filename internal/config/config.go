@@ -69,7 +69,9 @@ type AgentConfig struct {
 // DefaultsConfig holds run-level defaults.
 type DefaultsConfig struct {
 	Provider            string   `toml:"provider"`
-	Solver              string   `toml:"solver"` // react | plan_execute
+	SmartProvider       string   `toml:"smart_provider"` // for router solver
+	CheapProvider       string   `toml:"cheap_provider"` // for router solver
+	Solver              string   `toml:"solver"`         // react | plan_execute | router
 	MaxReplans          int      `toml:"max_replans"`
 	ConfirmTools        string   `toml:"confirm_tools"` // always | dangerous | never
 	BudgetSteps         int      `toml:"budget_steps"`
@@ -118,7 +120,7 @@ func DefaultConfig() *Config {
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
-				"sem_diff", "sem_impact", "sem_blame",
+				"sem_diff", "sem_impact", "sem_blame", "inspect_tool",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
 		},
@@ -153,6 +155,8 @@ func DefaultConfig() *Config {
 		},
 		Defaults: DefaultsConfig{
 			Provider:            "codex",
+			SmartProvider:       "gemini",
+			CheapProvider:       "ollama",
 			ConfirmTools:        "dangerous",
 			BudgetSteps:         50,
 			BudgetTokens:        100000,
@@ -247,6 +251,8 @@ max_tool_calls_per_step = 50
 
 [defaults]
 provider = "codex"            # use ChatGPT subscription by default
+smart_provider = "gemini"     # for router solver escalation
+cheap_provider = "ollama"     # for router solver discovery
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
 budget_tokens = 100000
@@ -296,8 +302,15 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "sem_diff")
 	ensureString(&cfg.Tools.Enabled, "sem_impact")
 	ensureString(&cfg.Tools.Enabled, "sem_blame")
+	ensureString(&cfg.Tools.Enabled, "inspect_tool")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
+	}
+	if cfg.Defaults.SmartProvider == "" {
+		cfg.Defaults.SmartProvider = DefaultConfig().Defaults.SmartProvider
+	}
+	if cfg.Defaults.CheapProvider == "" {
+		cfg.Defaults.CheapProvider = DefaultConfig().Defaults.CheapProvider
 	}
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	return &cfg, nil

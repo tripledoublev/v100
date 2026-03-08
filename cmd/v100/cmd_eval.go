@@ -209,39 +209,18 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					reg := buildToolRegistry(cfg)
 					pol := loadPolicy(cfg, "default")
 
-					// Build provider from variant config
-					pc, ok := cfg.Providers[variant.Provider]
-					if !ok {
-						_ = trace.Close()
-						return fmt.Errorf("provider %q not configured", variant.Provider)
-					}
-					if variant.Model != "" {
-						pc.DefaultModel = variant.Model
-					}
-					prov, err := buildProviderFromConfig(pc)
+					// Resolve solver
+					solver, err := buildSolver(cfg, variant.Solver)
 					if err != nil {
-						_ = trace.Close()
+						trace.Close()
 						return err
 					}
 
-					// Resolve solver
-					var solver core.Solver
-					solverName := variant.Solver
-					if solverName == "" {
-						solverName = cfg.Defaults.Solver
-					}
-					switch solverName {
-					case "plan_execute":
-						maxReplans := cfg.Defaults.MaxReplans
-						if maxReplans <= 0 {
-							maxReplans = 3
-						}
-						solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
-					case "react", "":
-						solver = &core.ReactSolver{}
-					default:
-						_ = trace.Close()
-						return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
+					// Build provider from variant config
+					prov, err := buildProvider(cfg, variant.Provider)
+					if err != nil {
+						trace.Close()
+						return err
 					}
 
 					budgetSteps := variant.BudgetSteps
@@ -456,22 +435,9 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 				}
 
 				// Resolve solver
-				var solver core.Solver
-				solverName := variant.Solver
-				if solverName == "" {
-					solverName = cfg.Defaults.Solver
-				}
-				switch solverName {
-				case "plan_execute":
-					maxReplans := cfg.Defaults.MaxReplans
-					if maxReplans <= 0 {
-						maxReplans = 3
-					}
-					solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
-				case "react", "":
-					solver = &core.ReactSolver{}
-				default:
-					return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
+				solver, err := buildSolver(cfg, variant.Solver)
+				if err != nil {
+					return err
 				}
 
 				for r := 0; r < exp.Config.Repeats; r++ {

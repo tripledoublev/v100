@@ -33,6 +33,7 @@ type ToolCallContext struct {
 	WorkspaceDir    string // host path to active workspace (sandbox if enabled)
 	TimeoutMS       int
 	Provider        providers.Provider
+	Registry        *Registry        // access to other enabled tools
 	Session         executor.Session // active sandbox session
 	Mapper          PathTranslator   // bidirectional path mapping
 	EmitOutputDelta func(stream, text string) error

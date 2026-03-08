@@ -200,18 +200,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
 
 			// Build solver
-			var solver core.Solver
-			switch cfg.Defaults.Solver {
-			case "plan_execute":
-				maxReplans := cfg.Defaults.MaxReplans
-				if maxReplans <= 0 {
-					maxReplans = 3
-				}
-				solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
-			case "react", "":
-				solver = &core.ReactSolver{}
-			default:
-				return fmt.Errorf("unknown solver %q", cfg.Defaults.Solver)
+			solver, err := buildSolver(cfg, solverFlag)
+			if err != nil {
+				return err
 			}
 
 			if tuiFlag {
