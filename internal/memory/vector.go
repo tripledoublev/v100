@@ -79,7 +79,7 @@ func (s *VectorStore) Add(item MemoryItem) error {
 
 // Search returns top-k items sorted by cosine similarity to the query embedding.
 func (s *VectorStore) Search(query []float32, k int) []SearchResult {
-	if len(s.items) == 0 {
+	if k <= 0 || len(s.items) == 0 {
 		return nil
 	}
 
