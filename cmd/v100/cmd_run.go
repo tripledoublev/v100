@@ -14,6 +14,7 @@ import (
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -29,6 +30,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		workspaceFlag    string
 		unsafeFlag       bool
 		autoFlag         bool
+		sandboxFlag      bool
 		streamingFlag    bool
 		budgetStepsFlag  int
 		budgetTokensFlag int
@@ -84,6 +86,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if solverFlag != "" {
 				cfg.Defaults.Solver = solverFlag
+			}
+			if cmd.Flags().Changed("sandbox") {
+				cfg.Sandbox.Enabled = sandboxFlag
 			}
 			if maxReplansFlag > 0 {
 				cfg.Defaults.MaxReplans = maxReplansFlag
@@ -194,6 +199,23 @@ func runCmd(cfgPath *string) *cobra.Command {
 			// Build generation params from flags and config defaults
 			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
 
+			// Build sandbox session
+			execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
+			if err != nil {
+				return err
+			}
+			session, err := execFactory.NewSession(runID, workspace)
+			if err != nil {
+				return err
+			}
+			if cfg.Sandbox.Enabled {
+				if err := session.Start(context.Background()); err != nil {
+					return err
+				}
+				defer session.Close()
+				workspace = session.Workspace() // Use sandbox path
+			}
+
 			// Build solver
 			var solver core.Solver
 			switch cfg.Defaults.Solver {
@@ -210,9 +232,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "))
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "), session)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "))
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "), session)
 		},
 	}
 
@@ -223,6 +245,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations")
 	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "disable path guardrails and confirmations")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable isolated sandbox execution")
 	cmd.Flags().BoolVar(&streamingFlag, "streaming", false, "enable real-time token streaming")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
 	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")
@@ -248,7 +271,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver, initialPrompt string) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session) error {
 
 	renderer := ui.NewCLIRenderer()
 
@@ -268,6 +291,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		OutputFn:  outputFn,
 		GenParams: genParams,
 		Solver:    solver,
+		Session:   session,
 	}
 
 	// Override workspace for tool execution
@@ -334,7 +358,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 }
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver, initialPrompt string) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session) error {
 
 	run.Dir = workspace
 
@@ -403,6 +427,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		OutputFn:  tuiOutputFn,
 		GenParams: genParams,
 		Solver:    solver,
+		Session:   session,
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.

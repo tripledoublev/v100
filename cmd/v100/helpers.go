@@ -281,6 +281,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Budget:    childBudget,
 			ConfirmFn: confirmFn,
 			OutputFn:  childOutputFn,
+			Session:   nil,
 		}
 
 		var result string

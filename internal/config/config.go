@@ -16,6 +16,18 @@ type Config struct {
 	Policies  map[string]PolicyConfig   `toml:"policies"`
 	Agents    map[string]AgentConfig    `toml:"agents"`
 	Defaults  DefaultsConfig            `toml:"defaults"`
+	Sandbox   SandboxConfig             `toml:"sandbox"`
+}
+
+// SandboxConfig defines the isolated execution environment.
+type SandboxConfig struct {
+	Enabled     bool    `toml:"enabled"`
+	Backend     string  `toml:"backend"`      // host | docker
+	Image       string  `toml:"image"`        // for docker backend
+	NetworkTier string  `toml:"network_tier"` // off | research | open
+	MemoryMB    int     `toml:"memory_mb"`
+	CPUs        float64 `toml:"cpus"`
+	ApplyBack   string  `toml:"apply_back"` // manual | on_success | never
 }
 
 // ProviderConfig holds per-provider settings.
@@ -147,6 +159,15 @@ func DefaultConfig() *Config {
 			ToolTimeoutMS:       30000,
 			MaxToolCallsPerStep: 50,
 			ContextLimit:        80000,
+		},
+		Sandbox: SandboxConfig{
+			Enabled:     false,
+			Backend:     "host",
+			Image:       "google/gemini-v100-research:latest",
+			NetworkTier: "off",
+			MemoryMB:    512,
+			CPUs:        1.0,
+			ApplyBack:   "manual",
 		},
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -36,6 +37,7 @@ type Loop struct {
 	OutputFn  OutputFn
 	GenParams providers.GenParams
 	Solver    Solver
+	Session   executor.Session
 	stepCount int // running step counter for step.summary events
 	ended     bool
 	mu        sync.Mutex
@@ -177,6 +179,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		WorkspaceDir: l.Run.Dir,
 		TimeoutMS:    timeout,
 		Provider:     l.Provider,
+		Session:      l.Session,
 	}
 
 	result, err := tool.Exec(ctx, callCtx, tc.Args)

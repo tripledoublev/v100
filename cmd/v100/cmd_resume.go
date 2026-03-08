@@ -91,6 +91,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Budget:    budget,
 				Messages:  msgs,
 				ConfirmFn: buildConfirmFn(cfg.Defaults.ConfirmTools),
+				Session:   nil,
 			}
 
 			renderer := ui.NewCLIRenderer()

@@ -227,6 +227,8 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						ConfirmFn: confirmFn,
 						OutputFn:  outputFn,
 						GenParams: genParams,
+						Solver:    &core.ReactSolver{},
+						Session:   nil,
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
@@ -496,6 +498,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						Budget:    budget,
 						Solver:    solver,
 						GenParams: providers.GenParams{},
+						Session:   nil,
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{

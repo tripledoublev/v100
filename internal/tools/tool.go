@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
@@ -20,9 +21,10 @@ type ToolCallContext struct {
 	RunID        string
 	StepID       string
 	CallID       string
-	WorkspaceDir string
+	WorkspaceDir string // host path to active workspace (sandbox if enabled)
 	TimeoutMS    int
 	Provider     providers.Provider
+	Session      executor.Session // active sandbox session
 }
 
 // ToolResult holds the output of a tool execution.
