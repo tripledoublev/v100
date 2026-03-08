@@ -32,7 +32,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	}
 
 	// 3. Continue model/tool turns until the model produces a final (no-tool) response.
-	maxToolCalls := 20
+	maxToolCalls := 50 // sensible high default
 	if l.Policy != nil && l.Policy.MaxToolCallsPerStep > 0 {
 		maxToolCalls = l.Policy.MaxToolCallsPerStep
 	}

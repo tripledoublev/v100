@@ -88,6 +88,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		toolTimeoutFlag  int
 		maxToolCallsFlag int
 		confirmToolsFlag string
+		maxReplansFlag   int
 		tuiFlag          bool
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
@@ -135,6 +136,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if solverFlag != "" {
 				cfg.Defaults.Solver = solverFlag
+			}
+			if maxReplansFlag > 0 {
+				cfg.Defaults.MaxReplans = maxReplansFlag
 			}
 
 			// Build run directory
@@ -243,7 +247,11 @@ func runCmd(cfgPath *string) *cobra.Command {
 			var solver core.Solver
 			switch cfg.Defaults.Solver {
 			case "plan_execute":
-				solver = &core.PlanExecuteSolver{MaxReplans: 3}
+				maxReplans := cfg.Defaults.MaxReplans
+				if maxReplans <= 0 {
+					maxReplans = 3
+				}
+				solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
 			case "react", "":
 				solver = &core.ReactSolver{}
 			default:
@@ -277,6 +285,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute (default: react)")
+	cmd.Flags().IntVar(&maxReplansFlag, "max-replans", 0, "max replans for plan_execute solver")
 	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
 	cmd.Flags().Float64Var(&topPFlag, "top-p", 0, "nucleus sampling top-p (0=provider default)")
 	cmd.Flags().IntVar(&topKFlag, "top-k", 0, "top-k sampling (0=provider default)")

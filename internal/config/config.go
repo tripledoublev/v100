@@ -57,6 +57,7 @@ type AgentConfig struct {
 type DefaultsConfig struct {
 	Provider            string   `toml:"provider"`
 	Solver              string   `toml:"solver"` // react | plan_execute
+	MaxReplans          int      `toml:"max_replans"`
 	ConfirmTools        string   `toml:"confirm_tools"` // always | dangerous | never
 	BudgetSteps         int      `toml:"budget_steps"`
 	BudgetTokens        int      `toml:"budget_tokens"`

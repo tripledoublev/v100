@@ -26,10 +26,8 @@ func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string
 
 	// 2. Execution of the plan
 	maxReplans := s.MaxReplans
-	if maxReplans <= 0 {
-		maxReplans = 3
-	}
-
+	// If not set on solver, check if we have a default in some global state or just use what was provided
+	
 	for replanCount := 0; replanCount <= maxReplans; replanCount++ {
 		// Use a reactive solver for the execution of the current plan/task
 		// but with the plan in context.
