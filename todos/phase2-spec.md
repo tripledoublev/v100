@@ -245,7 +245,9 @@ piping into external tools.
 
 ---
 
-## 2e. Sandbox Execution
+## 2e. Sandbox Execution (Historical; Superseded by Phase 3 Sandbox Spec)
+
+This section captures the earlier lightweight sandbox idea that operated directly on the live workspace. It is retained for history, but new implementation work should follow `todos/phase3_spec.md` instead.
 
 **Problem.** Tools execute against the live filesystem. A misbehaving agent can
 `rm -rf /`. For research on untrusted agent behavior and for reproducibility,

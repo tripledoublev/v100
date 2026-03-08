@@ -41,7 +41,13 @@ Agents currently view code as "text blocks." The strategic move is toward **Grap
 *   **Adversarial Benchmarking:** A new `v100 stress` command that introduces artificial "hallucinations" (e.g., a tool returns a slightly wrong file path) to measure how effectively an agent can recover using its own internal verification logic.
 *   **Human-in-the-Loop (HITL) Nudging:** Enhance the TUI to allow researchers to inject "Cognitive Anchors"—short, high-priority instructions that persist across compressions—to guide agents out of reasoning dead-ends.
 
-### Phase 3: Recursive Evolution (The "Self-Improving" System)
+### Phase 3: High-Fidelity Research Sandboxing
+*   **Persistent Sandbox Sessions:** Materialize an isolated per-run workspace and keep a runtime session alive across the entire run so tools can safely edit code, install dependencies, and execute builds without touching the source workspace directly.
+*   **Virtual Path Mapping:** Present a stable `/workspace` namespace to the agent while mapping host and sandbox paths bidirectionally for trace replay, resume, and observability.
+*   **Reliable Recovery:** Tie workspace snapshots to explicit mutation metadata rather than dangerous-tool confirmation, and restore both loop state and filesystem state together during backtracking or manual revert.
+*   **Hardened Runtime Policy:** Add optional Docker-backed subprocess execution with seccomp, resource caps, and network isolation controlled through sandbox policy.
+
+### Phase 100: Recursive Self-Evolution (The "Self-Improving" System)
 *   **Autonomous Tool Synthesis:** A `tool_builder` role that can write new Go-based tool plugins for the v100 registry. If an agent repeatedly fails a task because it lacks a specific capability (e.g., "I need a tool to diff SQL schemas"), it dispatches a request to the `tool_builder` to expand the harness's own capability.
 *   **Self-Prompt Optimization (DSPy Integration):** Use the `v100 score` feedback to automatically rewrite `system_prompts`. If agents frequently "thrash" on a certain task, the harness uses a "Meta-Optimizer" to refine the role definition until the `efficiency_score` improves.
 *   **Cross-Provider Distillation:** A "Golden Trace" pipeline that automatically exports successful multi-turn trajectories into a format suitable for fine-tuning local models (SFT/DPO), creating a specialized "v100-LLM" that is natively optimized for the harness's specific tool/policy/memory dialect.
