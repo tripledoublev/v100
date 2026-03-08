@@ -17,10 +17,10 @@ type Result struct {
 type Session interface {
 	ID() string
 	Type() string // "host", "docker"
-	
+
 	// Start initializes the session (e.g. spawns container, prepares workspace).
 	Start(ctx context.Context) error
-	
+
 	// Close terminates the session and cleans up resources.
 	Close() error
 
@@ -37,7 +37,8 @@ type RunRequest struct {
 	Args    []string
 	Env     []string
 	Dir     string // directory relative to /workspace
-	
+	Stdin   string
+
 	// Optional: Stream output deltas
 	StdoutWriter io.Writer
 	StderrWriter io.Writer

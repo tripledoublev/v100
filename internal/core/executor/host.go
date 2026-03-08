@@ -74,10 +74,13 @@ func (s *HostSession) Run(ctx context.Context, req RunRequest) (Result, error) {
 	if dir := strings.TrimSpace(req.Dir); dir != "" && dir != "." {
 		fullDir = filepath.Join(baseDir, dir)
 	}
-	
+
 	cmd := exec.CommandContext(ctx, req.Command, req.Args...)
 	cmd.Dir = fullDir
 	cmd.Env = append(os.Environ(), req.Env...)
+	if req.Stdin != "" {
+		cmd.Stdin = strings.NewReader(req.Stdin)
+	}
 
 	var stdout, stderr bytes.Buffer
 	var stdoutW io.Writer = &stdout

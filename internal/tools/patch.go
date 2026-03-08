@@ -5,17 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/core/executor"
 )
 
 type patchApplyTool struct{}
 
 func PatchApply() Tool { return &patchApplyTool{} }
 
-func (t *patchApplyTool) Name() string        { return "patch_apply" }
-func (t *patchApplyTool) Description() string { return "Apply a unified diff patch to files in the workspace." }
+func (t *patchApplyTool) Name() string { return "patch_apply" }
+func (t *patchApplyTool) Description() string {
+	return "Apply a unified diff patch to files in the workspace."
+}
 func (t *patchApplyTool) DangerLevel() DangerLevel { return Dangerous }
 
 func (t *patchApplyTool) InputSchema() json.RawMessage {
@@ -51,19 +54,6 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 		strip = *a.Strip
 	}
 
-	// Write diff to temp file
-	tmpFile, err := os.CreateTemp("", "agent-patch-*.diff")
-	if err != nil {
-		return failResult(start, "failed to create temp file: "+err.Error()), nil
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(a.Diff); err != nil {
-		tmpFile.Close()
-		return failResult(start, "failed to write patch: "+err.Error()), nil
-	}
-	tmpFile.Close()
-
 	timeout := 30 * time.Second
 	if call.TimeoutMS > 0 {
 		timeout = time.Duration(call.TimeoutMS) * time.Millisecond
@@ -72,16 +62,35 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 	defer cancel()
 
 	pArg := fmt.Sprintf("-p%d", strip)
-	cmd := exec.CommandContext(ctx, "patch", pArg, "--input", tmpFile.Name(), "--batch")
+	if call.Session != nil {
+		res, err := call.Session.Run(ctx, executor.RunRequest{
+			Command: "patch",
+			Args:    []string{pArg, "--batch"},
+			Dir:     ".",
+			Stdin:   a.Diff,
+		})
+		dur := time.Since(start).Milliseconds()
+		if err != nil {
+			return ToolResult{OK: false, Output: "exec error: " + err.Error(), DurationMS: dur}, nil
+		}
+		combined := res.Stdout + res.Stderr
+		if res.ExitCode != 0 {
+			return ToolResult{OK: false, Output: combined, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}, nil
+		}
+		return ToolResult{OK: true, Output: res.Stdout, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}, nil
+	}
+
+	cmd := exec.CommandContext(ctx, "patch", pArg, "--batch")
 	if call.WorkspaceDir != "" {
 		cmd.Dir = call.WorkspaceDir
 	}
+	cmd.Stdin = bytes.NewBufferString(a.Diff)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err = cmd.Run()
+	err := cmd.Run()
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
 		combined := stdout.String() + stderr.String()
