@@ -208,7 +208,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		r.mu.Unlock()
 		dur := ev.TS.Sub(startTime)
 		summary := fmt.Sprintf("%d tool uses · %s · %s",
-			p.ToolUses, formatTokens(p.UsedTokens), formatDuration(dur.Milliseconds()))
+			p.ToolUses, FormatTokens(p.UsedTokens), FormatDuration(dur.Milliseconds()))
 		if p.CostUSD > 0 {
 			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
 		}
@@ -426,7 +426,7 @@ func PrintReplayEvent(ev core.Event) {
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		summary := fmt.Sprintf("%d tool uses · %s", p.ToolUses, formatTokens(p.UsedTokens))
+		summary := fmt.Sprintf("%d tool uses · %s", p.ToolUses, FormatTokens(p.UsedTokens))
 		if p.CostUSD > 0 {
 			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
 		}
@@ -458,34 +458,6 @@ func PrintReplayEvent(ev core.Event) {
 	default:
 		fmt.Printf("%s  %s\n", styleMuted.Render(ts), styleMuted.Render(string(ev.Type)))
 	}
-}
-
-// formatTokens formats a token count for display: 0→"0", 500→"500", 1500→"1.5k", 24000→"24k".
-func formatTokens(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	if n%1000 == 0 {
-		return fmt.Sprintf("%dk", n/1000)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000.0)
-}
-
-// formatDuration formats milliseconds for display: 500→"0.5s", 3200→"3s", 65000→"1m5s".
-func formatDuration(ms int64) string {
-	if ms < 1000 {
-		return fmt.Sprintf("%.1fs", float64(ms)/1000.0)
-	}
-	sec := ms / 1000
-	if sec < 60 {
-		return fmt.Sprintf("%ds", sec)
-	}
-	min := sec / 60
-	rem := sec % 60
-	if rem == 0 {
-		return fmt.Sprintf("%dm", min)
-	}
-	return fmt.Sprintf("%dm%ds", min, rem)
 }
 
 // indentLines adds a prefix to every line after the first.
