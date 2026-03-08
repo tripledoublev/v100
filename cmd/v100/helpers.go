@@ -130,6 +130,13 @@ func loopNetworkTier(cfg *config.Config) string {
 	}
 }
 
+func buildSnapshotManager(cfg *config.Config, workspace string) core.SnapshotManager {
+	if cfg == nil || !cfg.Sandbox.Enabled {
+		return nil
+	}
+	return core.NewWorkspaceSnapshotManager(workspace, filepath.Join(filepath.Dir(workspace), "snapshots"))
+}
+
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
 	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
 
@@ -323,6 +330,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Session:     session,
 			Mapper:      mapper,
 			NetworkTier: loopNetworkTier(cfg),
+			Snapshots:   buildSnapshotManager(cfg, workspace),
 		}
 
 		var result string

@@ -132,6 +132,13 @@ type StepSummaryPayload struct {
 	DurationMS   int64   `json:"duration_ms"`
 }
 
+// SolverReplanPayload is the payload for EventSolverReplan.
+type SolverReplanPayload struct {
+	Attempt int    `json:"attempt"`
+	Error   string `json:"error,omitempty"`
+	Plan    string `json:"plan,omitempty"`
+}
+
 // ToolCallPayload is the Payload for EventToolCall.
 type ToolCallPayload struct {
 	CallID string `json:"call_id"`

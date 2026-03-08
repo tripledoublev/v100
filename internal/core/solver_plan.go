@@ -28,32 +28,34 @@ func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string
 
 	// 2. Execution of the plan
 	maxReplans := s.MaxReplans
-	// If not set on solver, check if we have a default in some global state or just use what was provided
-	
 	for replanCount := 0; replanCount <= maxReplans; replanCount++ {
-		// Use a reactive solver for the execution of the current plan/task
-		// but with the plan in context.
-		// For simplicity in this Phase 2a, we leverage the existing ReactSolver
-		// but we inject the plan as a system message.
-		
-		react := &ReactSolver{}
-		// We already appended the user message in the plan() call or we do it here.
-		// Actually s.plan didn't append the user message to l.Messages permanently yet.
-		
-		res, err := react.Solve(ctx, l, "Please execute the next steps of the plan: "+plan)
+		cp, err := l.CheckpointWithContext(ctx)
 		if err != nil {
-			return res, err
+			return SolveResult{}, fmt.Errorf("checkpoint before executing plan: %w", err)
 		}
 
-		// In a full implementation, we would check if the plan is complete or needs replanning.
-		// For now, we'll return the result of the execution.
-		budgetAfter := l.Budget.Budget()
-		return SolveResult{
-			FinalText: res.FinalText,
-			Steps:     res.Steps,
-			Tokens:    budgetAfter.UsedTokens - budgetBefore.UsedTokens,
-			CostUSD:   budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
-		}, nil
+		react := &ReactSolver{}
+		res, err := react.Solve(ctx, l, "Please execute the next steps of the plan: "+plan)
+		if err == nil {
+			budgetAfter := l.Budget.Budget()
+			return SolveResult{
+				FinalText: res.FinalText,
+				Steps:     res.Steps,
+				Tokens:    budgetAfter.UsedTokens - budgetBefore.UsedTokens,
+				CostUSD:   budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
+			}, nil
+		}
+
+		if replanCount == maxReplans {
+			return res, err
+		}
+		if restoreErr := l.RestoreWithContext(ctx, cp); restoreErr != nil {
+			return SolveResult{}, fmt.Errorf("restore checkpoint after execution failure: %w (original: %v)", restoreErr, err)
+		}
+		plan, err = s.replan(ctx, l, stepID, userInput, plan, err, replanCount+1)
+		if err != nil {
+			return SolveResult{}, err
+		}
 	}
 
 	return SolveResult{}, fmt.Errorf("plan_execute: max replans reached")
@@ -61,10 +63,40 @@ func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string
 
 func (s *PlanExecuteSolver) plan(ctx context.Context, l *Loop, stepID string, userInput string) (string, error) {
 	prompt := fmt.Sprintf("TASK: %s\n\nPlease create a structured, numbered plan to solve this task. Do not execute any tools yet. Just provide the plan.", userInput)
+	plan, err := s.generatePlan(ctx, l, stepID, prompt)
+	if err != nil {
+		return "", err
+	}
 
-	// We don't want to permanently append this planning prompt to history yet,
-	// or maybe we do. Let's follow the spec: "Plan phase: Call model with tools=nil".
-	
+	// Add the plan to the message history so subsequent steps see it.
+	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
+	l.Messages = append(l.Messages, providers.Message{Role: "assistant", Content: "Plan: " + plan})
+
+	return plan, nil
+}
+
+func (s *PlanExecuteSolver) replan(ctx context.Context, l *Loop, stepID string, userInput, previousPlan string, execErr error, attempt int) (string, error) {
+	prompt := fmt.Sprintf(
+		"TASK: %s\n\nThe previous execution plan failed.\nPrevious plan:\n%s\n\nFailure:\n%s\n\nPlease create a revised structured, numbered plan. Do not execute tools yet.",
+		userInput, previousPlan, execErr.Error(),
+	)
+	plan, err := s.generatePlan(ctx, l, stepID, prompt)
+	if err != nil {
+		return "", err
+	}
+	_, _ = l.emit(EventSolverReplan, stepID, SolverReplanPayload{
+		Attempt: attempt,
+		Error:   execErr.Error(),
+		Plan:    plan,
+	})
+	l.Messages = append(l.Messages, providers.Message{
+		Role:    "assistant",
+		Content: fmt.Sprintf("Revised Plan (attempt %d): %s", attempt, plan),
+	})
+	return plan, nil
+}
+
+func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, prompt string) (string, error) {
 	msgs := append([]providers.Message{}, l.buildMessages()...)
 	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})
 
@@ -121,10 +153,5 @@ func (s *PlanExecuteSolver) plan(ctx context.Context, l *Loop, stepID string, us
 
 	plan := assistantText.String()
 	_, _ = l.emit(EventSolverPlan, stepID, map[string]string{"plan": plan})
-
-	// Add the plan to the message history so subsequent steps see it.
-	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
-	l.Messages = append(l.Messages, providers.Message{Role: "assistant", Content: "Plan: " + plan})
-
 	return plan, nil
 }

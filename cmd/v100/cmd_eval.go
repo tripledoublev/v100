@@ -267,6 +267,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						Session:     s_session,
 						Mapper:      s_mapper,
 						NetworkTier: loopNetworkTier(cfg),
+						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
@@ -531,6 +532,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						Session:     s_session,
 						Mapper:      s_mapper,
 						NetworkTier: loopNetworkTier(cfg),
+						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{

@@ -120,6 +120,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Session:     session,
 				Mapper:      mapper,
 				NetworkTier: loopNetworkTier(cfg),
+				Snapshots:   buildSnapshotManager(cfg, sandboxWorkspace),
 			}
 			loop.OutputFn = outputFn
 

@@ -284,6 +284,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Session:     session,
 		Mapper:      mapper,
 		NetworkTier: loopNetworkTier(cfg),
+		Snapshots:   buildSnapshotManager(cfg, workspace),
 	}
 
 	// Override workspace for tool execution
@@ -427,6 +428,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Session:     session,
 		Mapper:      mapper,
 		NetworkTier: loopNetworkTier(cfg),
+		Snapshots:   buildSnapshotManager(cfg, workspace),
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.

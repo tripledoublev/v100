@@ -192,7 +192,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if l.Policy != nil && l.Policy.ToolTimeoutMS > 0 {
 		timeout = l.Policy.ToolTimeoutMS
 	}
-	if tool.Effects().MutatesWorkspace {
+	if l.Snapshots != nil && tool.Effects().MutatesWorkspace {
 		snap, err := l.snapshotManager().Capture(ctx, SnapshotRequest{
 			RunID:    l.Run.ID,
 			StepID:   stepID,
