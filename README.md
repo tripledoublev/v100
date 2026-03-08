@@ -51,7 +51,7 @@ Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authentica
 v100 login   # opens browser → completes OAuth → saves token to ~/.config/v100/auth.json
 ```
 
-Model: `gpt-5.3-codex`
+Model: `gpt-5.4`
 
 ### OpenAI API
 
@@ -88,7 +88,7 @@ v100 run --provider ollama --model qwen3.5:9b
 
 | Provider | Auth | Default model | Local state | Best for |
 |----------|------|---------------|-------------|----------|
-| `codex` | `~/.config/v100/oauth_credentials.json` + `v100 login` | `gpt-5.3-codex` | `~/.config/v100/auth.json` | subscription-backed coding runs |
+| `codex` | `~/.config/v100/oauth_credentials.json` + `v100 login` | `gpt-5.4` | `~/.config/v100/auth.json` | subscription-backed coding runs |
 | `gemini` | `~/.config/v100/oauth_credentials.json` + `v100 login --provider gemini` | `gemini-2.5-flash` | `~/.config/v100/gemini_auth.json` | subscription-backed Gemini comparison runs |
 | `openai` | `OPENAI_API_KEY` | `gpt-4o` | none | API-driven experiments |
 | `ollama` | local Ollama daemon | `qwen3.5:2b` | none | fully local runs |
@@ -255,7 +255,7 @@ Default location: `~/.config/v100/config.toml`
 ```toml
 [providers.codex]
 type = "codex"
-default_model = "gpt-5.3-codex"
+default_model = "gpt-5.4"
 
 [providers.openai]
 type = "openai"
@@ -356,7 +356,7 @@ message = "Refactor parser for streaming mode."
 [[variants]]
 name = "codex-default"
 provider = "codex"
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 budget_steps = 20
 ```
 

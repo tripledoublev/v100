@@ -91,7 +91,7 @@ func DefaultConfig() *Config {
 		Providers: map[string]ProviderConfig{
 			"codex": {
 				Type:         "codex",
-				DefaultModel: "gpt-5.3-codex",
+				DefaultModel: "gpt-5.4",
 			},
 			"openai": {
 				Type:         "openai",
@@ -182,7 +182,7 @@ func DefaultTOML() string {
 # Token is stored at ~/.config/v100/auth.json automatically.
 [providers.codex]
 type = "codex"
-default_model = "gpt-5.3-codex"
+default_model = "gpt-5.4"
 
 # ── OpenAI API provider (pay-as-you-go) ──────────────────────────────────────
 [providers.openai]

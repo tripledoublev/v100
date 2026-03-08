@@ -773,8 +773,8 @@ func normalizeCodexModelOverride(model string) (string, bool) {
 		return "", false
 	}
 	switch strings.ToLower(model) {
-	case "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
-		return "gpt-5.3-codex", true
+	case "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-5.3-codex":
+		return "gpt-5.4", true
 	default:
 		return model, false
 	}

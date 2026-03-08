@@ -17,7 +17,7 @@ import (
 
 const (
 	codexEndpoint     = "https://chatgpt.com/backend-api/codex/responses"
-	codexDefaultModel = "gpt-5.3-codex"
+	codexDefaultModel = "gpt-5.4"
 )
 
 // CodexProvider implements Provider using the ChatGPT subscription backend.

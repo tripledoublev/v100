@@ -25,7 +25,7 @@ func ev(t *testing.T, ts time.Time, typ EventType, stepID string, payload any) E
 func TestComputeMetricsBasic(t *testing.T) {
 	now := time.Now().UTC()
 	events := []Event{
-		ev(t, now, EventRunStart, "s1", RunStartPayload{Provider: "codex", Model: "gpt-5.3-codex"}),
+		ev(t, now, EventRunStart, "s1", RunStartPayload{Provider: "codex", Model: "gpt-5.4"}),
 		ev(t, now.Add(10*time.Millisecond), EventModelResp, "s1", ModelRespPayload{
 			Text: "hi",
 			Usage: Usage{

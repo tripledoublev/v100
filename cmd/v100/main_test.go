@@ -141,8 +141,9 @@ func TestNormalizeModelOverride(t *testing.T) {
 		want         string
 		wantChanged  bool
 	}{
-		{name: "codex 4o mini remapped", providerType: "codex", in: "gpt-4o-mini", want: "gpt-5.3-codex", wantChanged: true},
-		{name: "codex 4o remapped", providerType: "codex", in: "gpt-4o", want: "gpt-5.3-codex", wantChanged: true},
+		{name: "codex 4o mini remapped", providerType: "codex", in: "gpt-4o-mini", want: "gpt-5.4", wantChanged: true},
+		{name: "codex 4o remapped", providerType: "codex", in: "gpt-4o", want: "gpt-5.4", wantChanged: true},
+		{name: "codex old codex remapped", providerType: "codex", in: "gpt-5.3-codex", want: "gpt-5.4", wantChanged: true},
 		{name: "codex keep gpt5", providerType: "codex", in: "gpt-5.4", want: "gpt-5.4", wantChanged: false},
 		{name: "openai keep 4o mini", providerType: "openai", in: "gpt-4o-mini", want: "gpt-4o-mini", wantChanged: false},
 		{name: "blank unchanged", providerType: "codex", in: " ", want: "", wantChanged: false},

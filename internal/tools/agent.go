@@ -62,7 +62,7 @@ func (t *agentTool) InputSchema() json.RawMessage {
 		"required": ["task"],
 		"properties": {
 			"task":      {"type": "string", "description": "Prompt/task for the sub-agent."},
-			"model":     {"type": "string", "description": "Model override (e.g. gpt-5.3-codex). Empty = reuse parent model."},
+			"model":     {"type": "string", "description": "Model override (e.g. gpt-5.4). Empty = reuse parent model."},
 			"tools":     {"type": "array", "items": {"type": "string"}, "description": "Tool subset for the sub-agent. Default = all parent tools except agent."},
 			"max_steps": {"type": "integer", "description": "Step limit for the sub-agent (default 10)."}
 		}
