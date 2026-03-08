@@ -319,6 +319,10 @@ v100 compare <run_a> <run_b> <run_c>
 v100 query --tag team=core --score pass
 ```
 
+## Dogfooding
+
+For a concrete operator loop with ten runnable tasks, sandbox drills, and a starter bench file, see [`dogfood/README.md`](dogfood/README.md) and [`dogfood/smoke.bench.toml`](dogfood/smoke.bench.toml).
+
 ### Debugging a run
 
 ```bash
