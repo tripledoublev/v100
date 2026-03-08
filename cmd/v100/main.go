@@ -263,9 +263,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver)
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "))
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "))
 		},
 	}
 
@@ -301,7 +301,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver, initialPrompt string) error {
 
 	renderer := ui.NewCLIRenderer()
 
@@ -343,6 +343,19 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	ctx := context.Background()
 	reason := "user_exit"
 
+	if initialPrompt != "" {
+		if err := loop.Step(ctx, initialPrompt); err != nil {
+			var budgetErr *core.ErrBudgetExceeded
+			if errors.As(err, &budgetErr) {
+				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
+				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
+				_ = loop.EmitRunEnd(reason)
+				return nil
+			}
+			fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+		}
+	}
+
 	for {
 		input, err := ui.Prompt("")
 		if err != nil {
@@ -374,7 +387,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 }
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver, initialPrompt string) error {
 
 	run.Dir = workspace
 
@@ -466,6 +479,19 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 	if logger != nil {
 		logger.Printf("run_start emitted; waiting for tui loop")
+	}
+
+	if initialPrompt != "" {
+		go func() {
+			time.Sleep(100 * time.Millisecond) // Give TUI a moment to start
+			if err := loop.Step(ctx, initialPrompt); err != nil {
+				var budgetErr *core.ErrBudgetExceeded
+				if errors.As(err, &budgetErr) {
+					reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
+					tui.Quit()
+				}
+			}
+		}()
 	}
 
 	if err := <-runErrCh; err != nil {
