@@ -2345,6 +2345,154 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 	create.Flags().Int("repeats", 3, "number of trials per variant")
 	create.Flags().StringSlice("variants", nil, "variants in model:solver format")
 
+	run := &cobra.Command{
+		Use:   "run <experiment_id> --prompt <prompt>",
+		Short: "Execute all variants × repeats for an experiment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prompt, _ := cmd.Flags().GetString("prompt")
+			if prompt == "" {
+				return fmt.Errorf("--prompt is required")
+			}
+
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+
+			exp, err := eval.LoadExperiment("runs", args[0])
+			if err != nil {
+				return err
+			}
+			exp.Status = "running"
+			_ = exp.Save("runs")
+
+			total := len(exp.Config.Variants) * exp.Config.Repeats
+			completed := 0
+
+			for _, variant := range exp.Config.Variants {
+				provName := variant.Provider
+				if provName == "" {
+					provName = cfg.Defaults.Provider
+				}
+				prov, err := buildProvider(cfg, provName)
+				if err != nil {
+					return fmt.Errorf("variant %s: %w", variant.Name, err)
+				}
+
+				// Resolve model
+				model := variant.Model
+				if model == "" {
+					if pc, ok := cfg.Providers[provName]; ok {
+						model = pc.DefaultModel
+					}
+				}
+
+				// Resolve solver
+				var solver core.Solver
+				solverName := variant.Solver
+				if solverName == "" {
+					solverName = cfg.Defaults.Solver
+				}
+				switch solverName {
+				case "plan_execute":
+					maxReplans := cfg.Defaults.MaxReplans
+					if maxReplans <= 0 {
+						maxReplans = 3
+					}
+					solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
+				case "react", "":
+					solver = &core.ReactSolver{}
+				default:
+					return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
+				}
+
+				for r := 0; r < exp.Config.Repeats; r++ {
+					completed++
+					fmt.Printf("[%d/%d] variant=%s repeat=%d/%d\n", completed, total, variant.Name, r+1, exp.Config.Repeats)
+
+					runID := newRunID()
+					runDir := filepath.Join("runs", runID)
+					if err := os.MkdirAll(runDir, 0o755); err != nil {
+						return err
+					}
+
+					tags := map[string]string{
+						"experiment": exp.ID,
+						"variant":    variant.Name,
+						"repeat":     fmt.Sprintf("%d", r+1),
+					}
+					meta := core.RunMeta{
+						RunID:     runID,
+						Name:      fmt.Sprintf("%s/%s/%d", exp.Name, variant.Name, r+1),
+						Tags:      tags,
+						Provider:  provName,
+						Model:     model,
+						CreatedAt: time.Now().UTC(),
+					}
+					_ = core.WriteMeta(runDir, meta)
+
+					tracePath := filepath.Join(runDir, "trace.jsonl")
+					trace, err := core.OpenTrace(tracePath)
+					if err != nil {
+						return err
+					}
+
+					coreRun := &core.Run{
+						ID:        runID,
+						Dir:       runDir,
+						TraceFile: tracePath,
+						Budget: core.Budget{
+							MaxSteps:   cfg.Defaults.BudgetSteps,
+							MaxTokens:  cfg.Defaults.BudgetTokens,
+							MaxCostUSD: cfg.Defaults.BudgetCostUSD,
+						},
+					}
+
+					reg := buildToolRegistry(cfg)
+					pol := loadPolicy(cfg, "default")
+					budget := core.NewBudgetTracker(&coreRun.Budget)
+
+					loop := &core.Loop{
+						Run:       coreRun,
+						Provider:  prov,
+						Tools:     reg,
+						Policy:    pol,
+						Trace:     trace,
+						Budget:    budget,
+						Solver:    solver,
+						GenParams: providers.GenParams{},
+					}
+
+					_ = loop.EmitRunStart(core.RunStartPayload{
+						Policy:   "default",
+						Provider: provName,
+						Model:    model,
+					})
+
+					err = loop.Step(context.Background(), prompt)
+					reason := "completed"
+					if err != nil {
+						reason = "error"
+						fmt.Printf("  warning: run %s ended with error: %v\n", runID, err)
+					}
+					_ = loop.EmitRunEnd(reason)
+					trace.Close()
+
+					exp.RunIDs = append(exp.RunIDs, runID)
+					_ = exp.Save("runs")
+				}
+			}
+
+			exp.Status = "completed"
+			_ = exp.Save("runs")
+			fmt.Printf("\nExperiment %s completed. %d runs recorded.\n", exp.ID, len(exp.RunIDs))
+			fmt.Printf("View results: v100 experiment results %s\n", exp.ID)
+			return nil
+		},
+	}
+	run.Flags().String("prompt", "", "prompt to send to each variant trial")
+
 	results := &cobra.Command{
 		Use:   "results <experiment_id>",
 		Short: "Display statistical results for an experiment",
@@ -2355,15 +2503,55 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			// In a full implementation, we'd load all RunIDs and aggregate
 			fmt.Printf("Experiment: %s (%s)\n", exp.Name, exp.ID)
-			fmt.Println("Aggregating results...")
-			// (Aggregation logic would go here)
+			fmt.Printf("Status: %s | Variants: %d | Repeats: %d | Runs: %d\n\n",
+				exp.Status, len(exp.Config.Variants), exp.Config.Repeats, len(exp.RunIDs))
+
+			// Group run IDs by variant using tags
+			variantRuns := map[string][]string{}
+			for _, runID := range exp.RunIDs {
+				meta, err := core.ReadMeta(filepath.Join("runs", runID))
+				if err != nil {
+					continue
+				}
+				vName := meta.Tags["variant"]
+				if vName == "" {
+					vName = "unknown"
+				}
+				variantRuns[vName] = append(variantRuns[vName], runID)
+			}
+
+			// Compute and display per-variant statistics
+			for _, variant := range exp.Config.Variants {
+				runIDs := variantRuns[variant.Name]
+				if len(runIDs) == 0 {
+					fmt.Printf("Variant: %s — no runs found\n\n", variant.Name)
+					continue
+				}
+
+				var metrics []core.RunMetrics
+				for _, runID := range runIDs {
+					events, err := core.ReadAll(filepath.Join("runs", runID, "trace.jsonl"))
+					if err != nil {
+						continue
+					}
+					metrics = append(metrics, core.ComputeMetrics(events))
+				}
+
+				stats := eval.AggregateResults(variant.Name, metrics)
+				fmt.Printf("Variant: %s\n", ui.Info(stats.VariantName))
+				fmt.Printf("  Trials:      %d\n", stats.Trials)
+				fmt.Printf("  Pass Rate:   %.1f%% [95%% CI: %.1f%%–%.1f%%]\n",
+					stats.PassRate*100, stats.CI95Low*100, stats.CI95High*100)
+				fmt.Printf("  Mean Tokens: %.0f\n", stats.MeanTokens)
+				fmt.Printf("  Mean Cost:   $%.4f\n", stats.MeanCost)
+				fmt.Printf("  Mean Steps:  %.1f\n\n", stats.MeanSteps)
+			}
 			return nil
 		},
 	}
 
-	cmd.AddCommand(create, results)
+	cmd.AddCommand(create, run, results)
 	return cmd
 }
 

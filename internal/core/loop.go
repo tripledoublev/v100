@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -23,18 +22,6 @@ type ConfirmFn func(toolName, args string) bool
 
 // OutputFn is called for each event emitted during the loop.
 type OutputFn func(event Event)
-
-// RegisterAgentTool adds the special 'agent' tool to the registry.
-func RegisterAgentTool(cfg *config.Config, reg *tools.Registry, trace *TraceWriter,
-	budget *BudgetTracker, outputFn *OutputFn, confirmFn ConfirmFn, workspace string, parentMaxToolCalls int) {
-
-	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
-		// Minimal implementation for tool registration
-		return tools.AgentRunResult{OK: true}
-	}
-
-	reg.Register(tools.NewAgent(runFn))
-}
 
 // Loop is the main agent execution engine.
 type Loop struct {
@@ -133,29 +120,32 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 
 	// Confirm dangerous tools
 	if tool.DangerLevel() == tools.Dangerous {
-		// Phase 1: Reflection turn for dangerous tools
-		confidence, uncertainty, err := l.reflectOnTool(ctx, stepID, tc)
-		if err == nil {
-			_, _ = l.emit(EventToolReflect, stepID, ToolReflectPayload{
-				CallID:      tc.ID,
-				Name:        tc.Name,
-				Confidence:  confidence,
-				Uncertainty: uncertainty,
-			})
-
-			if confidence < 0.5 {
-				msg := "low confidence rejection (conf=" + fmt.Sprintf("%.2f", confidence) + "): " + uncertainty
-				result := tools.ToolResult{OK: false, Output: msg}
-				if err := l.emitToolResult(stepID, tc, result); err != nil {
-					return err
-				}
-				l.Messages = append(l.Messages, providers.Message{
-					Role:       "tool",
-					Content:    "ERROR: " + msg,
-					ToolCallID: tc.ID,
-					Name:       tc.Name,
+		// Optional reflection turn — burns an extra full-context model call per dangerous tool.
+		// Only enabled when policy.ReflectOnDangerous is true.
+		if l.Policy != nil && l.Policy.ReflectOnDangerous {
+			confidence, uncertainty, err := l.reflectOnTool(ctx, stepID, tc)
+			if err == nil {
+				_, _ = l.emit(EventToolReflect, stepID, ToolReflectPayload{
+					CallID:      tc.ID,
+					Name:        tc.Name,
+					Confidence:  confidence,
+					Uncertainty: uncertainty,
 				})
-				return nil
+
+				if confidence < 0.5 {
+					msg := "low confidence rejection (conf=" + fmt.Sprintf("%.2f", confidence) + "): " + uncertainty
+					result := tools.ToolResult{OK: false, Output: msg}
+					if err := l.emitToolResult(stepID, tc, result); err != nil {
+						return err
+					}
+					l.Messages = append(l.Messages, providers.Message{
+						Role:       "tool",
+						Content:    "ERROR: " + msg,
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+					})
+					return nil
+				}
 			}
 		}
 
