@@ -32,6 +32,10 @@ func (c *capturingProvider) Complete(_ context.Context, req providers.CompleteRe
 	return providers.CompleteResponse{AssistantText: "done"}, nil
 }
 
+func (c *capturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
+}
+
 // newCompressLoop builds a Loop wired for compression tests.
 func newCompressLoop(t *testing.T, prov providers.Provider, contextLimit int) *core.Loop {
 	t.Helper()

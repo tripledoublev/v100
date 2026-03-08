@@ -32,6 +32,10 @@ func (m *mockProvider) Complete(_ context.Context, _ providers.CompleteRequest) 
 	return resp, nil
 }
 
+func (m *mockProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
+}
+
 func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (*core.Loop, *core.TraceWriter) {
 	t.Helper()
 	dir := t.TempDir()
@@ -216,6 +220,10 @@ func (p *genParamCapturingProvider) Complete(_ context.Context, req providers.Co
 	p.lastReq = req
 	p.callCount++
 	return p.response, nil
+}
+
+func (p *genParamCapturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
 }
 
 func TestLoopGenParamsThreaded(t *testing.T) {
