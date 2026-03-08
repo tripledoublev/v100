@@ -38,9 +38,10 @@ jobs:
           LDFLAGS="-s -w -X main.version=${{ env.TAG }}"
           mkdir -p dist
 
-          GOOS=linux  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-linux-amd64      ./cmd/v100
-          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/v100-darwin-arm64      ./cmd/v100
-          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-darwin-amd64      ./cmd/v100
+          # Tree-sitter support blocks Darwin cross-compilation from Ubuntu today.
+          # Release the Linux binary here; add native macOS build jobs when we
+          # want Darwin artifacts again.
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-linux-amd64 ./cmd/v100
 
       - name: Generate checksums
         run: |
