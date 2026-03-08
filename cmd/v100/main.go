@@ -64,6 +64,7 @@ func rootCmd() *cobra.Command {
 		metricsCmd(),
 		compareCmd(),
 		benchCmd(&cfgPath),
+		experimentCmd(&cfgPath),
 		queryCmd(),
 	)
 	return root
@@ -2293,4 +2294,73 @@ func randBytes(n int) []byte {
 	defer f.Close()
 	_, _ = f.Read(b)
 	return b
+}
+
+// ─────────────────────────────────────────
+// experiment command
+// ─────────────────────────────────────────
+
+func experimentCmd(cfgPath *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "experiment",
+		Short: "Manage research experiments",
+	}
+
+	create := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a new research experiment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			repeats, _ := cmd.Flags().GetInt("repeats")
+			variantsStr, _ := cmd.Flags().GetStringSlice("variants") // model:solver format
+
+			var variants []eval.Variant
+			for _, v := range variantsStr {
+				parts := strings.Split(v, ":")
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid variant format %q, use model:solver", v)
+				}
+				variants = append(variants, eval.Variant{
+					Name:   v,
+					Model:  parts[0],
+					Solver: parts[1],
+				})
+			}
+
+			cfg := eval.ExperimentConfig{
+				Variants: variants,
+				Repeats:  repeats,
+			}
+			exp := eval.NewExperiment(name, cfg)
+			if err := exp.Save("runs"); err != nil {
+				return err
+			}
+			fmt.Printf("Created experiment: %s\n", exp.ID)
+			return nil
+		},
+	}
+	create.Flags().Int("repeats", 3, "number of trials per variant")
+	create.Flags().StringSlice("variants", nil, "variants in model:solver format")
+
+	results := &cobra.Command{
+		Use:   "results <experiment_id>",
+		Short: "Display statistical results for an experiment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			exp, err := eval.LoadExperiment("runs", args[0])
+			if err != nil {
+				return err
+			}
+
+			// In a full implementation, we'd load all RunIDs and aggregate
+			fmt.Printf("Experiment: %s (%s)\n", exp.Name, exp.ID)
+			fmt.Println("Aggregating results...")
+			// (Aggregation logic would go here)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(create, results)
+	return cmd
 }
