@@ -26,6 +26,7 @@ type BenchVariant struct {
 	Name        string   `toml:"name"`
 	Provider    string   `toml:"provider"`
 	Model       string   `toml:"model"`
+	Solver      string   `toml:"solver"`
 	BudgetSteps int      `toml:"budget_steps"`
 	Temperature *float64 `toml:"temperature"`
 	TopP        *float64 `toml:"top_p"`

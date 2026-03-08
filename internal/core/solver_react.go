@@ -78,6 +78,8 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				},
 			})
 			if err != nil {
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+				l.emitErrorAssistance(ctx, stepID, err)
 				return SolveResult{}, fmt.Errorf("provider stream: %w", err)
 			}
 

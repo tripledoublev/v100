@@ -203,6 +203,26 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					reg := buildToolRegistry(cfg)
 					pol := loadPolicy(cfg, "default")
 
+					// Resolve solver
+					var solver core.Solver
+					solverName := variant.Solver
+					if solverName == "" {
+						solverName = cfg.Defaults.Solver
+					}
+					switch solverName {
+					case "plan_execute":
+						maxReplans := cfg.Defaults.MaxReplans
+						if maxReplans <= 0 {
+							maxReplans = 3
+						}
+						solver = &core.PlanExecuteSolver{MaxReplans: maxReplans}
+					case "react", "":
+						solver = &core.ReactSolver{}
+					default:
+						trace.Close()
+						return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
+					}
+
 					budgetSteps := variant.BudgetSteps
 					if budgetSteps == 0 {
 						budgetSteps = cfg.Defaults.BudgetSteps
@@ -243,7 +263,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						ConfirmFn: confirmFn,
 						OutputFn:  outputFn,
 						GenParams: genParams,
-						Solver:    &core.ReactSolver{},
+						Solver:    solver,
 						Session:   s_session,
 						Mapper:    s_mapper,
 					}
