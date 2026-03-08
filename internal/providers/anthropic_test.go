@@ -111,7 +111,10 @@ func TestAnthropicParseResponse(t *testing.T) {
 		"stop_reason": "end_turn"
 	}`
 
-	resp, err := anthropicParseResponse("claude-sonnet-4-20250514", []byte(raw))
+	costFn := func(input, output int) float64 {
+		return anthropicEstimateCost("claude-sonnet-4-20250514", input, output)
+	}
+	resp, err := anthropicParseResponse([]byte(raw), costFn)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,9 @@ type ProviderConfig struct {
 
 // AuthConfig describes how to obtain credentials.
 type AuthConfig struct {
-	Env string `toml:"env"` // environment variable name
+	Env      string `toml:"env"`      // environment variable name
+	Username string `toml:"username"` // for basic auth
+	Password string `toml:"password"` // for basic auth
 }
 
 // ToolsConfig lists enabled and dangerous tools.

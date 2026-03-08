@@ -80,111 +80,13 @@ func (p *AnthropicProvider) Capabilities() Capabilities {
 	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
 }
 
-// Anthropic request/response types
-
-type anthropicRequest struct {
-	Model         string             `json:"model"`
-	MaxTokens     int                `json:"max_tokens"`
-	System        string             `json:"system,omitempty"`
-	Messages      []anthropicMessage `json:"messages"`
-	Tools         []anthropicToolDef `json:"tools,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	TopP          *float64           `json:"top_p,omitempty"`
-	TopK          *int               `json:"top_k,omitempty"`
-	StopSequences []string           `json:"stop_sequences,omitempty"`
-	Stream        bool               `json:"stream,omitempty"`
-}
-
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"` // string or []anthropicContentBlock
-}
-
-type anthropicContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-}
-
-type anthropicToolDef struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-}
-
-type anthropicResponse struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Role    string `json:"role"`
-	Content []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text,omitempty"`
-		ID    string          `json:"id,omitempty"`
-		Name  string          `json:"name,omitempty"`
-		Input json.RawMessage `json:"input,omitempty"`
-	} `json:"content"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
-	StopReason string `json:"stop_reason"`
-}
-
-type anthropicError struct {
-	Type  string `json:"type"`
-	Error struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
 	model := req.Model
 	if model == "" {
 		model = p.defaultModel
 	}
 
-	system, messages := anthropicConvertMessages(req.Messages)
-
-	var tools []anthropicToolDef
-	for _, ts := range req.Tools {
-		tools = append(tools, anthropicToolDef{
-			Name:        ts.Name,
-			Description: ts.Description,
-			InputSchema: ts.InputSchema,
-		})
-	}
-
-	maxTokens := req.GenParams.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 4096
-	}
-
-	aReq := anthropicRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    system,
-		Messages:  messages,
-	}
-	if len(tools) > 0 {
-		aReq.Tools = tools
-	}
-	if req.GenParams.Temperature != nil {
-		aReq.Temperature = req.GenParams.Temperature
-	}
-	if req.GenParams.TopP != nil {
-		aReq.TopP = req.GenParams.TopP
-	}
-	if req.GenParams.TopK != nil {
-		aReq.TopK = req.GenParams.TopK
-	}
-	if len(req.GenParams.StopSequences) > 0 {
-		aReq.StopSequences = req.GenParams.StopSequences
-	}
+	aReq := anthropicBuildRequest(model, req)
 
 	body, err := json.Marshal(aReq)
 	if err != nil {
@@ -205,11 +107,12 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
+	raw, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return CompleteResponse{}, fmt.Errorf("read body: %w", err)
+	}
+
 	if httpResp.StatusCode != http.StatusOK {
-		raw, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			return CompleteResponse{}, fmt.Errorf("read error body: %w", err)
-		}
 		baseErr := fmt.Errorf("anthropic: HTTP %d: %s", httpResp.StatusCode, raw)
 		var apiErr anthropicError
 		if json.Unmarshal(raw, &apiErr) == nil && apiErr.Error.Message != "" {
@@ -225,81 +128,10 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (
 		return CompleteResponse{}, baseErr
 	}
 
-	var resp anthropicResponse
-	raw, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return CompleteResponse{}, err
+	costFn := func(input, output int) float64 {
+		return anthropicEstimateCost(model, input, output)
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return CompleteResponse{}, fmt.Errorf("anthropic: decode: %w", err)
-	}
-
-	var text strings.Builder
-	var toolCalls []ToolCall
-	for _, block := range resp.Content {
-		switch block.Type {
-		case "text":
-			text.WriteString(block.Text)
-		case "tool_use":
-			input := block.Input
-			if input == nil {
-				input = json.RawMessage("{}")
-			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:   block.ID,
-				Name: block.Name,
-				Args: input,
-			})
-		}
-	}
-
-	costUSD := anthropicEstimateCost(model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
-
-	return CompleteResponse{
-		AssistantText: text.String(),
-		ToolCalls:     toolCalls,
-		Usage: Usage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			CostUSD:      costUSD,
-		},
-		Raw: raw,
-	}, nil
-}
-
-func anthropicParseResponse(model string, raw []byte) (CompleteResponse, error) {
-	var resp anthropicResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return CompleteResponse{}, err
-	}
-	var text strings.Builder
-	var toolCalls []ToolCall
-	for _, block := range resp.Content {
-		switch block.Type {
-		case "text":
-			text.WriteString(block.Text)
-		case "tool_use":
-			input := block.Input
-			if input == nil {
-				input = json.RawMessage("{}")
-			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:   block.ID,
-				Name: block.Name,
-				Args: input,
-			})
-		}
-	}
-	return CompleteResponse{
-		AssistantText: text.String(),
-		ToolCalls:     toolCalls,
-		Usage: Usage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			CostUSD:      anthropicEstimateCost(model, resp.Usage.InputTokens, resp.Usage.OutputTokens),
-		},
-		Raw: raw,
-	}, nil
+	return anthropicParseResponse(raw, costFn)
 }
 
 func (p *AnthropicProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
@@ -335,44 +167,8 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 		model = p.defaultModel
 	}
 
-	system, messages := anthropicConvertMessages(req.Messages)
-
-	var tools []anthropicToolDef
-	for _, ts := range req.Tools {
-		tools = append(tools, anthropicToolDef{
-			Name:        ts.Name,
-			Description: ts.Description,
-			InputSchema: ts.InputSchema,
-		})
-	}
-
-	maxTokens := req.GenParams.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 4096
-	}
-
-	aReq := anthropicRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    system,
-		Messages:  messages,
-		Stream:    true,
-	}
-	if len(tools) > 0 {
-		aReq.Tools = tools
-	}
-	if req.GenParams.Temperature != nil {
-		aReq.Temperature = req.GenParams.Temperature
-	}
-	if req.GenParams.TopP != nil {
-		aReq.TopP = req.GenParams.TopP
-	}
-	if req.GenParams.TopK != nil {
-		aReq.TopK = req.GenParams.TopK
-	}
-	if len(req.GenParams.StopSequences) > 0 {
-		aReq.StopSequences = req.GenParams.StopSequences
-	}
+	aReq := anthropicBuildRequest(model, req)
+	aReq.Stream = true
 
 	body, err := json.Marshal(aReq)
 	if err != nil {
@@ -410,141 +206,90 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 	}
 
 	ch := make(chan StreamEvent, 100)
-	go func() {
-		defer close(ch)
-		defer func() { _ = httpResp.Body.Close() }()
-
-		scanner := bufio.NewScanner(httpResp.Body)
-		var currentToolID string
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-
-			var event struct {
-				Type         string                 `json:"type"`
-				Message      *anthropicResponse     `json:"message"`
-				ContentBlock *anthropicContentBlock `json:"content_block"`
-				Delta        *struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-					JSON string `json:"partial_json"`
-				} `json:"delta"`
-				Usage *struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
-				} `json:"usage"`
-			}
-
-			if err := json.Unmarshal([]byte(data), &event); err != nil {
-				continue
-			}
-
-			switch event.Type {
-			case "message_start":
-				// message_start contains initial usage or metadata if needed
-			case "content_block_start":
-				if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-					currentToolID = event.ContentBlock.ID
-					ch <- StreamEvent{
-						Type:         StreamToolCallStart,
-						ToolCallID:   currentToolID,
-						ToolCallName: event.ContentBlock.Name,
-					}
-				}
-			case "content_block_delta":
-				if event.Delta != nil {
-					switch event.Delta.Type {
-					case "text_delta":
-						ch <- StreamEvent{Type: StreamToken, Text: event.Delta.Text}
-					case "input_json_delta":
-						ch <- StreamEvent{
-							Type:         StreamToolCallDelta,
-							ToolCallID:   currentToolID,
-							ToolCallArgs: event.Delta.JSON,
-						}
-					}
-				}
-			case "message_delta":
-				// partial usage updates
-			case "message_stop":
-				// message_stop usually has the final usage block
-				u := Usage{}
-				if event.Message != nil {
-					u = Usage{
-						InputTokens:  event.Message.Usage.InputTokens,
-						OutputTokens: event.Message.Usage.OutputTokens,
-						CostUSD:      anthropicEstimateCost(model, event.Message.Usage.InputTokens, event.Message.Usage.OutputTokens),
-					}
-				}
-				ch <- StreamEvent{Type: StreamDone, Usage: u}
-				return
-			case "error":
-				ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("anthropic stream error: %s", data)}
-				return
-			}
-		}
-	}()
+	go anthropicStreamSSE(httpResp, model, ch)
 
 	return ch, nil
 }
 
-// anthropicConvertMessages converts provider messages to Anthropic format.
-// Returns (system, messages). System messages are extracted; tool results
-// are wrapped in tool_result content blocks within user turns.
-func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
-	var system string
-	var out []anthropicMessage
+// anthropicStreamSSE reads SSE events from an Anthropic streaming response and
+// sends parsed StreamEvents on ch. It closes ch and httpResp.Body when done.
+func anthropicStreamSSE(httpResp *http.Response, model string, ch chan<- StreamEvent) {
+	defer close(ch)
+	defer func() { _ = httpResp.Body.Close() }()
 
-	// Collect pending tool results to merge into a single user turn
-	var pendingResults []anthropicContentBlock
+	scanner := bufio.NewScanner(httpResp.Body)
+	var currentToolID string
 
-	for i := 0; i < len(msgs); i++ {
-		m := msgs[i]
-		switch m.Role {
-		case "system":
-			if system != "" {
-				system += "\n\n"
-			}
-			system += m.Content
-		case "user":
-			out = append(out, anthropicMessage{Role: "user", Content: m.Content})
-		case "assistant":
-			if len(m.ToolCalls) > 0 {
-				var content []anthropicContentBlock
-				if m.Content != "" {
-					content = append(content, anthropicContentBlock{Type: "text", Text: m.Content})
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		var event struct {
+			Type         string                 `json:"type"`
+			Message      *anthropicResponse     `json:"message"`
+			ContentBlock *anthropicContentBlock `json:"content_block"`
+			Delta        *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+				JSON string `json:"partial_json"`
+			} `json:"delta"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "message_start":
+			// message_start contains initial usage or metadata if needed
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				currentToolID = event.ContentBlock.ID
+				ch <- StreamEvent{
+					Type:         StreamToolCallStart,
+					ToolCallID:   currentToolID,
+					ToolCallName: event.ContentBlock.Name,
 				}
-				for _, tc := range m.ToolCalls {
-					content = append(content, anthropicContentBlock{
-						Type:  "tool_use",
-						ID:    tc.ID,
-						Name:  tc.Name,
-						Input: tc.Args,
-					})
+			}
+		case "content_block_delta":
+			if event.Delta != nil {
+				switch event.Delta.Type {
+				case "text_delta":
+					ch <- StreamEvent{Type: StreamToken, Text: event.Delta.Text}
+				case "input_json_delta":
+					ch <- StreamEvent{
+						Type:         StreamToolCallDelta,
+						ToolCallID:   currentToolID,
+						ToolCallArgs: event.Delta.JSON,
+					}
 				}
-				out = append(out, anthropicMessage{Role: "assistant", Content: content})
-			} else {
-				out = append(out, anthropicMessage{Role: "assistant", Content: m.Content})
 			}
-		case "tool":
-			pendingResults = append(pendingResults, anthropicContentBlock{
-				Type:      "tool_result",
-				ToolUseID: m.ToolCallID,
-				Content:   m.Content,
-			})
-
-			// If next message is not a tool result, flush pending results into a user turn
-			if i+1 == len(msgs) || msgs[i+1].Role != "tool" {
-				out = append(out, anthropicMessage{Role: "user", Content: pendingResults})
-				pendingResults = nil
+		case "message_delta":
+			// partial usage updates
+		case "message_stop":
+			// message_stop usually has the final usage block
+			u := Usage{}
+			if event.Message != nil {
+				u = Usage{
+					InputTokens:  event.Message.Usage.InputTokens,
+					OutputTokens: event.Message.Usage.OutputTokens,
+					CostUSD:      anthropicEstimateCost(model, event.Message.Usage.InputTokens, event.Message.Usage.OutputTokens),
+				}
 			}
+			ch <- StreamEvent{Type: StreamDone, Usage: u}
+			return
+		case "error":
+			ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("anthropic stream error: %s", data)}
+			return
 		}
 	}
-	return system, out
 }
 
 func anthropicEstimateCost(model string, input, output int) float64 {

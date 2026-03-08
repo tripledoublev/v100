@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -29,6 +30,10 @@ const (
 	GeminiTokenURL    = "https://oauth2.googleapis.com/token"
 	GeminiRedirectURI = "http://127.0.0.1:8085/oauth2callback"
 	GeminiScopes      = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+
+	MiniMaxCodeURL  = "https://api.minimax.io/oauth/code"
+	MiniMaxTokenURL = "https://api.minimax.io/oauth/token"
+	MiniMaxScopes   = "group_id profile model.completion"
 )
 
 // OAuthCredentials holds client credentials loaded from disk.
@@ -36,6 +41,7 @@ type OAuthCredentials struct {
 	CodexClientID      string `json:"codex_client_id"`
 	GeminiClientID     string `json:"gemini_client_id"`
 	GeminiClientSecret string `json:"gemini_client_secret"`
+	MiniMaxClientID    string `json:"minimax_client_id"`
 }
 
 // DefaultCredentialsPath returns ~/.config/v100/oauth_credentials.json.
@@ -49,7 +55,7 @@ func DefaultCredentialsPath() string {
 
 // CredentialsTemplate returns a stub oauth_credentials.json payload.
 func CredentialsTemplate() string {
-	return "{\n  \"codex_client_id\": \"\",\n  \"gemini_client_id\": \"\",\n  \"gemini_client_secret\": \"\"\n}\n"
+	return "{\n  \"codex_client_id\": \"\",\n  \"gemini_client_id\": \"\",\n  \"gemini_client_secret\": \"\",\n  \"minimax_client_id\": \"\"\n}\n"
 }
 
 // LoadCodexCredentials reads and validates the Codex OAuth client config.
@@ -60,6 +66,11 @@ func LoadCodexCredentials() (*OAuthCredentials, error) {
 // LoadGeminiCredentials reads and validates the Gemini OAuth client config.
 func LoadGeminiCredentials() (*OAuthCredentials, error) {
 	return loadCredentials("gemini_client_id", "gemini_client_secret")
+}
+
+// LoadMiniMaxCredentials reads and validates the MiniMax OAuth client config.
+func LoadMiniMaxCredentials() (*OAuthCredentials, error) {
+	return loadCredentials("minimax_client_id")
 }
 
 func loadCredentials(requiredFields ...string) (*OAuthCredentials, error) {
@@ -97,6 +108,8 @@ func credentialValue(c *OAuthCredentials, field string) string {
 		return c.GeminiClientID
 	case "gemini_client_secret":
 		return c.GeminiClientSecret
+	case "minimax_client_id":
+		return c.MiniMaxClientID
 	default:
 		return ""
 	}
@@ -363,6 +376,179 @@ func postTokenRequest(ctx context.Context, tokenURL string, form url.Values) (*T
 		Refresh:   tok.RefreshToken,
 		ExpiresMS: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000,
 		AccountID: AccountIDFromJWT(tok.AccessToken),
+	}
+	return t, nil
+}
+
+// LoginMiniMax performs an OAuth Device Flow for MiniMax.
+func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
+	creds, err := LoadMiniMaxCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	verifier, challenge, err := GeneratePKCE()
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 1: Request a device code
+	codeBody, _ := json.Marshal(map[string]string{
+		"client_id":             creds.MiniMaxClientID,
+		"scope":                 MiniMaxScopes,
+		"code_challenge":        challenge,
+		"code_challenge_method": "S256",
+	})
+	codeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxCodeURL, bytes.NewReader(codeBody))
+	if err != nil {
+		return nil, fmt.Errorf("auth: build code request: %w", err)
+	}
+	codeReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	codeResp, err := client.Do(codeReq)
+	if err != nil {
+		return nil, fmt.Errorf("auth: code request: %w", err)
+	}
+	codeRaw, _ := io.ReadAll(codeResp.Body)
+	_ = codeResp.Body.Close()
+
+	if codeResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("auth: code endpoint HTTP %d: %s", codeResp.StatusCode, codeRaw)
+	}
+
+	var codeResult struct {
+		UserCode        string `json:"user_code"`
+		VerificationURI string `json:"verification_uri"`
+		ExpiresIn       int    `json:"expires_in"`
+		Interval        int    `json:"interval"`
+	}
+	if err := json.Unmarshal(codeRaw, &codeResult); err != nil {
+		return nil, fmt.Errorf("auth: parse code response: %w", err)
+	}
+
+	fmt.Printf("\nVisit: %s\nEnter code: %s\n\n", codeResult.VerificationURI, codeResult.UserCode)
+	openBrowser(codeResult.VerificationURI)
+
+	// Step 2: Poll for token
+	interval := time.Duration(codeResult.Interval) * time.Second
+	if interval < 2*time.Second {
+		interval = 2 * time.Second
+	}
+	deadline := time.Now().Add(time.Duration(codeResult.ExpiresIn) * time.Second)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("auth: login cancelled: %w", ctx.Err())
+		case <-time.After(interval):
+		}
+
+		tokenBody, _ := json.Marshal(map[string]string{
+			"grant_type":    "urn:ietf:params:oauth:grant-type:user_code",
+			"client_id":    creds.MiniMaxClientID,
+			"code":         codeResult.UserCode,
+			"code_verifier": verifier,
+		})
+		tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, bytes.NewReader(tokenBody))
+		if err != nil {
+			return nil, fmt.Errorf("auth: build token request: %w", err)
+		}
+		tokenReq.Header.Set("Content-Type", "application/json")
+
+		tokenResp, err := client.Do(tokenReq)
+		if err != nil {
+			return nil, fmt.Errorf("auth: token request: %w", err)
+		}
+		tokenRaw, _ := io.ReadAll(tokenResp.Body)
+		_ = tokenResp.Body.Close()
+
+		if tokenResp.StatusCode == http.StatusOK {
+			var tok struct {
+				AccessToken  string `json:"access_token"`
+				RefreshToken string `json:"refresh_token"`
+				ExpiresIn    int    `json:"expires_in"`
+			}
+			if err := json.Unmarshal(tokenRaw, &tok); err != nil {
+				return nil, fmt.Errorf("auth: parse token response: %w", err)
+			}
+			if tok.AccessToken == "" {
+				return nil, fmt.Errorf("auth: empty access_token in response")
+			}
+			return &MiniMaxToken{
+				Access:    tok.AccessToken,
+				Refresh:   tok.RefreshToken,
+				ExpiresMS: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000,
+			}, nil
+		}
+
+		// Check if still pending (authorization_pending or slow_down)
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(tokenRaw, &errBody) == nil {
+			switch errBody.Error {
+			case "authorization_pending":
+				continue
+			case "slow_down":
+				interval += 2 * time.Second
+				if interval > 10*time.Second {
+					interval = 10 * time.Second
+				}
+				continue
+			}
+		}
+
+		return nil, fmt.Errorf("auth: token endpoint HTTP %d: %s", tokenResp.StatusCode, tokenRaw)
+	}
+
+	return nil, fmt.Errorf("auth: device code expired — try again")
+}
+
+// RefreshMiniMax exchanges a refresh token for a new MiniMax access token.
+func RefreshMiniMax(ctx context.Context, creds *OAuthCredentials, refreshToken string) (*MiniMaxToken, error) {
+	body, _ := json.Marshal(map[string]string{
+		"grant_type":    "refresh_token",
+		"client_id":     creds.MiniMaxClientID,
+		"refresh_token": refreshToken,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("auth: build refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("auth: refresh request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("auth: refresh endpoint HTTP %d: %s", resp.StatusCode, raw)
+	}
+
+	var tok struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(raw, &tok); err != nil {
+		return nil, fmt.Errorf("auth: parse refresh response: %w", err)
+	}
+	if tok.AccessToken == "" {
+		return nil, fmt.Errorf("auth: empty access_token in refresh response")
+	}
+
+	t := &MiniMaxToken{
+		Access:    tok.AccessToken,
+		Refresh:   tok.RefreshToken,
+		ExpiresMS: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000,
+	}
+	if t.Refresh == "" {
+		t.Refresh = refreshToken // keep old refresh token if not rotated
 	}
 	return t, nil
 }

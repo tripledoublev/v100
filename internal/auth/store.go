@@ -141,6 +141,55 @@ func SaveClaude(path string, t *ClaudeToken) error {
 	return nil
 }
 
+// MiniMaxToken holds OAuth credentials for the MiniMax provider.
+type MiniMaxToken struct {
+	Access    string `json:"access"`
+	Refresh   string `json:"refresh"`
+	ExpiresMS int64  `json:"expires_ms"`
+}
+
+// Valid reports whether the MiniMax token is usable (not expiring within 60 s).
+func (t *MiniMaxToken) Valid() bool {
+	return t != nil && t.Access != "" && time.Now().UnixMilli()+60_000 < t.ExpiresMS
+}
+
+// DefaultMiniMaxTokenPath returns ~/.config/v100/minimax_auth.json.
+func DefaultMiniMaxTokenPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "v100", "minimax_auth.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "v100", "minimax_auth.json")
+}
+
+// LoadMiniMax reads a MiniMaxToken from path.
+func LoadMiniMax(path string) (*MiniMaxToken, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("auth: read %s: %w", path, err)
+	}
+	var t MiniMaxToken
+	if err := json.Unmarshal(data, &t); err != nil {
+		return nil, fmt.Errorf("auth: parse %s: %w", path, err)
+	}
+	return &t, nil
+}
+
+// SaveMiniMax writes a MiniMaxToken to path (creates parent directories as needed).
+func SaveMiniMax(path string, t *MiniMaxToken) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("auth: mkdir: %w", err)
+	}
+	data, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return fmt.Errorf("auth: marshal: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("auth: write %s: %w", path, err)
+	}
+	return nil
+}
+
 // Save writes a Token to path (creates parent directories as needed).
 func Save(path string, t *Token) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

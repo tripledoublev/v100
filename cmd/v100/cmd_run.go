@@ -46,6 +46,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		nameFlag         string
 		tagFlags         []string
 		solverFlag       string
+		authFlag         string
 		temperatureFlag  float64
 		topPFlag         float64
 		topKFlag         int
@@ -86,6 +87,16 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if solverFlag != "" {
 				cfg.Defaults.Solver = solverFlag
+			}
+			if authFlag != "" {
+				parts := strings.SplitN(authFlag, ":", 2)
+				if len(parts) == 2 {
+					if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
+						pc.Auth.Username = parts[0]
+						pc.Auth.Password = parts[1]
+						cfg.Providers[cfg.Defaults.Provider] = pc
+					}
+				}
 			}
 			if cmd.Flags().Changed("sandbox") {
 				cfg.Sandbox.Enabled = sandboxFlag
@@ -233,7 +244,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
-	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute (default: react)")
+	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
+	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth credentials (user:password) for providers like ollama")
 	cmd.Flags().IntVar(&maxReplansFlag, "max-replans", 0, "max replans for plan_execute solver")
 	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
 	cmd.Flags().Float64Var(&topPFlag, "top-p", 0, "nucleus sampling top-p (0=provider default)")

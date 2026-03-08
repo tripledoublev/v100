@@ -16,14 +16,16 @@ const (
 	ollamaDefaultModel   = "qwen3.5:2b"
 )
 
-// OllamaProvider implements Provider using a local Ollama server.
+// OllamaProvider implements Provider using a local or remote Ollama server.
 type OllamaProvider struct {
 	client       *http.Client
 	baseURL      string
 	defaultModel string
+	username     string
+	password     string
 }
 
-func NewOllamaProvider(baseURL, defaultModel string) (*OllamaProvider, error) {
+func NewOllamaProvider(baseURL, defaultModel, username, password string) (*OllamaProvider, error) {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = ollamaDefaultBaseURL
 	}
@@ -34,6 +36,8 @@ func NewOllamaProvider(baseURL, defaultModel string) (*OllamaProvider, error) {
 		client:       &http.Client{Timeout: 180 * time.Second},
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		defaultModel: defaultModel,
+		username:     username,
+		password:     password,
 	}, nil
 }
 
@@ -41,6 +45,12 @@ func (p *OllamaProvider) Name() string { return "ollama" }
 
 func (p *OllamaProvider) Capabilities() Capabilities {
 	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+}
+
+func (p *OllamaProvider) setAuth(req *http.Request) {
+	if p.username != "" || p.password != "" {
+		req.SetBasicAuth(p.username, p.password)
+	}
 }
 
 func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
@@ -92,6 +102,7 @@ func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	p.setAuth(httpReq)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -306,6 +317,7 @@ func (p *OllamaProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		return CompleteResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	p.setAuth(httpReq)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -373,6 +385,7 @@ func (p *OllamaProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 		return EmbedResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	p.setAuth(httpReq)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -423,6 +436,7 @@ func (p *OllamaProvider) Metadata(ctx context.Context, model string) (ModelMetad
 		return ModelMetadata{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	p.setAuth(httpReq)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
