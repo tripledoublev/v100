@@ -27,6 +27,10 @@ func (m *mockStreamer) Capabilities() providers.Capabilities {
 	return providers.Capabilities{ToolCalls: true, Streaming: true}
 }
 
+func (m *mockStreamer) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
+
 func TestReactSolverStreaming(t *testing.T) {
 	ctx := context.Background()
 	events := []providers.StreamEvent{

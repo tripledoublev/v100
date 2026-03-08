@@ -558,6 +558,17 @@ func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 	return EmbedResponse{}, fmt.Errorf("gemini: embeddings not yet supported for subscription provider")
 }
 
+func (p *GeminiProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	if model == "" {
+		model = p.defaultModel
+	}
+	return ModelMetadata{
+		Model:       model,
+		ContextSize: 1048576, // 1M
+		IsFree:      true,    // subscription-backed
+	}, nil
+}
+
 // geminiParseRetryWait extracts wait time from a 429 error body like "after 49s".
 var retryAfterRe = regexp.MustCompile(`after (\d+)s`)
 

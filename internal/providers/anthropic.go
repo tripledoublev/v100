@@ -304,6 +304,28 @@ func (p *AnthropicProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedR
 	return EmbedResponse{}, fmt.Errorf("anthropic: embeddings not supported")
 }
 
+func (p *AnthropicProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	m := ModelMetadata{Model: model, ContextSize: 200000}
+
+	switch {
+	case strings.Contains(model, "opus"):
+		m.CostPer1MIn = 15.00
+		m.CostPer1MOut = 75.00
+	case strings.Contains(model, "sonnet-3-5"), strings.Contains(model, "sonnet-3.5"):
+		m.CostPer1MIn = 3.00
+		m.CostPer1MOut = 15.00
+	case strings.Contains(model, "haiku"):
+		m.CostPer1MIn = 0.80
+		m.CostPer1MOut = 4.00
+	}
+
+	return m, nil
+}
+
 func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {

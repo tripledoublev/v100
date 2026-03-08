@@ -75,7 +75,7 @@ func TestReconstructHistoryResetsOnSandboxRestore(t *testing.T) {
 		}),
 	}
 
-	msgs, providerName, model, workspace := reconstructHistory(runDir, events)
+	msgs, providerName, model, workspace, _ := reconstructHistory(runDir, events)
 	if providerName != "mock" || model != "test" || workspace != "/workspace" {
 		t.Fatalf("unexpected run info: provider=%q model=%q workspace=%q", providerName, model, workspace)
 	}

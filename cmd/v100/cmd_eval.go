@@ -270,11 +270,15 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
+					metadata, _ := prov.Metadata(ctx, variant.Model)
+					loop.ModelMetadata = metadata
+
 					_ = loop.EmitRunStart(core.RunStartPayload{
-						Policy:    pol.Name,
-						Provider:  prov.Name(),
-						Model:     variant.Model,
-						Workspace: s_workspace,
+						Policy:        pol.Name,
+						Provider:      prov.Name(),
+						Model:         variant.Model,
+						Workspace:     s_workspace,
+						ModelMetadata: metadata,
 					})
 
 					reason := "completed"
@@ -535,11 +539,15 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
+					metadata, _ := prov.Metadata(context.Background(), model)
+					loop.ModelMetadata = metadata
+
 					_ = loop.EmitRunStart(core.RunStartPayload{
-						Policy:    "default",
-						Provider:  provName,
-						Model:     model,
-						Workspace: s_workspace,
+						Policy:        "default",
+						Provider:      provName,
+						Model:         model,
+						Workspace:     s_workspace,
+						ModelMetadata: metadata,
 					})
 
 					err = loop.Step(context.Background(), prompt)

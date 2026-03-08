@@ -38,6 +38,9 @@ func (p *scriptedProvider) Complete(_ context.Context, _ providers.CompleteReque
 func (p *scriptedProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
 	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
 }
+func (p *scriptedProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "scripted", ContextSize: 4096}, nil
+}
 
 func TestPlanExecuteSolverRestoresCheckpointOnReplan(t *testing.T) {
 	workspace := t.TempDir()

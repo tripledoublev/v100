@@ -36,6 +36,10 @@ func (c *capturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (
 	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
 }
 
+func (c *capturingProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
+
 // newCompressLoop builds a Loop wired for compression tests.
 func newCompressLoop(t *testing.T, prov providers.Provider, contextLimit int) *core.Loop {
 	t.Helper()

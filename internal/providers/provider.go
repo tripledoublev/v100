@@ -94,6 +94,15 @@ type EmbedResponse struct {
 	Usage     Usage
 }
 
+// ModelMetadata describes discovered model limits and costs.
+type ModelMetadata struct {
+	Model        string
+	ContextSize  int
+	CostPer1MIn  float64
+	CostPer1MOut float64
+	IsFree       bool
+}
+
 // StreamEventType identifies the type of streaming event.
 type StreamEventType int
 
@@ -124,6 +133,7 @@ type Provider interface {
 	Capabilities() Capabilities
 	Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error)
 	Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error)
+	Metadata(ctx context.Context, model string) (ModelMetadata, error)
 }
 
 // Streamer is an optional interface for providers that support streaming.

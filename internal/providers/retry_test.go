@@ -41,6 +41,10 @@ func (p *stubProvider) StreamComplete(ctx context.Context, req CompleteRequest) 
 	return nil, io.EOF
 }
 
+func (p *stubProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	return ModelMetadata{Model: p.name, ContextSize: 4096}, nil
+}
+
 func testRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxAttempts: 3,

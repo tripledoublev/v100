@@ -74,6 +74,10 @@ func (rp *RetryProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 	})
 }
 
+func (rp *RetryProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	return rp.inner.Metadata(ctx, model)
+}
+
 func (rp *RetryProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
 	return retryCall(ctx, rp.config, func() (CompleteResponse, error) {
 		return rp.inner.Complete(ctx, req)
@@ -116,6 +120,10 @@ func (rs *retryStreamer) StreamComplete(ctx context.Context, req CompleteRequest
 	return retryCall(ctx, rs.config, func() (<-chan StreamEvent, error) {
 		return s.StreamComplete(ctx, req)
 	})
+}
+
+func (rs *retryStreamer) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	return rs.RetryProvider.Metadata(ctx, model)
 }
 
 func isRetryableStatus(code int) bool {

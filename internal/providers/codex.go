@@ -375,3 +375,14 @@ func (p *CodexProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedRespo
 	// Subscription-backed ChatGPT embeddings endpoint is not currently known/supported in this harness.
 	return EmbedResponse{}, fmt.Errorf("codex: embeddings not yet supported for subscription provider")
 }
+
+func (p *CodexProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	if model == "" {
+		model = p.defaultModel
+	}
+	return ModelMetadata{
+		Model:       model,
+		ContextSize: 128000,
+		IsFree:      true, // subscription-backed
+	}, nil
+}

@@ -405,3 +405,56 @@ func (p *OllamaProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 		Usage:     Usage{InputTokens: 0, OutputTokens: 0, CostUSD: 0},
 	}, nil
 }
+
+func (p *OllamaProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	payload := map[string]any{"model": model}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ModelMetadata{}, err
+	}
+
+	url := p.baseURL + "/api/show"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return ModelMetadata{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return ModelMetadata{}, fmt.Errorf("ollama: show: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return ModelMetadata{Model: model, IsFree: true, ContextSize: 4096}, nil // fallback
+	}
+
+	var result struct {
+		ModelInfo struct {
+			ContextLength int `json:"context_length"`
+		} `json:"model_info"`
+		Details struct {
+			ContextLength int `json:"context_length"`
+		} `json:"details"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+
+	ctxSize := result.ModelInfo.ContextLength
+	if ctxSize == 0 {
+		ctxSize = result.Details.ContextLength
+	}
+	if ctxSize == 0 {
+		ctxSize = 4096 // default fallback
+	}
+
+	return ModelMetadata{
+		Model:       model,
+		ContextSize: ctxSize,
+		IsFree:      true,
+	}, nil
+}

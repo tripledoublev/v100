@@ -3,10 +3,10 @@ package providers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -17,24 +17,23 @@ type OpenAIProvider struct {
 	defaultModel string
 }
 
-// NewOpenAIProvider creates an OpenAI provider.
-// authEnv is the name of the environment variable holding the API key.
-// baseURL may be empty to use the default OpenAI endpoint.
-func NewOpenAIProvider(authEnv, baseURL, defaultModel string) (*OpenAIProvider, error) {
+func NewOpenAIProvider(authEnv, baseURL, model string) (*OpenAIProvider, error) {
+	if authEnv == "" {
+		authEnv = "OPENAI_API_KEY"
+	}
 	apiKey := os.Getenv(authEnv)
 	if apiKey == "" {
-		return nil, fmt.Errorf("openai: env var %q is not set", authEnv)
+		return nil, fmt.Errorf("openai: %s not set", authEnv)
 	}
 
-	cfg := openai.DefaultConfig(apiKey)
+	config := openai.DefaultConfig(apiKey)
 	if baseURL != "" {
-		cfg.BaseURL = baseURL
+		config.BaseURL = baseURL
 	}
-	client := openai.NewClientWithConfig(cfg)
 
-	model := defaultModel
+	client := openai.NewClientWithConfig(config)
 	if model == "" {
-		model = openai.GPT4o
+		model = "gpt-4o"
 	}
 
 	return &OpenAIProvider{client: client, defaultModel: model}, nil
@@ -58,29 +57,24 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		msg := openai.ChatCompletionMessage{
 			Role:    m.Role,
 			Content: m.Content,
-		}
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			tcs := make([]openai.ToolCall, 0, len(m.ToolCalls))
-			for _, tc := range m.ToolCalls {
-				tcs = append(tcs, openai.ToolCall{
-					ID:   tc.ID,
-					Type: openai.ToolTypeFunction,
-					Function: openai.FunctionCall{
-						Name:      tc.Name,
-						Arguments: string(tc.Args),
-					},
-				})
-			}
-			msg.ToolCalls = tcs
+			Name:    m.Name,
 		}
 		if m.Role == "tool" {
 			msg.ToolCallID = m.ToolCallID
-			msg.Name = m.Name
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+					ID:       tc.ID,
+					Type:     openai.ToolTypeFunction,
+					Function: openai.FunctionCall{Name: tc.Name, Arguments: string(tc.Args)},
+				})
+			}
 		}
 		msgs = append(msgs, msg)
 	}
 
-	// Build tool definitions
+	// Build tools
 	var tools []openai.Tool
 	for _, ts := range req.Tools {
 		tools = append(tools, openai.Tool{
@@ -93,40 +87,49 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		})
 	}
 
-	creq := openai.ChatCompletionRequest{
+	oReq := openai.ChatCompletionRequest{
 		Model:    model,
 		Messages: msgs,
-	}
-	if len(tools) > 0 {
-		creq.Tools = tools
-	}
-	if req.GenParams.Temperature != nil {
-		creq.Temperature = float32(*req.GenParams.Temperature)
-	}
-	if req.GenParams.TopP != nil {
-		creq.TopP = float32(*req.GenParams.TopP)
-	}
-	if req.GenParams.MaxTokens > 0 {
-		creq.MaxTokens = req.GenParams.MaxTokens
-	}
-	if req.GenParams.Seed != nil {
-		creq.Seed = req.GenParams.Seed
-	}
-	if len(req.GenParams.StopSequences) > 0 {
-		creq.Stop = req.GenParams.StopSequences
+		Tools:    tools,
 	}
 
-	resp, err := p.client.CreateChatCompletion(ctx, creq)
+	// Set GenParams
+	if req.GenParams.Temperature != nil {
+		oReq.Temperature = float32(*req.GenParams.Temperature)
+	}
+	if req.GenParams.TopP != nil {
+		oReq.TopP = float32(*req.GenParams.TopP)
+	}
+	if req.GenParams.MaxTokens > 0 {
+		oReq.MaxTokens = req.GenParams.MaxTokens
+	}
+	if len(req.GenParams.StopSequences) > 0 {
+		oReq.Stop = req.GenParams.StopSequences
+	}
+	if req.GenParams.Seed != nil {
+		oReq.Seed = req.GenParams.Seed
+	}
+
+	// Apply tool call hints
+	if req.Hints.ToolCallsOnly {
+		oReq.ToolChoice = "required"
+	}
+
+	resp, err := p.client.CreateChatCompletion(ctx, oReq)
 	if err != nil {
-		return CompleteResponse{}, wrapOpenAIError("openai: complete", err)
+		// Detect rate limit or transient errors
+		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "500") {
+			return CompleteResponse{}, &RetryableError{Err: err, StatusCode: 429}
+		}
+		return CompleteResponse{}, fmt.Errorf("openai: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
 		return CompleteResponse{}, fmt.Errorf("openai: no choices in response")
 	}
-
 	choice := resp.Choices[0]
-	var toolCalls []ToolCall
+
+	toolCalls := make([]ToolCall, 0, len(choice.Message.ToolCalls))
 	for _, tc := range choice.Message.ToolCalls {
 		toolCalls = append(toolCalls, ToolCall{
 			ID:   tc.ID,
@@ -166,7 +169,7 @@ func (p *OpenAIProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 
 	resp, err := p.client.CreateEmbeddings(ctx, ereq)
 	if err != nil {
-		return EmbedResponse{}, wrapOpenAIError("openai: embed", err)
+		return EmbedResponse{}, fmt.Errorf("openai: embed: %w", err)
 	}
 
 	if len(resp.Data) == 0 {
@@ -180,6 +183,35 @@ func (p *OpenAIProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 			CostUSD:     (float64(resp.Usage.TotalTokens) / 1_000_000) * 0.02, // approx for 3-small
 		},
 	}, nil
+}
+
+func (p *OpenAIProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	m := ModelMetadata{Model: model, ContextSize: 128000}
+
+	switch {
+	case strings.HasPrefix(model, "gpt-4o-mini"):
+		m.CostPer1MIn = 0.15
+		m.CostPer1MOut = 0.60
+	case strings.HasPrefix(model, "gpt-4o"):
+		m.CostPer1MIn = 2.50
+		m.CostPer1MOut = 10.00
+	case strings.HasPrefix(model, "o1"):
+		m.CostPer1MIn = 15.00
+		m.CostPer1MOut = 60.00
+	case strings.HasPrefix(model, "gpt-4-turbo"):
+		m.CostPer1MIn = 10.00
+		m.CostPer1MOut = 30.00
+	case strings.HasPrefix(model, "gpt-3.5-turbo"):
+		m.CostPer1MIn = 0.50
+		m.CostPer1MOut = 1.50
+		m.ContextSize = 16385
+	}
+
+	return m, nil
 }
 
 func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
@@ -242,7 +274,7 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 
 	stream, err := p.client.CreateChatCompletionStream(ctx, oReq)
 	if err != nil {
-		return nil, wrapOpenAIError("openai: stream", err)
+		return nil, fmt.Errorf("openai: stream: %w", err)
 	}
 
 	ch := make(chan StreamEvent, 100)
@@ -307,22 +339,6 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	return ch, nil
 }
 
-func wrapOpenAIError(prefix string, err error) error {
-	baseErr := fmt.Errorf("%s: %w", prefix, err)
-
-	var apiErr *openai.APIError
-	if errors.As(err, &apiErr) && isRetryableStatus(apiErr.HTTPStatusCode) {
-		return &RetryableError{Err: baseErr, StatusCode: apiErr.HTTPStatusCode}
-	}
-
-	var reqErr *openai.RequestError
-	if errors.As(err, &reqErr) && isRetryableStatus(reqErr.HTTPStatusCode) {
-		return &RetryableError{Err: baseErr, StatusCode: reqErr.HTTPStatusCode}
-	}
-
-	return baseErr
-}
-
 // estimateCost returns a rough USD cost estimate.
 func estimateCost(model string, input, output int) float64 {
 	// Per-1M token prices (as of early 2025 — approximate)
@@ -330,7 +346,7 @@ func estimateCost(model string, input, output int) float64 {
 	switch model {
 	case "gpt-4o", "gpt-4o-2024-08-06":
 		inPrice, outPrice = 2.50, 10.00
-	case "gpt-4o-mini":
+	case "gpt-4o-mini", "gpt-4o-mini-2024-07-18":
 		inPrice, outPrice = 0.15, 0.60
 	case "gpt-4-turbo", "gpt-4-turbo-2024-04-09":
 		inPrice, outPrice = 10.00, 30.00

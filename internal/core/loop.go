@@ -36,10 +36,12 @@ type Loop struct {
 	ConfirmFn   ConfirmFn
 	OutputFn    OutputFn
 	GenParams   providers.GenParams
-	Solver      Solver
-	Session     executor.Session
-	Mapper      *PathMapper
-	NetworkTier string
+	Solver        Solver
+	Session       executor.Session
+	Mapper        *PathMapper
+	ModelMetadata providers.ModelMetadata
+	NetworkTier   string
+
 	Snapshots   SnapshotManager
 	stepCount   int // running step counter for step.summary events
 	ended       bool
@@ -48,6 +50,14 @@ type Loop struct {
 
 // Step processes a single user input through the full model + tool execution cycle.
 func (l *Loop) Step(ctx context.Context, userInput string) error {
+	// Auto-discover metadata on first step if not set
+	if l.ModelMetadata.Model == "" {
+		m, err := l.Provider.Metadata(ctx, "")
+		if err == nil {
+			l.ModelMetadata = m
+		}
+	}
+
 	solver := l.Solver
 	if solver == nil {
 		solver = &ReactSolver{}

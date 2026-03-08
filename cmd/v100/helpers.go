@@ -662,9 +662,10 @@ func buildConfirmFn(mode string) core.ConfirmFn {
 	}
 }
 
-func reconstructHistory(runDir string, events []core.Event) ([]providers.Message, string, string, string) {
+func reconstructHistory(runDir string, events []core.Event) ([]providers.Message, string, string, string, providers.ModelMetadata) {
 	var msgs []providers.Message
 	var providerName, model, workspace string
+	var metadata providers.ModelMetadata
 
 	for _, ev := range events {
 		switch ev.Type {
@@ -673,7 +674,9 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 			_ = json.Unmarshal(ev.Payload, &p)
 			providerName = p.Provider
 			model = p.Model
-			workspace = strings.TrimSpace(p.Workspace)
+			workspace = p.Workspace
+			metadata = p.ModelMetadata
+
 
 		case core.EventUserMsg:
 			var p core.UserMsgPayload
@@ -713,7 +716,7 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 			copy(msgs, cp.Messages)
 		}
 	}
-	return msgs, providerName, model, workspace
+	return msgs, providerName, model, workspace, metadata
 }
 
 func resolveWorkspace(workspaceFlag, runDir string) string {

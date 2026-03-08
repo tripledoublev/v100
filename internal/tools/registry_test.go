@@ -5,8 +5,25 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
 )
+
+type mockProvider struct{}
+
+func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{ToolCalls: true}
+}
+func (m *mockProvider) Complete(ctx context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	return providers.CompleteResponse{}, nil
+}
+func (m *mockProvider) Embed(ctx context.Context, req providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{}, nil
+}
+func (m *mockProvider) Metadata(ctx context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
 
 func TestRegistryEnabled(t *testing.T) {
 	reg := tools.NewRegistry([]string{"fs_read", "fs_list"})

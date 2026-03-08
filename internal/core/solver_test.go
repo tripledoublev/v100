@@ -31,6 +31,9 @@ func (p *MockProvider) Complete(ctx context.Context, req providers.CompleteReque
 func (p *MockProvider) Embed(ctx context.Context, req providers.EmbedRequest) (providers.EmbedResponse, error) {
 	return providers.EmbedResponse{Embedding: []float32{0.1, 0.2}}, nil
 }
+func (p *MockProvider) Metadata(ctx context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
 
 func TestReactSolver(t *testing.T) {
 	ctx := context.Background()

@@ -44,7 +44,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// Reconstruct message history from trace
-			msgs, providerName, model, tracedWorkspace := reconstructHistory(runDir, events)
+			msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
 
 			// Load meta to get original source workspace
 			meta, _ := core.ReadMeta(runDir)
@@ -108,19 +108,20 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), sandboxWorkspace, pol.MaxToolCallsPerStep, session, mapper)
 
 			loop := &core.Loop{
-				Run:         run,
-				Provider:    prov,
-				Tools:       reg,
-				Policy:      pol,
-				Trace:       trace,
-				Budget:      budget,
-				Messages:    msgs,
-				ConfirmFn:   buildConfirmFn(cfg.Defaults.ConfirmTools),
-				OutputFn:    outputFn,
-				Session:     session,
-				Mapper:      mapper,
-				NetworkTier: loopNetworkTier(cfg),
-				Snapshots:   buildSnapshotManager(cfg, sandboxWorkspace),
+				Run:           run,
+				Provider:      prov,
+				Tools:         reg,
+				Policy:        pol,
+				Trace:         trace,
+				Budget:        budget,
+				Messages:      msgs,
+				ConfirmFn:     buildConfirmFn(cfg.Defaults.ConfirmTools),
+				OutputFn:      outputFn,
+				Session:       session,
+				Mapper:        mapper,
+				ModelMetadata: metadata,
+				NetworkTier:   loopNetworkTier(cfg),
+				Snapshots:     buildSnapshotManager(cfg, sandboxWorkspace),
 			}
 			loop.OutputFn = outputFn
 
