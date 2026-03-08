@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -34,9 +33,10 @@ const (
 	MiniMaxCodeURL  = "https://api.minimax.io/oauth/code"
 	MiniMaxTokenURL = "https://api.minimax.io/oauth/token"
 	MiniMaxScopes   = "group_id profile model.completion"
+	MiniMaxGrantType = "urn:ietf:params:oauth:grant-type:user_code"
 
 	// MiniMaxDefaultClientID is the public Client ID for the MiniMax Coding Plan.
-	MiniMaxDefaultClientID = "minimax-coding-plan-cli"
+	MiniMaxDefaultClientID = "78257093-7e40-4613-99e0-527b14b39113"
 )
 
 // OAuthCredentials holds client credentials loaded from disk.
@@ -396,6 +396,8 @@ func postTokenRequest(ctx context.Context, tokenURL string, form url.Values) (*T
 }
 
 // LoginMiniMax performs an OAuth Device Flow for MiniMax.
+// Protocol matches the OpenClaw minimax-portal-auth extension:
+// form-urlencoded requests, state parameter, PKCE, user_code polling.
 func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 	creds, err := LoadMiniMaxCredentials()
 	if err != nil {
@@ -407,18 +409,27 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 		return nil, err
 	}
 
-	// Step 1: Request a device code
-	codeBody, _ := json.Marshal(map[string]string{
-		"client_id":             creds.MiniMaxClientID,
-		"scope":                 MiniMaxScopes,
-		"code_challenge":        challenge,
-		"code_challenge_method": "S256",
-	})
-	codeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxCodeURL, bytes.NewReader(codeBody))
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return nil, fmt.Errorf("auth: generate state: %w", err)
+	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
+
+	// Step 1: Request a device code (form-urlencoded, like OpenClaw)
+	codeForm := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {creds.MiniMaxClientID},
+		"scope":                 {MiniMaxScopes},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {state},
+	}
+	codeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxCodeURL, strings.NewReader(codeForm.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("auth: build code request: %w", err)
 	}
-	codeReq.Header.Set("Content-Type", "application/json")
+	codeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	codeReq.Header.Set("Accept", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	codeResp, err := client.Do(codeReq)
@@ -435,22 +446,30 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 	var codeResult struct {
 		UserCode        string `json:"user_code"`
 		VerificationURI string `json:"verification_uri"`
-		ExpiresIn       int    `json:"expires_in"`
+		ExpiredIn       int64  `json:"expired_in"` // unix timestamp, not duration
 		Interval        int    `json:"interval"`
+		State           string `json:"state"`
 	}
 	if err := json.Unmarshal(codeRaw, &codeResult); err != nil {
 		return nil, fmt.Errorf("auth: parse code response: %w", err)
+	}
+	if codeResult.UserCode == "" || codeResult.VerificationURI == "" {
+		return nil, fmt.Errorf("auth: incomplete code response: %s", codeRaw)
+	}
+	if codeResult.State != state {
+		return nil, fmt.Errorf("auth: state mismatch in code response")
 	}
 
 	fmt.Printf("\nVisit: %s\nEnter code: %s\n\n", codeResult.VerificationURI, codeResult.UserCode)
 	openBrowser(codeResult.VerificationURI)
 
-	// Step 2: Poll for token
-	interval := time.Duration(codeResult.Interval) * time.Second
+	// Step 2: Poll for token (form-urlencoded)
+	interval := time.Duration(codeResult.Interval) * time.Millisecond
 	if interval < 2*time.Second {
 		interval = 2 * time.Second
 	}
-	deadline := time.Now().Add(time.Duration(codeResult.ExpiresIn) * time.Second)
+	// expired_in is a unix timestamp (seconds)
+	deadline := time.Unix(codeResult.ExpiredIn, 0)
 
 	for time.Now().Before(deadline) {
 		select {
@@ -459,17 +478,18 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 		case <-time.After(interval):
 		}
 
-		tokenBody, _ := json.Marshal(map[string]string{
-			"grant_type":    "urn:ietf:params:oauth:grant-type:user_code",
-			"client_id":    creds.MiniMaxClientID,
-			"code":         codeResult.UserCode,
-			"code_verifier": verifier,
-		})
-		tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, bytes.NewReader(tokenBody))
+		tokenForm := url.Values{
+			"grant_type":    {MiniMaxGrantType},
+			"client_id":     {creds.MiniMaxClientID},
+			"user_code":     {codeResult.UserCode},
+			"code_verifier": {verifier},
+		}
+		tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, strings.NewReader(tokenForm.Encode()))
 		if err != nil {
 			return nil, fmt.Errorf("auth: build token request: %w", err)
 		}
-		tokenReq.Header.Set("Content-Type", "application/json")
+		tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		tokenReq.Header.Set("Accept", "application/json")
 
 		tokenResp, err := client.Do(tokenReq)
 		if err != nil {
@@ -478,43 +498,32 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 		tokenRaw, _ := io.ReadAll(tokenResp.Body)
 		_ = tokenResp.Body.Close()
 
-		if tokenResp.StatusCode == http.StatusOK {
-			var tok struct {
-				AccessToken  string `json:"access_token"`
-				RefreshToken string `json:"refresh_token"`
-				ExpiresIn    int    `json:"expires_in"`
-			}
-			if err := json.Unmarshal(tokenRaw, &tok); err != nil {
-				return nil, fmt.Errorf("auth: parse token response: %w", err)
-			}
-			if tok.AccessToken == "" {
-				return nil, fmt.Errorf("auth: empty access_token in response")
+		var tok struct {
+			Status      string `json:"status"`
+			AccessToken string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			ExpiredIn   int64  `json:"expired_in"` // unix timestamp
+		}
+		if err := json.Unmarshal(tokenRaw, &tok); err != nil {
+			continue
+		}
+
+		switch tok.Status {
+		case "success":
+			if tok.AccessToken == "" || tok.RefreshToken == "" {
+				return nil, fmt.Errorf("auth: incomplete token payload: %s", tokenRaw)
 			}
 			return &MiniMaxToken{
 				Access:    tok.AccessToken,
 				Refresh:   tok.RefreshToken,
-				ExpiresMS: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000,
+				ExpiresMS: tok.ExpiredIn * 1000, // convert unix seconds → ms
 			}, nil
+		case "error":
+			return nil, fmt.Errorf("auth: MiniMax OAuth error: %s", tokenRaw)
+		default:
+			// "pending" or any other status — keep polling
+			continue
 		}
-
-		// Check if still pending (authorization_pending or slow_down)
-		var errBody struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(tokenRaw, &errBody) == nil {
-			switch errBody.Error {
-			case "authorization_pending":
-				continue
-			case "slow_down":
-				interval += 2 * time.Second
-				if interval > 10*time.Second {
-					interval = 10 * time.Second
-				}
-				continue
-			}
-		}
-
-		return nil, fmt.Errorf("auth: token endpoint HTTP %d: %s", tokenResp.StatusCode, tokenRaw)
 	}
 
 	return nil, fmt.Errorf("auth: device code expired — try again")
@@ -522,16 +531,17 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 
 // RefreshMiniMax exchanges a refresh token for a new MiniMax access token.
 func RefreshMiniMax(ctx context.Context, creds *OAuthCredentials, refreshToken string) (*MiniMaxToken, error) {
-	body, _ := json.Marshal(map[string]string{
-		"grant_type":    "refresh_token",
-		"client_id":     creds.MiniMaxClientID,
-		"refresh_token": refreshToken,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, bytes.NewReader(body))
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {creds.MiniMaxClientID},
+		"refresh_token": {refreshToken},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("auth: build refresh request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -546,21 +556,22 @@ func RefreshMiniMax(ctx context.Context, creds *OAuthCredentials, refreshToken s
 	}
 
 	var tok struct {
+		Status       string `json:"status"`
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
+		ExpiredIn    int64  `json:"expired_in"` // unix timestamp
 	}
 	if err := json.Unmarshal(raw, &tok); err != nil {
 		return nil, fmt.Errorf("auth: parse refresh response: %w", err)
 	}
-	if tok.AccessToken == "" {
-		return nil, fmt.Errorf("auth: empty access_token in refresh response")
+	if tok.Status != "success" || tok.AccessToken == "" {
+		return nil, fmt.Errorf("auth: refresh failed: %s", raw)
 	}
 
 	t := &MiniMaxToken{
 		Access:    tok.AccessToken,
 		Refresh:   tok.RefreshToken,
-		ExpiresMS: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000,
+		ExpiresMS: tok.ExpiredIn * 1000,
 	}
 	if t.Refresh == "" {
 		t.Refresh = refreshToken // keep old refresh token if not rotated
