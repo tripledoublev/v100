@@ -1,48 +1,123 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Agent Tool I/O Schemas",
-  "description": "Input and output schemas for all built-in tools",
+  "description": "Input and output schemas for all built-in tools. Tools marked dangerous require confirmation unless --auto is set.",
   "type": "object",
   "properties": {
     "fs_read": {
+      "dangerous": false,
       "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
       "output": { "properties": { "content": { "type": "string" } } }
     },
     "fs_write": {
+      "dangerous": true,
       "input":  { "required": ["path","content"], "properties": { "path": { "type": "string" }, "content": { "type": "string" }, "append": { "type": "boolean" } } },
       "output": { "properties": { "bytes_written": { "type": "integer" } } }
     },
     "fs_list": {
+      "dangerous": false,
       "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
       "output": { "properties": { "entries": { "type": "array", "items": { "type": "string" } } } }
     },
     "fs_mkdir": {
+      "dangerous": false,
       "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
       "output": { "properties": { "created": { "type": "string" } } }
     },
+    "fs_outline": {
+      "dangerous": false,
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
+      "output": { "properties": { "outline": { "type": "string" } } }
+    },
     "sh": {
+      "dangerous": true,
       "input":  { "required": ["cmd"], "properties": { "cmd": { "type": "string" }, "timeout": { "type": "integer" } } },
       "output": { "properties": { "stdout": { "type": "string" }, "stderr": { "type": "string" }, "exit_code": { "type": "integer" } } }
     },
     "git_status": {
+      "dangerous": false,
       "input":  {},
       "output": { "properties": { "output": { "type": "string" } } }
     },
     "git_diff": {
+      "dangerous": false,
       "input":  { "properties": { "staged": { "type": "boolean" } } },
       "output": { "properties": { "output": { "type": "string" } } }
     },
     "git_commit": {
+      "dangerous": true,
       "input":  { "required": ["message"], "properties": { "message": { "type": "string" }, "add_all": { "type": "boolean" } } },
       "output": { "properties": { "output": { "type": "string" } } }
     },
+    "git_push": {
+      "dangerous": true,
+      "input":  {},
+      "output": { "properties": { "output": { "type": "string" } } }
+    },
+    "sem_diff": {
+      "dangerous": false,
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" }, "ref": { "type": "string" } } },
+      "output": { "properties": { "entities": { "type": "array" } } }
+    },
+    "sem_impact": {
+      "dangerous": false,
+      "input":  { "required": ["entity"], "properties": { "entity": { "type": "string" }, "path": { "type": "string" } } },
+      "output": { "properties": { "impact": { "type": "string" } } }
+    },
+    "sem_blame": {
+      "dangerous": false,
+      "input":  { "required": ["path"], "properties": { "path": { "type": "string" } } },
+      "output": { "properties": { "blame": { "type": "string" } } }
+    },
     "patch_apply": {
+      "dangerous": true,
       "input":  { "required": ["diff"], "properties": { "diff": { "type": "string" }, "strip": { "type": "integer" } } },
       "output": { "properties": { "output": { "type": "string" } } }
     },
     "project_search": {
+      "dangerous": false,
       "input":  { "required": ["pattern"], "properties": { "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string" }, "case_sensitive": { "type": "boolean" }, "max_results": { "type": "integer" } } },
       "output": { "properties": { "matches": { "type": "string" } } }
+    },
+    "curl_fetch": {
+      "dangerous": false,
+      "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "method": { "type": "string" }, "headers": { "type": "object" } } },
+      "output": { "properties": { "status": { "type": "integer" }, "body": { "type": "string" } } }
+    },
+    "agent": {
+      "dangerous": true,
+      "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "budget_steps": { "type": "integer" }, "budget_tokens": { "type": "integer" } } },
+      "output": { "properties": { "result": { "type": "string" } } }
+    },
+    "dispatch": {
+      "dangerous": true,
+      "input":  { "required": ["agent","task"], "properties": { "agent": { "type": "string" }, "task": { "type": "string" } } },
+      "output": { "properties": { "result": { "type": "string" } } }
+    },
+    "orchestrate": {
+      "dangerous": true,
+      "input":  { "required": ["pattern","tasks"], "properties": { "pattern": { "type": "string", "enum": ["fanout","pipeline"] }, "tasks": { "type": "array" } } },
+      "output": { "properties": { "results": { "type": "array" } } }
+    },
+    "blackboard_read": {
+      "dangerous": false,
+      "input":  {},
+      "output": { "properties": { "content": { "type": "string" } } }
+    },
+    "blackboard_write": {
+      "dangerous": true,
+      "input":  { "required": ["content"], "properties": { "content": { "type": "string" }, "append": { "type": "boolean" } } },
+      "output": { "properties": { "bytes_written": { "type": "integer" } } }
+    },
+    "blackboard_search": {
+      "dangerous": false,
+      "input":  { "required": ["query"], "properties": { "query": { "type": "string" }, "limit": { "type": "integer" } } },
+      "output": { "properties": { "results": { "type": "array" } } }
+    },
+    "blackboard_store": {
+      "dangerous": true,
+      "input":  { "required": ["key","value"], "properties": { "key": { "type": "string" }, "value": { "type": "string" } } },
+      "output": { "properties": { "stored": { "type": "boolean" } } }
     }
   }
 }

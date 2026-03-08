@@ -41,16 +41,28 @@ Agents currently view code as "text blocks." The strategic move is toward **Grap
 *   **Adversarial Benchmarking:** A new `v100 stress` command that introduces artificial "hallucinations" (e.g., a tool returns a slightly wrong file path) to measure how effectively an agent can recover using its own internal verification logic.
 *   **Human-in-the-Loop (HITL) Nudging:** Enhance the TUI to allow researchers to inject "Cognitive Anchors"—short, high-priority instructions that persist across compressions—to guide agents out of reasoning dead-ends.
 
-### Phase 3: High-Fidelity Research Sandboxing
-*   **Persistent Sandbox Sessions:** Materialize an isolated per-run workspace and keep a runtime session alive across the entire run so tools can safely edit code, install dependencies, and execute builds without touching the source workspace directly.
-*   **Virtual Path Mapping:** Present a stable `/workspace` namespace to the agent while mapping host and sandbox paths bidirectionally for trace replay, resume, and observability.
-*   **Reliable Recovery:** Tie workspace snapshots to explicit mutation metadata rather than dangerous-tool confirmation, and restore both loop state and filesystem state together during backtracking or manual revert.
-*   **Hardened Runtime Policy:** Add optional Docker-backed subprocess execution with seccomp, resource caps, and network isolation controlled through sandbox policy.
+### Phase 3: High-Fidelity Research Sandboxing (COMPLETED)
+*   **Persistent Sandbox Sessions (3a COMPLETED):** Materialize an isolated per-run workspace and keep a runtime session alive across the entire run.
+*   **Virtual Path Mapping (3b COMPLETED):** Present a stable `/workspace` namespace while mapping host and sandbox paths bidirectionally.
+*   **Reliable Recovery (3c COMPLETED):** Tie workspace snapshots to explicit mutation metadata and restore loop+filesystem state together.
+*   **Hardened Runtime Policy (3d COMPLETED):** Add Docker-backed subprocess execution with explicit seccomp, network isolation, backend-aware doctor checks, and apply-back/export support.
 
-### Phase 100: Recursive Self-Evolution (The "Self-Improving" System)
-*   **Autonomous Tool Synthesis:** A `tool_builder` role that can write new Go-based tool plugins for the v100 registry. If an agent repeatedly fails a task because it lacks a specific capability (e.g., "I need a tool to diff SQL schemas"), it dispatches a request to the `tool_builder` to expand the harness's own capability.
-*   **Self-Prompt Optimization (DSPy Integration):** Use the `v100 score` feedback to automatically rewrite `system_prompts`. If agents frequently "thrash" on a certain task, the harness uses a "Meta-Optimizer" to refine the role definition until the `efficiency_score` improves.
-*   **Cross-Provider Distillation:** A "Golden Trace" pipeline that automatically exports successful multi-turn trajectories into a format suitable for fine-tuning local models (SFT/DPO), creating a specialized "v100-LLM" that is natively optimized for the harness's specific tool/policy/memory dialect.
+### Phase 4: Collective Intelligence & A2A Protocols
+*   **Agent-to-Agent Mesh:** Implement standardized A2A protocols for cross-provider negotiation and shared memory handoffs.
+*   **Consensus Solvers:** Implement multi-agent voting and judging to mitigate model-specific hallucinations.
+
+### Phase 5: Autonomous Research & Goal Invention
+*   **Active Goal Discovery:** The system scans the environment and autonomously proposes new tasks and research objectives.
+*   **Autonomous Benchmarking:** v100 identifies failure clusters and launches its own ablation experiments to test strategy mutations.
+
+### Phase 6: Neural Forging & Self-Distillation
+*   **Self-Tuning Loop:** The agent uses successful trajectories to autonomously generate synthetic datasets for local fine-tuning.
+*   **Model Specialization:** Agents benchmark 'Old Self' vs 'New Self' and autonomously update the model weights in their default Policy.
+
+### Phase 100: Recursive Self-Evolution (The "Singularity")
+*   **Autonomous Tool Synthesis:** A `tool_builder` role that can write and register new Go-based tool plugins in real-time.
+*   **Self-Prompt Optimization:** Meta-optimizers that refine `system_prompts` based on empirical `v100 score` data.
+*   **Substrate Migration (X100):** Agents that monitor their own latency and autonomously migrate their sandbox and trace to higher-compute hardware mid-trajectory.
 
 ---
 

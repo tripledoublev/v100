@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/core"
@@ -50,13 +51,16 @@ func TestShStreamsSanitizedOutputDeltas(t *testing.T) {
 	session := startHostSession(t, sourceDir)
 	sandboxDir := session.Workspace()
 
+	var mu sync.Mutex
 	var got []string
 	call := tools.ToolCallContext{
 		WorkspaceDir: sourceDir,
 		Session:      session,
 		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
 		EmitOutputDelta: func(stream, text string) error {
+			mu.Lock()
 			got = append(got, stream+":"+text)
+			mu.Unlock()
 			return nil
 		},
 	}
@@ -77,10 +81,18 @@ func TestShStreamsSanitizedOutputDeltas(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 streamed deltas, got %d (%v)", len(got), got)
 	}
-	if got[0] != "stdout:/workspace/out.txt" {
-		t.Fatalf("unexpected stdout delta: %q", got[0])
+	hasStdout, hasStderr := false, false
+	for _, d := range got {
+		switch d {
+		case "stdout:/workspace/out.txt":
+			hasStdout = true
+		case "stderr:/workspace/err.txt":
+			hasStderr = true
+		default:
+			t.Fatalf("unexpected delta: %q", d)
+		}
 	}
-	if got[1] != "stderr:/workspace/err.txt" {
-		t.Fatalf("unexpected stderr delta: %q", got[1])
+	if !hasStdout || !hasStderr {
+		t.Fatalf("missing expected deltas: stdout=%v stderr=%v got=%v", hasStdout, hasStderr, got)
 	}
 }

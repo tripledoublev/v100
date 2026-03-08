@@ -6,49 +6,94 @@ It provides a modular runtime for tool-using language model agents where every r
 
 The goal is to make agent behavior measurable and reproducible so different prompting strategies, tool policies, and orchestration approaches can be systematically evaluated.
 
-## Architecture
-
-v100 runs a core agent loop that orchestrates model calls, tool execution, and optional sub-agent delegation, while emitting structured events into an append-only trace.
-
 ## Features
 
-- **Durable traces** — every run is logged as append-only JSONL (`runs/<id>/trace.jsonl`)
+- **Durable traces** — every run is logged as append-only JSONL (`runs/<id>/trace.jsonl`) with 21 structured event types
+- **Two solvers** — ReAct loop (default) and Plan-Execute with automatic replanning
+- **Sandbox execution** — Docker-based isolated containers with hardened security, snapshots, and apply-back
 - **Run metadata + scoring** — attach names/tags and score outcomes for later analysis
-- **Evaluation tooling** — per-run stats, run comparisons, and batch bench execution
+- **Evaluation tooling** — per-run stats, run comparisons, experiments, and batch bench execution
 - **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
 - **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
 - **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
-- **Shared run state** — blackboard tools provide cross-agent coordination via `runs/<id>/blackboard.md` and vectorized memory
-- **Vectorized Memory** — `blackboard_store` and `blackboard_search` provide persistent, semantic retrieval across long runs
-- **Reflection Turn** — agents perform an internal confidence-check before executing dangerous tools to reduce thrashing
-- **Dispatch telemetry** — per-role dispatch success/cost/tokens appear in `v100 metrics`
-- **Tool execution** — file system, shell, git, patch, curl, ripgrep search, and semantic parsing
+- **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
+- **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
+- **Streaming** — real-time token streaming from providers that support it
+- **Tool execution** — 23 built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Four providers** — ChatGPT subscription (Codex), Gemini subscription, OpenAI API, or local Ollama
+- **Five providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, or local Ollama
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea 3-pane TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
-## Providers
+## Install
 
-OAuth client config for the subscription providers lives outside the repo at `~/.config/v100/oauth_credentials.json`:
-
-```json
-{
-  "codex_client_id": "YOUR_CODEX_CLIENT_ID",
-  "gemini_client_id": "YOUR_GEMINI_CLIENT_ID",
-  "gemini_client_secret": "YOUR_GEMINI_CLIENT_SECRET"
-}
+```bash
+git clone https://github.com/tripledoublev/v100
+cd v100
+go build -ldflags "-X main.version=v0.0.2" -o v100 ./cmd/v100/
 ```
+
+Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution.
+
+Pre-built binaries are available on the [releases page](https://github.com/tripledoublev/v100/releases).
+
+## Quick start
+
+```bash
+# Initialize config
+v100 config init
+
+# Fill ~/.config/v100/oauth_credentials.json with your OAuth client values
+# (only needed for Codex/Gemini subscription providers)
+
+# Authenticate with ChatGPT subscription
+v100 login
+
+# Verify setup
+v100 doctor
+
+# Start a run (uses ChatGPT subscription by default)
+v100 run
+
+# With a step budget
+v100 run --budget-steps 10
+
+# Use OpenAI API
+v100 run --provider openai
+
+# Use Anthropic API
+v100 run --provider anthropic
+
+# Use local Ollama
+v100 run --provider ollama --model qwen3.5:9b
+
+# Use plan-execute solver with replanning
+v100 run --solver plan_execute --max-replans 3
+
+# Enable sandbox execution
+v100 run --sandbox
+
+# Enable real-time token streaming
+v100 run --streaming
+
+# Enable TUI
+v100 run --tui
+
+# Name and tag runs for later querying
+v100 run --name "parser refactor" --tag team=core --tag sprint=12
+```
+
+## Providers
 
 ### ChatGPT subscription (default)
 
-Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate directly with `v100 login` after filling `~/.config/v100/oauth_credentials.json`:
+Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate with `v100 login` after filling `~/.config/v100/oauth_credentials.json`:
 
 ```bash
-v100 login   # opens browser → completes OAuth → saves token to ~/.config/v100/auth.json
+v100 login   # opens browser → completes OAuth → saves token
 ```
 
 Model: `gpt-5.4`
@@ -62,15 +107,29 @@ export OPENAI_API_KEY=sk-...
 v100 run --provider openai --model gpt-4o
 ```
 
+### Anthropic API
+
+Claude API access via API key.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+v100 run --provider anthropic --model claude-sonnet-4-20250514
+```
+
+Or authenticate interactively:
+
+```bash
+v100 login --provider anthropic   # prompts for API key, saves to ~/.config/v100/anthropic_auth.json
+```
+
 ### Gemini subscription
 
 Uses your existing Gemini Pro / Google One AI Premium plan — no separate API billing. Authenticate with `v100 login --provider gemini` after filling `~/.config/v100/oauth_credentials.json`:
 
 ```bash
-v100 login --provider gemini   # opens browser → completes OAuth → saves token
-v100 run --provider gemini     # uses gemini-2.5-flash by default
+v100 login --provider gemini
+v100 run --provider gemini
 v100 run --provider gemini --model gemini-2.5-pro
-v100 run --provider gemini --model gemini-3-pro-preview
 ```
 
 Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, `gemini-3-flash-preview`
@@ -86,74 +145,95 @@ v100 run --provider ollama --model qwen3.5:9b
 
 ### Provider matrix
 
-| Provider | Auth | Default model | Local state | Best for |
-|----------|------|---------------|-------------|----------|
-| `codex` | `~/.config/v100/oauth_credentials.json` + `v100 login` | `gpt-5.4` | `~/.config/v100/auth.json` | subscription-backed coding runs |
-| `gemini` | `~/.config/v100/oauth_credentials.json` + `v100 login --provider gemini` | `gemini-2.5-flash` | `~/.config/v100/gemini_auth.json` | subscription-backed Gemini comparison runs |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o` | none | API-driven experiments |
-| `ollama` | local Ollama daemon | `qwen3.5:2b` | none | fully local runs |
+| Provider | Auth | Default model | Streaming | Best for |
+|----------|------|---------------|-----------|----------|
+| `codex` | OAuth (`v100 login`) | `gpt-5.4` | yes | subscription-backed coding runs |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o` | yes | API-driven experiments |
+| `anthropic` | `ANTHROPIC_API_KEY` or `v100 login --provider anthropic` | `claude-sonnet-4-20250514` | yes | Claude API experiments |
+| `gemini` | OAuth (`v100 login --provider gemini`) | `gemini-2.5-flash` | yes | subscription-backed Gemini runs |
+| `ollama` | local daemon | `qwen3.5:2b` | yes | fully local runs |
+
+OAuth client config for subscription providers lives at `~/.config/v100/oauth_credentials.json`.
 
 ### Known limitations
 
-- Provider behavior differs noticeably; the same prompt can produce very different tool-use patterns across Codex, Gemini, OpenAI, and Ollama.
+- Provider behavior differs noticeably; the same prompt can produce very different tool-use patterns across providers.
 - Subscription providers require a local OAuth client config file before `v100 login` will work.
 - Underspecified prompts can still trigger over-eager exploration on some models. Use `--budget-steps`, `--budget-tokens`, and default dangerous-tool confirmation when evaluating a new provider or prompt style.
 
-## Install
+## Solvers
+
+v100 supports two solver strategies that control how the agent loop processes tasks.
+
+### ReactSolver (default)
+
+Classic ReAct (Reasoning + Acting) loop. The model receives the conversation, produces reasoning and tool calls, observes results, and repeats until done.
 
 ```bash
-git clone https://github.com/tripledoublev/v100
-cd v100
-go build -o v100 ./cmd/v100/
+v100 run --solver react
 ```
 
-Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`.
+### PlanExecuteSolver
 
-## Quick start
+Two-phase strategy: first generates a plan, then executes it with ReAct. If execution fails, the solver can replan and retry up to `--max-replans` times. Checkpoints are created before execution so the workspace can be restored on failure.
 
 ```bash
-# Initialize config
-v100 config init
-
-# This writes ~/.config/v100/config.toml and, if missing,
-# ~/.config/v100/oauth_credentials.json as a blank template
-
-# Fill ~/.config/v100/oauth_credentials.json with your OAuth client values
-
-# Authenticate with ChatGPT subscription
-v100 login
-
-# Verify setup
-v100 doctor
-
-# Start a run (uses ChatGPT subscription by default)
-v100 run
-
-# With a step budget
-v100 run --budget-steps 10
-
-# Use OpenAI API instead
-v100 run --provider openai
-
-# Use local Ollama instead
-v100 run --provider ollama --model qwen3.5:9b
-
-# Enable TUI
-v100 run --tui
-
-# Name and tag runs for later querying
-v100 run --name "parser refactor" --tag team=core --tag sprint=12
+v100 run --solver plan_execute --max-replans 3
 ```
 
-## Files created
+## Sandbox
 
-`v100 config init` and the login flows create a small set of local files:
+v100 can execute tool operations inside an isolated Docker container instead of directly on the host.
 
-- `~/.config/v100/config.toml` — main runtime config
-- `~/.config/v100/oauth_credentials.json` — local OAuth client config for Codex/Gemini
-- `~/.config/v100/auth.json` — Codex subscription token after `v100 login`
-- `~/.config/v100/gemini_auth.json` — Gemini subscription token after `v100 login --provider gemini`
-- `runs/<run_id>/` — trace, metadata, and artifacts for each run
+### Setup
+
+```bash
+v100 run --sandbox
+```
+
+### Security
+
+The Docker executor applies hardened security defaults:
+- `--cap-drop ALL` — drops all Linux capabilities
+- `--security-opt no-new-privileges` — prevents privilege escalation
+- `--pids-limit 64` — limits child processes
+- Seccomp profile blocking: mount, ptrace, kexec_load, and other sensitive syscalls
+- Network isolation configurable via `network_tier`
+
+### Configuration
+
+```toml
+[sandbox]
+enabled = false
+backend = "docker"              # "host" or "docker"
+image = "ubuntu:22.04"
+network_tier = "off"            # "off" (isolated) or "open" (bridge)
+memory_mb = 512
+cpus = 1.0
+apply_back = "manual"           # "manual", "on_success", or "never"
+```
+
+### Snapshots and restore
+
+During sandboxed runs, the solver can create workspace snapshots (checkpoints). These can be restored later:
+
+```bash
+# List checkpoints for a run
+v100 restore --list <run_id>
+
+# Restore to a specific checkpoint
+v100 restore <run_id> <checkpoint_id>
+
+# Resume from restored state
+v100 resume <run_id>
+```
+
+### Apply-back
+
+After a sandboxed run, changes can be merged back to the host workspace:
+- `on_success` — automatically apply changes when the run ends successfully
+- `manual` — prompt for confirmation
+- `never` — keep changes only in the sandbox
 
 ## Commands
 
@@ -161,20 +241,58 @@ v100 run --name "parser refactor" --tag team=core --tag sprint=12
 |---------|-------------|
 | `v100 run` | Start interactive agent run |
 | `v100 resume <run_id>` | Continue a run from its trace |
+| `v100 restore <run_id> [checkpoint_id]` | Restore sandbox checkpoint |
 | `v100 replay <run_id>` | Pretty-print run transcript |
 | `v100 tools` | List registered tools |
 | `v100 providers` | List configured providers |
 | `v100 config init` | Write default config to `~/.config/v100/config.toml` |
 | `v100 doctor` | Check provider auth, tools, run dir |
-| `v100 login` | Authenticate via browser OAuth (ChatGPT Plus/Pro) |
-| `v100 logout` | Remove stored OAuth token |
-| `v100 score <run_id> <pass|fail|partial> [notes...]` | Score a completed run |
+| `v100 login [--provider <name>]` | Authenticate via browser OAuth or API key |
+| `v100 logout [--provider <name>]` | Remove stored auth token |
+| `v100 score <run_id> <pass\|fail\|partial> [notes...]` | Score a completed run |
 | `v100 stats <run_id>` | Compute stats from trace events |
-| `v100 metrics <run_id>` | Compute trace-derived efficiency/behavior metrics and auto-classification |
-| `v100 compare <run_id> <run_id> [run_id...]` | Compare multiple runs side-by-side |
+| `v100 metrics <run_id>` | Compute trace-derived efficiency/behavior metrics |
+| `v100 compare <run_id> <run_id> [...]` | Compare multiple runs side-by-side |
 | `v100 bench <bench.toml>` | Batch-run prompt/provider/model variants |
-| `v100 query [--tag k=v ...] [--score pass|fail|partial]` | Filter runs by metadata |
-| `v100 dev` | Rebuild/restart dev binary when `.v100-reload` appears |
+| `v100 experiment create <name>` | Create a new experiment |
+| `v100 experiment run <exp_id> --prompt <text>` | Execute all experiment variants |
+| `v100 experiment results <exp_id>` | Display statistical results |
+| `v100 analyze <run_id>` | Automated behavioral analysis |
+| `v100 diff <run_a> <run_b>` | Find divergence point between traces |
+| `v100 query [--tag k=v ...] [--score <verdict>]` | Filter runs by metadata |
+| `v100 dev` | Rebuild/restart dev binary on `.v100-reload` |
+
+### `v100 run` flags
+
+```
+--provider string              Provider name (codex, gemini, openai, ollama, anthropic)
+--model string                 Model override
+--solver string                Solver strategy: react (default), plan_execute
+--max-replans int              Max replans for plan_execute solver
+--sandbox                      Enable isolated sandbox execution
+--streaming                    Enable real-time token streaming
+--budget-steps int             Max steps before halting
+--budget-tokens int            Max tokens before halting
+--budget-cost float            Max cost in USD before halting
+--max-tool-calls-per-step int  Max tool calls per step
+--confirm-tools string         always | dangerous | never (default: dangerous)
+--auto                         Auto-approve all tool calls
+--unsafe                       Disable path guardrails
+--workspace string             Workspace directory for tool operations
+--name string                  Human-readable run name (meta.json)
+--tag key=value                Repeatable run tags (meta.json)
+--temperature float            Sampling temperature
+--top-p float                  Nucleus sampling parameter
+--top-k int                    Top-k sampling parameter
+--max-tokens int               Max output tokens per model call
+--seed int                     Random seed for reproducibility
+--tui                          Enable Bubble Tea TUI
+--tui-no-alt                   Disable alternate screen
+--tui-plain                    Force monochrome rendering
+--tui-debug                    Write TUI debug log in run directory
+```
+
+Default workspace is the current directory where `v100 run` is launched.
 
 ### Deterministic replay
 
@@ -190,29 +308,6 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 `--replace-model` runs recorded `model.call` prompts against a different model and prints a counterfactual response.
 `--inject-tool` overrides recorded tool outputs in replayed prompts for what-if experiments.
 
-### `v100 run` flags
-
-```
---provider string       Provider name (codex, gemini, openai, ollama)
---model string          Model override
---budget-steps int      Max steps before halting
---budget-tokens int     Max tokens before halting
---budget-cost float     Max cost in USD before halting
---max-tool-calls-per-step int  Max tool calls per step
---confirm-tools string  always | dangerous | never (default: dangerous)
---auto                  Auto-approve all tool calls
---unsafe                Disable path guardrails
---tui                   Enable Bubble Tea TUI
---tui-no-alt            Disable alternate screen
---tui-plain             Force monochrome rendering
---tui-debug             Write TUI debug log in run directory
---workspace string      Workspace directory for tool operations
---name string           Human-readable run name (meta.json)
---tag key=value         Repeatable run tags (meta.json)
-```
-
-Default workspace is the current directory where `v100 run` is launched.
-
 ## Tools
 
 | Tool | Danger | Description |
@@ -227,26 +322,21 @@ Default workspace is the current directory where `v100 run` is launched.
 | `git_diff` | safe | Git diff |
 | `git_commit` | **dangerous** | Stage and commit |
 | `git_push` | **dangerous** | Push current branch |
-| `sem_diff` | safe | Semantic entity-level diffing (functions, classes) |
+| `sem_diff` | safe | Semantic entity-level diffing |
 | `sem_impact` | safe | Impact analysis for specific code entities |
 | `sem_blame` | safe | Entity-level blame for a file |
 | `patch_apply` | **dangerous** | Apply unified diff |
 | `project_search` | safe | Ripgrep search |
 | `curl_fetch` | safe | Fetch URL content |
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
-| `dispatch` | **dangerous** | Dispatch a task to a named agent role from config |
-| `orchestrate` | **dangerous** | Coordinate multiple dispatches with fanout/pipeline patterns |
-| `blackboard_read` | safe | Read shared run blackboard (legacy text) |
-| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard (legacy text) |
+| `dispatch` | **dangerous** | Dispatch a task to a named agent role |
+| `orchestrate` | **dangerous** | Coordinate multiple dispatches (fanout/pipeline) |
+| `blackboard_read` | safe | Read shared run blackboard |
+| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard |
 | `blackboard_search` | safe | Search vectorized blackboard memory |
 | `blackboard_store` | **dangerous** | Store a record in vectorized blackboard |
 
 Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
-
-Recommended defaults:
-- keep `confirm_tools = "dangerous"` for normal interactive use
-- avoid `--auto` when trying a new provider or prompt pattern
-- set step/token budgets when evaluating model behavior
 
 ## Config
 
@@ -263,6 +353,12 @@ default_model = "gpt-4o"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
 
+[providers.anthropic]
+type = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+[providers.anthropic.auth]
+env = "ANTHROPIC_API_KEY"
+
 [providers.ollama]
 type = "ollama"
 default_model = "qwen3.5:9b"
@@ -271,6 +367,13 @@ base_url = "http://localhost:11434"
 [providers.gemini]
 type = "gemini"
 default_model = "gemini-2.5-flash"
+
+[sandbox]
+enabled = false
+backend = "docker"
+image = "ubuntu:22.04"
+network_tier = "off"
+apply_back = "manual"
 
 [agents.researcher]
 system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
@@ -282,6 +385,7 @@ budget_cost_usd = 0.0
 
 [defaults]
 provider = "codex"
+solver = "react"
 confirm_tools = "dangerous"
 budget_steps = 50
 budget_tokens = 100000
@@ -295,7 +399,7 @@ context_limit = 80000
 
 ```
 runs/<run_id>/
-  trace.jsonl     # append-only event log
+  trace.jsonl     # append-only event log (21 event types)
   meta.json       # run metadata: name/tags/provider/model/score
   blackboard.md   # shared scratchpad for multi-agent coordination
   artifacts/      # per-run artifact files
@@ -317,35 +421,19 @@ v100 compare <run_a> <run_b> <run_c>
 
 # Query by metadata
 v100 query --tag team=core --score pass
+
+# Automated behavioral analysis
+v100 analyze <run_id>
+
+# Find where two runs diverged
+v100 diff <run_a> <run_b>
 ```
 
-## Dogfooding
-
-For a concrete operator loop with ten runnable tasks, sandbox drills, and a starter bench file, see [`dogfood/README.md`](dogfood/README.md) and [`dogfood/smoke.bench.toml`](dogfood/smoke.bench.toml).
-
-### Debugging a run
+### Batch benchmarks
 
 ```bash
-# Verify auth, provider setup, and local tools
-v100 doctor
-v100 providers
-
-# Inspect one run in more detail
-v100 stats <run_id>
-v100 metrics <run_id>
-v100 replay <run_id>
-v100 replay --deterministic <run_id>
+v100 bench ./bench.toml
 ```
-
-## Multi-agent quick examples
-
-```text
-Call dispatch with {"agent":"researcher","task":"Find replay implementation and list key files."}
-Call orchestrate with {"pattern":"fanout","tasks":[{"agent":"researcher","task":"Map replay"},{"agent":"reviewer","task":"List risks"}]}
-Call blackboard_read with {}
-```
-
-## Bench config example
 
 ```toml
 name = "prompt-rewrite-v1"
@@ -360,10 +448,44 @@ model = "gpt-5.4"
 budget_steps = 20
 ```
 
-Run with:
+### Experiments
 
 ```bash
-v100 bench ./bench.toml
+# Create an experiment with 3 repeats per variant
+v100 experiment create my-experiment --repeats 3 \
+  --variants gpt-4o:react --variants claude-sonnet-4-20250514:plan_execute
+
+# Run all trials
+v100 experiment run <exp_id> --prompt "Implement a linked list in Go"
+
+# View results with statistical analysis
+v100 experiment results <exp_id>
+```
+
+## Dogfooding
+
+For a concrete operator loop with ten runnable tasks, sandbox drills, and a starter bench file, see [`dogfood/README.md`](dogfood/README.md) and [`dogfood/smoke.bench.toml`](dogfood/smoke.bench.toml).
+
+## Multi-agent quick examples
+
+```text
+Call dispatch with {"agent":"researcher","task":"Find replay implementation and list key files."}
+Call orchestrate with {"pattern":"fanout","tasks":[{"agent":"researcher","task":"Map replay"},{"agent":"reviewer","task":"List risks"}]}
+Call blackboard_read with {}
+```
+
+## Debugging a run
+
+```bash
+# Verify auth, provider setup, and local tools
+v100 doctor
+v100 providers
+
+# Inspect one run in more detail
+v100 stats <run_id>
+v100 metrics <run_id>
+v100 replay <run_id>
+v100 replay --deterministic <run_id>
 ```
 
 ## Dev mode
@@ -388,6 +510,17 @@ touch .v100-reload
 | `Ctrl+N` | Deny dangerous tool |
 | `Ctrl+C` | Quit |
 
+## Files created
+
+`v100 config init` and the login flows create a small set of local files:
+
+- `~/.config/v100/config.toml` — main runtime config
+- `~/.config/v100/oauth_credentials.json` — local OAuth client config for Codex/Gemini
+- `~/.config/v100/auth.json` — Codex subscription token after `v100 login`
+- `~/.config/v100/gemini_auth.json` — Gemini subscription token after `v100 login --provider gemini`
+- `~/.config/v100/anthropic_auth.json` — Anthropic API key after `v100 login --provider anthropic`
+- `runs/<run_id>/` — trace, metadata, and artifacts for each run
+
 ## License
 
-MIT
+[MIT](LICENSE)

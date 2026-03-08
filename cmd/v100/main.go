@@ -6,6 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set at build time via -ldflags "-X main.version=..."
+var version = "dev"
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(1)
@@ -16,8 +19,9 @@ func rootCmd() *cobra.Command {
 	var cfgPath string
 
 	root := &cobra.Command{
-		Use:   "v100",
-		Short: "Modular CLI/TUI agent harness",
+		Use:     "v100",
+		Short:   "Modular CLI/TUI agent harness",
+		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return nil
 		},

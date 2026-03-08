@@ -101,7 +101,7 @@ func (s *DockerSession) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, _ = s.runDocker(ctx, nil, nil, nil, append([]string{"rm", "-f", s.containerName})...)
+	_, _ = s.runDocker(ctx, nil, nil, nil, "rm", "-f", s.containerName)
 
 	res, err := s.runDocker(ctx, nil, nil, nil, s.startArgs()...)
 	if err != nil {

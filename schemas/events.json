@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Agent Trace Event",
-  "description": "Schema for events written to trace.jsonl",
+  "description": "Schema for events written to trace.jsonl. This schema covers all 21 event types emitted by v100.",
   "type": "object",
   "required": ["ts", "run_id", "event_id", "type", "payload"],
   "properties": {
@@ -13,26 +13,54 @@
       "type": "string",
       "enum": [
         "run.start",
-        "user.message",
-        "model.response",
-        "tool.call",
-        "tool.result",
         "run.error",
-        "run.end"
+        "run.end",
+        "user.message",
+        "model.call",
+        "model.response",
+        "model.token",
+        "tool.call",
+        "tool.call_delta",
+        "tool.output_delta",
+        "tool.result",
+        "tool.reflect",
+        "sandbox.snapshot",
+        "sandbox.restore",
+        "agent.start",
+        "agent.dispatch",
+        "agent.end",
+        "context.compress",
+        "step.summary",
+        "solver.plan",
+        "solver.replan"
       ]
     },
     "payload": {
       "type": "object",
-      "description": "Event-specific payload — see individual definitions below"
+      "description": "Event-specific payload — see definitions below"
     }
   },
   "definitions": {
-    "run.start":      { "properties": { "policy": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" } } },
-    "user.message":   { "properties": { "content": { "type": "string" } } },
-    "model.response": { "properties": { "text": { "type": "string" }, "tool_calls": { "type": "array" }, "usage": { "type": "object" } } },
-    "tool.call":      { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "args": { "type": "string" } } },
-    "tool.result":    { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "ok": { "type": "boolean" }, "output": { "type": "string" }, "duration_ms": { "type": "integer" } } },
-    "run.error":      { "properties": { "error": { "type": "string" } } },
-    "run.end":        { "properties": { "reason": { "type": "string" }, "used_steps": { "type": "integer" }, "used_tokens": { "type": "integer" } } }
+    "run.start":         { "properties": { "policy": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "solver": { "type": "string" } } },
+    "run.error":         { "properties": { "error": { "type": "string" } } },
+    "run.end":           { "properties": { "reason": { "type": "string" }, "used_steps": { "type": "integer" }, "used_tokens": { "type": "integer" }, "cost_usd": { "type": "number" } } },
+    "user.message":      { "properties": { "content": { "type": "string" } } },
+    "model.call":        { "properties": { "messages": { "type": "integer" }, "tools": { "type": "integer" } } },
+    "model.response":    { "properties": { "text": { "type": "string" }, "tool_calls": { "type": "array" }, "usage": { "type": "object" } } },
+    "model.token":       { "properties": { "token": { "type": "string" } } },
+    "tool.call":         { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "args": { "type": "string" } } },
+    "tool.call_delta":   { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "delta": { "type": "string" } } },
+    "tool.output_delta": { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "delta": { "type": "string" } } },
+    "tool.result":       { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "ok": { "type": "boolean" }, "output": { "type": "string" }, "duration_ms": { "type": "integer" } } },
+    "tool.reflect":      { "properties": { "call_id": { "type": "string" }, "name": { "type": "string" }, "decision": { "type": "string" } } },
+    "sandbox.snapshot":  { "properties": { "snapshot_id": { "type": "string" }, "step": { "type": "integer" } } },
+    "sandbox.restore":   { "properties": { "snapshot_id": { "type": "string" }, "method": { "type": "string" }, "reason": { "type": "string" } } },
+    "agent.start":       { "properties": { "agent_id": { "type": "string" }, "task": { "type": "string" } } },
+    "agent.dispatch":    { "properties": { "agent": { "type": "string" }, "task": { "type": "string" }, "model": { "type": "string" } } },
+    "agent.end":         { "properties": { "agent_id": { "type": "string" }, "result": { "type": "string" } } },
+    "context.compress":  { "properties": { "before_tokens": { "type": "integer" }, "after_tokens": { "type": "integer" } } },
+    "step.summary":      { "properties": { "step": { "type": "integer" }, "tokens": { "type": "integer" }, "tool_calls": { "type": "integer" } } },
+    "solver.plan":       { "properties": { "plan": { "type": "string" } } },
+    "solver.replan":     { "properties": { "attempt": { "type": "integer" }, "reason": { "type": "string" }, "plan": { "type": "string" } } }
   }
 }
