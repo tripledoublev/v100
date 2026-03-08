@@ -25,6 +25,7 @@ func (e *HostExecutor) NewSession(runID, sourceWorkspace string) (Session, error
 		runID:           runID,
 		sourceWorkspace: sourceWorkspace,
 		sandboxDir:      filepath.Join(e.BaseDir, runID, "workspace"),
+		Enabled:         true,
 	}, nil
 }
 
@@ -33,12 +34,16 @@ type HostSession struct {
 	runID           string
 	sourceWorkspace string
 	sandboxDir      string
+	Enabled         bool
 }
 
 func (s *HostSession) ID() string   { return s.runID }
 func (s *HostSession) Type() string { return "host" }
 
 func (s *HostSession) Start(ctx context.Context) error {
+	if !s.Enabled {
+		return nil
+	}
 	// 1. Create sandbox directory
 	if err := os.MkdirAll(s.sandboxDir, 0755); err != nil {
 		return fmt.Errorf("host session: mkdir: %w", err)

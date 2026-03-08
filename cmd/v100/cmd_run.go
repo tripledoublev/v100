@@ -148,8 +148,30 @@ func runCmd(cfgPath *string) *cobra.Command {
 				},
 			}
 
-			// Set workspace
-			workspace := resolveWorkspace(workspaceFlag, runDir)
+			// Set workspace grounding
+			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
+
+			// Build sandbox session
+			execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
+			if err != nil {
+				return err
+			}
+			session, err := execFactory.NewSession(runID, sourceWorkspace)
+			if err != nil {
+				return err
+			}
+			
+			sandboxWorkspace := sourceWorkspace
+			if cfg.Sandbox.Enabled {
+				if err := session.Start(context.Background()); err != nil {
+					return err
+				}
+				defer session.Close()
+				sandboxWorkspace = session.Workspace()
+			}
+
+			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
+			workspace = sandboxWorkspace
 
 			// Build provider
 			prov, err := buildProvider(cfg, cfg.Defaults.Provider)
@@ -232,9 +254,10 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "), session)
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "), session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "), session)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "), session, mapper)
+
 		},
 	}
 
@@ -271,7 +294,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	renderer := ui.NewCLIRenderer()
 
@@ -292,16 +315,22 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		GenParams: genParams,
 		Solver:    solver,
 		Session:   session,
+		Mapper:    mapper,
 	}
 
 	// Override workspace for tool execution
 	run.Dir = workspace
 
+	tracedWorkspace := workspace
+	if cfg.Sandbox.Enabled {
+		tracedWorkspace = "/workspace"
+	}
+
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:    pol.Name,
 		Provider:  prov.Name(),
 		Model:     model,
-		Workspace: workspace,
+		Workspace: tracedWorkspace,
 	}); err != nil {
 		return err
 	}
@@ -358,7 +387,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 }
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	run.Dir = workspace
 
@@ -428,6 +457,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		GenParams: genParams,
 		Solver:    solver,
 		Session:   session,
+		Mapper:    mapper,
 	}
 
 	// Start Bubble Tea first: Program.Send blocks before Run initializes.
@@ -436,10 +466,16 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		runErrCh <- tui.Run()
 	}()
 
+	tracedWorkspace := workspace
+	if cfg.Sandbox.Enabled {
+		tracedWorkspace = "/workspace"
+	}
+
 	if err := loop.EmitRunStart(core.RunStartPayload{
-		Policy:   pol.Name,
-		Provider: prov.Name(),
-		Model:    model,
+		Policy:    pol.Name,
+		Provider:  prov.Name(),
+		Model:     model,
+		Workspace: tracedWorkspace,
 	}); err != nil {
 		if logger != nil {
 			logger.Printf("emit run_start error: %v", err)

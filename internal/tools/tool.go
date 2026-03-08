@@ -25,6 +25,14 @@ type ToolCallContext struct {
 	TimeoutMS    int
 	Provider     providers.Provider
 	Session      executor.Session // active sandbox session
+	Mapper       PathTranslator   // bidirectional path mapping
+}
+
+// PathTranslator defines the subset of core.PathMapper needed by tools.
+type PathTranslator interface {
+	ToSandbox(path string) string
+	ToVirtual(path string) string
+	SecurePath(path string) (string, bool)
 }
 
 // ToolResult holds the output of a tool execution.

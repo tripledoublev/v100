@@ -44,7 +44,10 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
-	path := resolvePath(call.WorkspaceDir, a.Path)
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return failResult(start, err.Error()), nil
@@ -95,7 +98,10 @@ func (t *fsWriteTool) Exec(ctx context.Context, call ToolCallContext, args json.
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
 
-	path := resolvePath(call.WorkspaceDir, a.Path)
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return failResult(start, err.Error()), nil
 	}
@@ -157,7 +163,10 @@ func (t *fsListTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
-	path := resolvePath(call.WorkspaceDir, a.Path)
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return failResult(start, err.Error()), nil
@@ -212,11 +221,14 @@ func (t *fsMkdirTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
-	path := resolvePath(call.WorkspaceDir, a.Path)
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return failResult(start, err.Error()), nil
 	}
-	b, _ := json.Marshal(map[string]string{"created": path})
+	b, _ := json.Marshal(map[string]string{"created": call.Mapper.ToVirtual(path)})
 	return ToolResult{
 		OK:         true,
 		Output:     string(b),

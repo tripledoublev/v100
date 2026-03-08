@@ -8,14 +8,31 @@ import (
 
 // NewExecutor creates an executor based on the provided configuration.
 func NewExecutor(cfg config.SandboxConfig, baseDir string) (Executor, error) {
+	if !cfg.Enabled {
+		return &disabledExecutor{NewHostExecutor(baseDir)}, nil
+	}
+
 	switch cfg.Backend {
 	case "host", "":
 		return NewHostExecutor(baseDir), nil
 	case "docker":
-		// Docker executor will be implemented in Phase 3d or later in Phase 3a.
-		// For now return an error or a placeholder if Docker SDK is not yet linked.
-		return nil, fmt.Errorf("docker backend not yet implemented in this foundation phase")
+		return nil, fmt.Errorf("docker backend not yet implemented; use 'host' for Phase 3a foundation")
 	default:
 		return nil, fmt.Errorf("unknown sandbox backend %q", cfg.Backend)
 	}
+}
+
+type disabledExecutor struct {
+	h *HostExecutor
+}
+
+func (e *disabledExecutor) NewSession(runID, sourceWorkspace string) (Session, error) {
+	s, err := e.h.NewSession(runID, sourceWorkspace)
+	if err != nil {
+		return nil, err
+	}
+	if hs, ok := s.(*HostSession); ok {
+		hs.Enabled = false
+	}
+	return s, nil
 }

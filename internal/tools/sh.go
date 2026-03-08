@@ -1,13 +1,13 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/core/executor"
 )
 
 // shDenylist contains substring patterns that are always blocked.
@@ -76,35 +76,29 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", a.Cmd)
-	if call.WorkspaceDir != "" {
-		cmd.Dir = call.WorkspaceDir
+	if call.Session == nil {
+		return failResult(start, "no active sandbox session available"), nil
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
+	res, err := call.Session.Run(ctx, executor.RunRequest{
+		Command: "sh",
+		Args:    []string{"-c", a.Cmd},
+		Dir:     ".",
+	})
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return failResult(start, "exec error: "+err.Error()), nil
-		}
+		return failResult(start, "exec error: "+err.Error()), nil
 	}
 
 	out, _ := json.Marshal(map[string]interface{}{
-		"stdout":    stdout.String(),
-		"stderr":    stderr.String(),
-		"exit_code": exitCode,
+		"stdout":    res.Stdout,
+		"stderr":    res.Stderr,
+		"exit_code": res.ExitCode,
 	})
 	return ToolResult{
-		OK:         exitCode == 0,
+		OK:         res.ExitCode == 0,
 		Output:     string(out),
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
+		Stdout:     res.Stdout,
+		Stderr:     res.Stderr,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

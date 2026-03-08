@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/ui"
 )
 
@@ -75,12 +76,34 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Dir:       runDir,
 				TraceFile: tracePath,
 			}
-			workspace := resolveWorkspace(workspaceFlag, runDir)
+			// Source workspace grounding
+			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
 			if workspaceFlag == "" && strings.TrimSpace(tracedWorkspace) != "" {
-				workspace = resolveWorkspace(tracedWorkspace, runDir)
+				// If we resumed a sandboxed run, the traced workspace is "/workspace"
+				// but we need the real host source workspace.
+				// In a real implementation, we'd store the source path in meta.json.
+				if tracedWorkspace == "/workspace" {
+					// for now assume current host source is same as original
+					sourceWorkspace = resolveWorkspace("", runDir)
+				} else {
+					sourceWorkspace = resolveWorkspace(tracedWorkspace, runDir)
+				}
 			}
-			run.Dir = workspace
-			pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
+
+			// Build sandbox session (always same type as default for now)
+			execFactory, _ := executor.NewExecutor(cfg.Sandbox, filepath.Dir(runDir))
+			session, _ := execFactory.NewSession(runID, sourceWorkspace)
+			
+			sandboxWorkspace := sourceWorkspace
+			// In resume, we might need to verify if the sandbox already exists
+			if cfg.Sandbox.Enabled {
+				// Re-start or just resolve path
+				sandboxWorkspace = filepath.Join(filepath.Dir(runDir), runID, "workspace")
+			}
+
+			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
+			run.Dir = sandboxWorkspace
+			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
 			loop := &core.Loop{
 				Run:       run,
@@ -91,7 +114,8 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Budget:    budget,
 				Messages:  msgs,
 				ConfirmFn: buildConfirmFn(cfg.Defaults.ConfirmTools),
-				Session:   nil,
+				Session:   session,
+				Mapper:    mapper,
 			}
 
 			renderer := ui.NewCLIRenderer()

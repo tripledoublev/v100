@@ -38,6 +38,7 @@ type Loop struct {
 	GenParams providers.GenParams
 	Solver    Solver
 	Session   executor.Session
+	Mapper    *PathMapper
 	stepCount int // running step counter for step.summary events
 	ended     bool
 	mu        sync.Mutex
@@ -180,6 +181,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		TimeoutMS:    timeout,
 		Provider:     l.Provider,
 		Session:      l.Session,
+		Mapper:       l.Mapper,
 	}
 
 	result, err := tool.Exec(ctx, callCtx, tc.Args)
