@@ -34,6 +34,9 @@ const (
 	MiniMaxCodeURL  = "https://api.minimax.io/oauth/code"
 	MiniMaxTokenURL = "https://api.minimax.io/oauth/token"
 	MiniMaxScopes   = "group_id profile model.completion"
+
+	// MiniMaxDefaultClientID is the public Client ID for the MiniMax Coding Plan.
+	MiniMaxDefaultClientID = "minimax-coding-plan-cli"
 )
 
 // OAuthCredentials holds client credentials loaded from disk.
@@ -69,14 +72,26 @@ func LoadGeminiCredentials() (*OAuthCredentials, error) {
 }
 
 // LoadMiniMaxCredentials reads and validates the MiniMax OAuth client config.
+// Falls back to MiniMaxDefaultClientID if missing from config.
 func LoadMiniMaxCredentials() (*OAuthCredentials, error) {
-	return loadCredentials("minimax_client_id")
+	c, err := loadCredentials() // try loading with no required fields
+	if err != nil {
+		// If file is missing or unreadable, just use the default
+		return &OAuthCredentials{MiniMaxClientID: MiniMaxDefaultClientID}, nil
+	}
+	if strings.TrimSpace(c.MiniMaxClientID) == "" {
+		c.MiniMaxClientID = MiniMaxDefaultClientID
+	}
+	return c, nil
 }
 
 func loadCredentials(requiredFields ...string) (*OAuthCredentials, error) {
 	path := DefaultCredentialsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if len(requiredFields) == 0 {
+			return &OAuthCredentials{}, nil
+		}
 		return nil, fmt.Errorf("auth: read %s: %w\n  → create it with JSON keys: %s\n  → see: v100 doctor", path, err, strings.Join(requiredFields, ", "))
 	}
 	var c OAuthCredentials
