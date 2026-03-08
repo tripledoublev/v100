@@ -65,7 +65,15 @@ func (s *HostSession) Close() error {
 }
 
 func (s *HostSession) Run(ctx context.Context, req RunRequest) (Result, error) {
-	fullDir := filepath.Join(s.sandboxDir, req.Dir)
+	baseDir := s.sandboxDir
+	if !s.Enabled || strings.TrimSpace(baseDir) == "" {
+		baseDir = s.sourceWorkspace
+	}
+
+	fullDir := baseDir
+	if dir := strings.TrimSpace(req.Dir); dir != "" && dir != "." {
+		fullDir = filepath.Join(baseDir, dir)
+	}
 	
 	cmd := exec.CommandContext(ctx, req.Command, req.Args...)
 	cmd.Dir = fullDir
@@ -104,6 +112,9 @@ func (s *HostSession) Run(ctx context.Context, req RunRequest) (Result, error) {
 }
 
 func (s *HostSession) Workspace() string {
+	if !s.Enabled {
+		return s.sourceWorkspace
+	}
 	return s.sandboxDir
 }
 

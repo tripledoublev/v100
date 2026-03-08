@@ -79,32 +79,24 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Dir:       runDir,
 				TraceFile: tracePath,
 			}
-			// Source workspace grounding
-			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
-			if workspaceFlag == "" {
-				if meta.SourceWorkspace != "" {
-					sourceWorkspace = meta.SourceWorkspace
-				} else if strings.TrimSpace(tracedWorkspace) != "" {
-					// If we resumed a sandboxed run, the traced workspace is "/workspace"
-					// but we need the real host source workspace.
-					if tracedWorkspace == "/workspace" {
-						// for now assume current host source is same as original
-						sourceWorkspace = resolveWorkspace("", runDir)
-					} else {
-						sourceWorkspace = resolveWorkspace(tracedWorkspace, runDir)
-					}
-				}
+			sourceWorkspace := resolveResumeSourceWorkspace(workspaceFlag, runDir, tracedWorkspace, meta)
+
+			execFactory, err := executor.NewExecutor(cfg.Sandbox, filepath.Dir(runDir))
+			if err != nil {
+				return err
+			}
+			session, err := execFactory.NewSession(runID, sourceWorkspace)
+			if err != nil {
+				return err
 			}
 
-			// Build sandbox session (always same type as default for now)
-			execFactory, _ := executor.NewExecutor(cfg.Sandbox, filepath.Dir(runDir))
-			session, _ := execFactory.NewSession(runID, sourceWorkspace)
-			
 			sandboxWorkspace := sourceWorkspace
-			// In resume, we might need to verify if the sandbox already exists
 			if cfg.Sandbox.Enabled {
-				// Re-start or just resolve path
 				sandboxWorkspace = filepath.Join(filepath.Dir(runDir), runID, "workspace")
+				if _, err := os.Stat(sandboxWorkspace); err != nil {
+					return fmt.Errorf("resume sandbox workspace: %w", err)
+				}
+				defer session.Close()
 			}
 
 			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
@@ -162,4 +154,20 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable TUI")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
 	return cmd
+}
+
+func resolveResumeSourceWorkspace(workspaceFlag, runDir, tracedWorkspace string, meta core.RunMeta) string {
+	if strings.TrimSpace(workspaceFlag) != "" {
+		return resolveWorkspace(workspaceFlag, runDir)
+	}
+	if strings.TrimSpace(meta.SourceWorkspace) != "" {
+		return meta.SourceWorkspace
+	}
+	if strings.TrimSpace(tracedWorkspace) != "" {
+		if tracedWorkspace == "/workspace" {
+			return resolveWorkspace("", runDir)
+		}
+		return resolveWorkspace(tracedWorkspace, runDir)
+	}
+	return resolveWorkspace("", runDir)
 }
