@@ -59,7 +59,16 @@ func (m *TUIModel) adjustRadioVolume(delta int) {
 
 	// Send volume update via IPC socket for mpv
 	go func(vol int) {
-		conn, err := net.Dial("unix", radioIPCSocket)
+		// Try to dial multiple times in case mpv is still starting
+		var conn net.Conn
+		var err error
+		for i := 0; i < 3; i++ {
+			conn, err = net.Dial("unix", radioIPCSocket)
+			if err == nil {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 		if err != nil {
 			return
 		}
