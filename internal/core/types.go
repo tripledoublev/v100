@@ -11,24 +11,26 @@ import (
 type EventType string
 
 const (
-	EventRunStart      EventType = "run.start"
-	EventUserMsg       EventType = "user.message"
-	EventModelCall     EventType = "model.call"
-	EventModelResp     EventType = "model.response"
-	EventModelToken    EventType = "model.token"
-	EventToolCall      EventType = "tool.call"
-	EventToolCallDelta EventType = "tool.call_delta"
-	EventToolResult    EventType = "tool.result"
-	EventToolReflect   EventType = "tool.reflect"
-	EventRunError      EventType = "run.error"
-	EventRunEnd        EventType = "run.end"
-	EventAgentStart    EventType = "agent.start"
-	EventAgentDispatch EventType = "agent.dispatch"
-	EventAgentEnd      EventType = "agent.end"
-	EventCompress      EventType = "context.compress"
-	EventStepSummary   EventType = "step.summary"
-	EventSolverPlan    EventType = "solver.plan"
-	EventSolverReplan  EventType = "solver.replan"
+	EventRunStart        EventType = "run.start"
+	EventUserMsg         EventType = "user.message"
+	EventModelCall       EventType = "model.call"
+	EventModelResp       EventType = "model.response"
+	EventModelToken      EventType = "model.token"
+	EventToolCall        EventType = "tool.call"
+	EventToolCallDelta   EventType = "tool.call_delta"
+	EventToolResult      EventType = "tool.result"
+	EventToolReflect     EventType = "tool.reflect"
+	EventRunError        EventType = "run.error"
+	EventRunEnd          EventType = "run.end"
+	EventSandboxSnapshot EventType = "sandbox.snapshot"
+	EventSandboxRestore  EventType = "sandbox.restore"
+	EventAgentStart      EventType = "agent.start"
+	EventAgentDispatch   EventType = "agent.dispatch"
+	EventAgentEnd        EventType = "agent.end"
+	EventCompress        EventType = "context.compress"
+	EventStepSummary     EventType = "step.summary"
+	EventSolverPlan      EventType = "solver.plan"
+	EventSolverReplan    EventType = "solver.replan"
 )
 
 // Event is a single entry in the trace log.
@@ -158,6 +160,22 @@ type ToolReflectPayload struct {
 	Name        string  `json:"name"`
 	Confidence  float64 `json:"confidence"`
 	Uncertainty string  `json:"uncertainty,omitempty"`
+}
+
+// SandboxSnapshotPayload is the payload for EventSandboxSnapshot.
+type SandboxSnapshotPayload struct {
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	CallID     string `json:"call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Method     string `json:"method"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// SandboxRestorePayload is the payload for EventSandboxRestore.
+type SandboxRestorePayload struct {
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	Method     string `json:"method"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // RunErrorPayload is the Payload for EventRunError.

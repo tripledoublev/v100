@@ -40,6 +40,7 @@ type Loop struct {
 	Session     executor.Session
 	Mapper      *PathMapper
 	NetworkTier string
+	Snapshots   SnapshotManager
 	stepCount   int // running step counter for step.summary events
 	ended       bool
 	mu          sync.Mutex
@@ -191,6 +192,27 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if l.Policy != nil && l.Policy.ToolTimeoutMS > 0 {
 		timeout = l.Policy.ToolTimeoutMS
 	}
+	if tool.Effects().MutatesWorkspace {
+		snap, err := l.snapshotManager().Capture(ctx, SnapshotRequest{
+			RunID:    l.Run.ID,
+			StepID:   stepID,
+			CallID:   tc.ID,
+			ToolName: tc.Name,
+			Reason:   "before_mutating_tool",
+		})
+		if err != nil {
+			return fmt.Errorf("capture snapshot before tool %q: %w", tc.Name, err)
+		}
+		if _, err := l.emit(EventSandboxSnapshot, stepID, SandboxSnapshotPayload{
+			SnapshotID: snap.ID,
+			CallID:     tc.ID,
+			Name:       tc.Name,
+			Method:     snap.Method,
+			Reason:     "before_mutating_tool",
+		}); err != nil {
+			return err
+		}
+	}
 	callCtx := tools.ToolCallContext{
 		RunID:        l.Run.ID,
 		StepID:       stepID,
@@ -241,6 +263,13 @@ func (l *Loop) effectiveNetworkTier() string {
 		return "open"
 	}
 	return tier
+}
+
+func (l *Loop) snapshotManager() SnapshotManager {
+	if l.Snapshots != nil {
+		return l.Snapshots
+	}
+	return NoopSnapshotManager{}
 }
 
 func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools.ToolResult) error {
