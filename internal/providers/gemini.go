@@ -409,21 +409,36 @@ type geminiFunctionDecl struct {
 func geminiConvertMessages(msgs []Message) (*geminiContent, []geminiContent) {
 	var sysInstruction *geminiContent
 	var contents []geminiContent
+	var pendingToolResponses []geminiPart
+
+	flushToolResponses := func() {
+		if len(pendingToolResponses) == 0 {
+			return
+		}
+		contents = append(contents, geminiContent{
+			Role:  "user",
+			Parts: pendingToolResponses,
+		})
+		pendingToolResponses = nil
+	}
 
 	for _, m := range msgs {
 		switch m.Role {
 		case "system":
+			flushToolResponses()
 			sysInstruction = &geminiContent{
 				Parts: []geminiPart{{Text: m.Content}},
 			}
 
 		case "user":
+			flushToolResponses()
 			contents = append(contents, geminiContent{
 				Role:  "user",
 				Parts: []geminiPart{{Text: m.Content}},
 			})
 
 		case "assistant":
+			flushToolResponses()
 			var parts []geminiPart
 			if m.Content != "" {
 				parts = append(parts, geminiPart{Text: m.Content})
@@ -448,18 +463,17 @@ func geminiConvertMessages(msgs []Message) (*geminiContent, []geminiContent) {
 			if content == "" {
 				content = "(no output)"
 			}
-			// Function responses go in a "user" turn (Gemini convention for tool results)
-			contents = append(contents, geminiContent{
-				Role: "user",
-				Parts: []geminiPart{{
-					FunctionResponse: &geminiFuncResponse{
-						Name:     m.Name,
-						Response: map[string]any{"result": content},
-					},
-				}},
+			// Gemini expects tool results to come back as functionResponse parts in a
+			// single user turn matching the prior function-call turn.
+			pendingToolResponses = append(pendingToolResponses, geminiPart{
+				FunctionResponse: &geminiFuncResponse{
+					Name:     m.Name,
+					Response: map[string]any{"result": content},
+				},
 			})
 		}
 	}
+	flushToolResponses()
 	return sysInstruction, contents
 }
 
