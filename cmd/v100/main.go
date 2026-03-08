@@ -1300,6 +1300,8 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSMkdir())
 	reg.Register(tools.BlackboardRead())
 	reg.Register(tools.BlackboardWrite())
+	reg.Register(tools.BlackboardSearch())
+	reg.Register(tools.BlackboardStore())
 	reg.Register(tools.Sh())
 	reg.Register(tools.GitStatus())
 	reg.Register(tools.GitDiff())
@@ -1311,6 +1313,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.SemDiff())
 	reg.Register(tools.SemImpact())
 	reg.Register(tools.SemBlame())
+	reg.Register(tools.FSOutline())
 	return reg
 }
 

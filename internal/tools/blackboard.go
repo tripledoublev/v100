@@ -7,16 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/memory"
+	"github.com/tripledoublev/v100/internal/providers"
 )
 
 type blackboardReadTool struct{}
 type blackboardWriteTool struct{}
+type blackboardSearchTool struct{}
+type blackboardStoreTool struct{}
 
-func BlackboardRead() Tool  { return &blackboardReadTool{} }
-func BlackboardWrite() Tool { return &blackboardWriteTool{} }
+func BlackboardRead() Tool   { return &blackboardReadTool{} }
+func BlackboardWrite() Tool  { return &blackboardWriteTool{} }
+func BlackboardSearch() Tool { return &blackboardSearchTool{} }
+func BlackboardStore() Tool  { return &blackboardStoreTool{} }
 
 func (t *blackboardReadTool) Name() string             { return "blackboard_read" }
-func (t *blackboardReadTool) Description() string      { return "Read shared run blackboard content." }
+func (t *blackboardReadTool) Description() string      { return "Read shared run blackboard content (legacy text format)." }
 func (t *blackboardReadTool) DangerLevel() DangerLevel { return Safe }
 func (t *blackboardReadTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
@@ -43,7 +50,7 @@ func (t *blackboardReadTool) Exec(ctx context.Context, call ToolCallContext, arg
 
 func (t *blackboardWriteTool) Name() string { return "blackboard_write" }
 func (t *blackboardWriteTool) Description() string {
-	return "Append or overwrite shared run blackboard content."
+	return "Append or overwrite shared run blackboard content (legacy text format)."
 }
 func (t *blackboardWriteTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *blackboardWriteTool) InputSchema() json.RawMessage {
@@ -98,6 +105,129 @@ func (t *blackboardWriteTool) Exec(ctx context.Context, call ToolCallContext, ar
 	return ToolResult{
 		OK:         true,
 		Output:     fmt.Sprintf(`{"bytes_written":%d}`, n),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// ─────────────────────────────────────────
+// Vector Tools
+// ─────────────────────────────────────────
+
+func (t *blackboardSearchTool) Name() string        { return "blackboard_search" }
+func (t *blackboardSearchTool) Description() string { return "Search vectorized blackboard memory." }
+func (t *blackboardSearchTool) DangerLevel() DangerLevel { return Safe }
+func (t *blackboardSearchTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["query"],
+		"properties": {
+			"query": {"type": "string"},
+			"limit": {"type": "integer", "default": 5}
+		}
+	}`)
+}
+func (t *blackboardSearchTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"results": {"type": "array"}}}`)
+}
+func (t *blackboardSearchTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+	if a.Limit <= 0 {
+		a.Limit = 5
+	}
+
+	if call.Provider == nil {
+		return failResult(start, "provider not available for search"), nil
+	}
+
+	// 1. Get embedding for query
+	embResp, err := call.Provider.Embed(ctx, providers.EmbedRequest{Text: a.Query})
+	if err != nil {
+		return failResult(start, "embedding query: "+err.Error()), nil
+	}
+
+	// 2. Load vector store
+	s := memory.NewVectorStore(call.RunID)
+	if err := s.Load(); err != nil {
+		return failResult(start, "load vector store: "+err.Error()), nil
+	}
+
+	// 3. Search
+	results := s.Search(embResp.Embedding, a.Limit)
+
+	b, _ := json.Marshal(map[string]any{"results": results})
+	return ToolResult{
+		OK:         true,
+		Output:     string(b),
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+func (t *blackboardStoreTool) Name() string             { return "blackboard_store" }
+func (t *blackboardStoreTool) Description() string      { return "Store a memory record in the vectorized blackboard." }
+func (t *blackboardStoreTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *blackboardStoreTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["content"],
+		"properties": {
+			"content": {"type": "string"},
+			"tags": {"type": "object", "additionalProperties": {"type": "string"}}
+		}
+	}`)
+}
+func (t *blackboardStoreTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"ok": {"type": "boolean"}}}`)
+}
+func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Content string            `json:"content"`
+		Tags    map[string]string `json:"tags"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+
+	if call.Provider == nil {
+		return failResult(start, "provider not available for storage"), nil
+	}
+
+	// 1. Get embedding for content
+	embResp, err := call.Provider.Embed(ctx, providers.EmbedRequest{Text: a.Content})
+	if err != nil {
+		return failResult(start, "embedding content: "+err.Error()), nil
+	}
+
+	// 2. Load vector store
+	s := memory.NewVectorStore(call.RunID)
+	_ = s.Load() // ignore error if not exists
+
+	// 3. Add item
+	item := memory.MemoryItem{
+		ID:        fmt.Sprintf("mem-%x", time.Now().UnixNano()),
+		Content:   a.Content,
+		Embedding: embResp.Embedding,
+		Metadata: memory.Metadata{
+			AgentRole: "", // could be injected from context if available
+			StepID:    call.StepID,
+			Tags:      a.Tags,
+		},
+		TS: time.Now().UTC(),
+	}
+	if err := s.Add(item); err != nil {
+		return failResult(start, "add to vector store: "+err.Error()), nil
+	}
+
+	return ToolResult{
+		OK:         true,
+		Output:     `{"ok":true}`,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

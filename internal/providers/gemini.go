@@ -561,6 +561,11 @@ func geminiParseSSE(r io.Reader) (CompleteResponse, error) {
 	}, nil
 }
 
+func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
+	// Subscription-backed Gemini embeddings endpoint is not currently known/supported in this harness.
+	return EmbedResponse{}, fmt.Errorf("gemini: embeddings not yet supported for subscription provider")
+}
+
 // geminiParseRetryWait extracts wait time from a 429 error body like "after 49s".
 var retryAfterRe = regexp.MustCompile(`after (\d+)s`)
 

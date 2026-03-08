@@ -362,3 +362,8 @@ func codexParseStream(r io.Reader) (CompleteResponse, error) {
 		Raw:           raw,
 	}, nil
 }
+
+func (p *CodexProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
+	// Subscription-backed ChatGPT embeddings endpoint is not currently known/supported in this harness.
+	return EmbedResponse{}, fmt.Errorf("codex: embeddings not yet supported for subscription provider")
+}

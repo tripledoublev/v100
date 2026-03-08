@@ -215,3 +215,44 @@ func (p *OllamaProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		Raw: raw,
 	}, nil
 }
+
+func (p *OllamaProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	payload := map[string]any{
+		"model":  model,
+		"prompt": req.Text,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+
+	url := p.baseURL + "/api/embeddings"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return EmbedResponse{}, fmt.Errorf("ollama: embed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Embedding []float32 `json:"embedding"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return EmbedResponse{}, fmt.Errorf("ollama: embed decode: %w", err)
+	}
+
+	return EmbedResponse{
+		Embedding: result.Embedding,
+		Usage:     Usage{InputTokens: 0, OutputTokens: 0, CostUSD: 0},
+	}, nil
+}

@@ -239,6 +239,32 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 
 	// Confirm dangerous tools
 	if tool.DangerLevel() == tools.Dangerous {
+		// Phase 1: Reflection turn for dangerous tools
+		confidence, uncertainty, err := l.reflectOnTool(ctx, stepID, tc)
+		if err == nil {
+			_, _ = l.emit(EventToolReflect, stepID, ToolReflectPayload{
+				CallID:      tc.ID,
+				Name:        tc.Name,
+				Confidence:  confidence,
+				Uncertainty: uncertainty,
+			})
+
+			if confidence < 0.5 {
+				msg := "low confidence rejection (conf=" + fmt.Sprintf("%.2f", confidence) + "): " + uncertainty
+				result := tools.ToolResult{OK: false, Output: msg}
+				if err := l.emitToolResult(stepID, tc, result); err != nil {
+					return err
+				}
+				l.Messages = append(l.Messages, providers.Message{
+					Role:       "tool",
+					Content:    "ERROR: " + msg,
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+				})
+				return nil
+			}
+		}
+
 		if l.ConfirmFn != nil && !l.ConfirmFn(tc.Name, string(tc.Args)) {
 			result := tools.ToolResult{OK: false, Output: "user denied tool execution"}
 			if err := l.emitToolResult(stepID, tc, result); err != nil {
@@ -266,6 +292,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		CallID:       tc.ID,
 		WorkspaceDir: l.Run.Dir,
 		TimeoutMS:    timeout,
+		Provider:     l.Provider,
 	}
 
 	result, err := tool.Exec(ctx, callCtx, tc.Args)
@@ -301,6 +328,37 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 		DurationMS: result.DurationMS,
 	})
 	return err
+}
+
+func (l *Loop) reflectOnTool(ctx context.Context, stepID string, tc providers.ToolCall) (float64, string, error) {
+	prompt := fmt.Sprintf("You are about to execute the tool %q with arguments: %s\n\n"+
+		"On a scale of 0.0 to 1.0, what is your confidence that this is the correct next step to achieve the goal? "+
+		"If below 0.7, please state your primary uncertainty concisely.\n\n"+
+		"Respond ONLY in JSON format: {\"confidence\": 0.XX, \"uncertainty\": \"...\"}",
+		tc.Name, string(tc.Args))
+
+	msgs := append([]providers.Message{}, l.buildMessages()...)
+	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})
+
+	resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+		RunID:    l.Run.ID,
+		StepID:   stepID,
+		Messages: msgs,
+		Hints:    providers.Hints{JSONOnly: true},
+	})
+	if err != nil {
+		return 0, "", err
+	}
+
+	var res struct {
+		Confidence  float64 `json:"confidence"`
+		Uncertainty string  `json:"uncertainty"`
+	}
+	if err := json.Unmarshal([]byte(resp.AssistantText), &res); err != nil {
+		return 0.8, "failed to parse reflection", nil
+	}
+
+	return res.Confidence, res.Uncertainty, nil
 }
 
 func (l *Loop) buildMessages() []providers.Message {

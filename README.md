@@ -19,9 +19,11 @@ v100 runs a core agent loop that orchestrates model calls, tool execution, and o
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
 - **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
 - **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
-- **Shared run state** — blackboard tools provide cross-agent coordination via `runs/<id>/blackboard.md`
+- **Shared run state** — blackboard tools provide cross-agent coordination via `runs/<id>/blackboard.md` and vectorized memory
+- **Vectorized Memory** — `blackboard_store` and `blackboard_search` provide persistent, semantic retrieval across long runs
+- **Reflection Turn** — agents perform an internal confidence-check before executing dangerous tools to reduce thrashing
 - **Dispatch telemetry** — per-role dispatch success/cost/tokens appear in `v100 metrics`
-- **Tool execution** — file system, shell, git, patch, curl, ripgrep search
+- **Tool execution** — file system, shell, git, patch, curl, ripgrep search, and semantic parsing
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
@@ -219,6 +221,7 @@ Default workspace is the current directory where `v100 run` is launched.
 | `fs_write` | **dangerous** | Write/append to file |
 | `fs_list` | safe | List directory entries |
 | `fs_mkdir` | safe | Create directory |
+| `fs_outline` | safe | Semantic outline of functions/types (Go only) |
 | `sh` | **dangerous** | Execute shell command |
 | `git_status` | safe | Git status |
 | `git_diff` | safe | Git diff |
@@ -233,8 +236,10 @@ Default workspace is the current directory where `v100 run` is launched.
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
 | `dispatch` | **dangerous** | Dispatch a task to a named agent role from config |
 | `orchestrate` | **dangerous** | Coordinate multiple dispatches with fanout/pipeline patterns |
-| `blackboard_read` | safe | Read shared run blackboard |
-| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard |
+| `blackboard_read` | safe | Read shared run blackboard (legacy text) |
+| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard (legacy text) |
+| `blackboard_search` | safe | Search vectorized blackboard memory |
+| `blackboard_store` | **dangerous** | Store a record in vectorized blackboard |
 
 Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
 

@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/tripledoublev/v100/internal/providers"
 )
 
 // DangerLevel classifies how risky a tool operation is.
@@ -20,6 +22,7 @@ type ToolCallContext struct {
 	CallID       string
 	WorkspaceDir string
 	TimeoutMS    int
+	Provider     providers.Provider
 }
 
 // ToolResult holds the output of a tool execution.

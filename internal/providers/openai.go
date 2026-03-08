@@ -151,6 +151,35 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 	}, nil
 }
 
+func (p *OpenAIProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+
+	ereq := openai.EmbeddingRequest{
+		Input: []string{req.Text},
+		Model: openai.EmbeddingModel(model),
+	}
+
+	resp, err := p.client.CreateEmbeddings(ctx, ereq)
+	if err != nil {
+		return EmbedResponse{}, fmt.Errorf("openai: embed: %w", err)
+	}
+
+	if len(resp.Data) == 0 {
+		return EmbedResponse{}, fmt.Errorf("openai: no embedding data in response")
+	}
+
+	return EmbedResponse{
+		Embedding: resp.Data[0].Embedding,
+		Usage: Usage{
+			InputTokens: resp.Usage.PromptTokens,
+			CostUSD:     (float64(resp.Usage.TotalTokens) / 1_000_000) * 0.02, // approx for 3-small
+		},
+	}, nil
+}
+
 // estimateCost returns a rough USD cost estimate.
 func estimateCost(model string, input, output int) float64 {
 	// Per-1M token prices (as of early 2025 — approximate)

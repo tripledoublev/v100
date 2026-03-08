@@ -275,6 +275,11 @@ func anthropicParseResponse(raw []byte, model string) (CompleteResponse, error) 
 	}, nil
 }
 
+func (p *AnthropicProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
+	// Anthropic does not currently provide a native embeddings API.
+	return EmbedResponse{}, fmt.Errorf("anthropic: embeddings not supported")
+}
+
 // anthropicConvertMessages converts provider messages to Anthropic format.
 // Returns (system, messages). System messages are extracted; tool results
 // are wrapped in tool_result content blocks within user turns.

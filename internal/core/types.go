@@ -17,6 +17,7 @@ const (
 	EventModelResp     EventType = "model.response"
 	EventToolCall      EventType = "tool.call"
 	EventToolResult    EventType = "tool.result"
+	EventToolReflect   EventType = "tool.reflect"
 	EventRunError      EventType = "run.error"
 	EventRunEnd        EventType = "run.end"
 	EventAgentStart    EventType = "agent.start"
@@ -138,6 +139,14 @@ type ToolResultPayload struct {
 	OK         bool   `json:"ok"`
 	Output     string `json:"output"`
 	DurationMS int64  `json:"duration_ms"`
+}
+
+// ToolReflectPayload is the Payload for EventToolReflect.
+type ToolReflectPayload struct {
+	CallID      string  `json:"call_id"`
+	Name        string  `json:"name"`
+	Confidence  float64 `json:"confidence"`
+	Uncertainty string  `json:"uncertainty,omitempty"`
 }
 
 // RunErrorPayload is the Payload for EventRunError.

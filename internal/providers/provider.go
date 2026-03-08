@@ -80,9 +80,22 @@ type CompleteResponse struct {
 	Raw           json.RawMessage // raw provider payload (redact secrets before storing)
 }
 
+// EmbedRequest is a request to generate an embedding for text.
+type EmbedRequest struct {
+	Text  string
+	Model string
+}
+
+// EmbedResponse is the response from an embedding request.
+type EmbedResponse struct {
+	Embedding []float32
+	Usage     Usage
+}
+
 // Provider is the interface all LLM backends implement.
 type Provider interface {
 	Name() string
 	Capabilities() Capabilities
 	Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error)
+	Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error)
 }
