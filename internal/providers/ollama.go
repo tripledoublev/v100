@@ -99,7 +99,7 @@ func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		baseErr := fmt.Errorf("ollama: HTTP %d: %s", resp.StatusCode, string(raw))
 		if isRetryableStatus(resp.StatusCode) {
 			return nil, &RetryableError{
@@ -114,7 +114,7 @@ func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	ch := make(chan StreamEvent, 100)
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		dec := json.NewDecoder(resp.Body)
 		var toolCallIdx int
@@ -311,7 +311,7 @@ func (p *OllamaProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 	if err != nil {
 		return CompleteResponse{}, fmt.Errorf("ollama: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		baseErr := fmt.Errorf("ollama: HTTP %d: %s", resp.StatusCode, string(raw))
@@ -378,7 +378,7 @@ func (p *OllamaProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 	if err != nil {
 		return EmbedResponse{}, fmt.Errorf("ollama: embed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(resp.Body)
@@ -428,7 +428,7 @@ func (p *OllamaProvider) Metadata(ctx context.Context, model string) (ModelMetad
 	if err != nil {
 		return ModelMetadata{}, fmt.Errorf("ollama: show: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return ModelMetadata{Model: model, IsFree: true, ContextSize: 4096}, nil // fallback

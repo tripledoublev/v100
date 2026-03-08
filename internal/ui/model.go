@@ -515,7 +515,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 					styleMuted.Render("  run "+ev.RunID[:8]+"  "+p.Provider+" · "+p.Model) +
 					"\n\n",
 			)
-			m.plainBuf.WriteString(fmt.Sprintf("v100  run %s  %s · %s\n\n", ev.RunID[:8], p.Provider, p.Model))
+			_, _ = fmt.Fprintf(&m.plainBuf, "v100  run %s  %s · %s\n\n", ev.RunID[:8], p.Provider, p.Model)
 		}
 
 	case core.EventUserMsg:
@@ -523,14 +523,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
 			wrapped := m.wrapPlainForTranscript(p.Content)
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"\n%s  %s  %s\n",
-				ts, styleUser.Render("you"), wrapped,
-			))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render("you"), wrapped)
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
 			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Content})
-			m.plainBuf.WriteString(fmt.Sprintf("\nyou: %s\n", p.Content))
+			_, _ = fmt.Fprintf(&m.plainBuf, "\nyou: %s\n", p.Content)
 		}
 
 	case core.EventModelResp:
@@ -543,23 +540,15 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		m.input.Blur()
 		if p.Text != "" {
 			rendered := m.renderMarkdownForPane(p.Text)
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"\n%s  %s\n%s\n",
-				ts, styleAssistant.Render("v100"), rendered,
-			))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
 			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Text})
-			m.plainBuf.WriteString(fmt.Sprintf("\nv100: %s\n", p.Text))
+			_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", p.Text)
 		}
 		for _, tc := range p.ToolCalls {
 			args := m.wrapPlainForTranscript(tc.ArgsJSON)
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"           %s %s%s\n",
-				styleTool.Render("⚙"),
-				styleTool.Render(tc.Name),
-				styleMuted.Render("("+args+")"),
-			))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(tc.Name), styleMuted.Render("("+args+")"))
 		}
 
 	case core.EventToolCall:
@@ -583,40 +572,24 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		}
 		out = strings.ReplaceAll(out, "\n", " ↵ ")
 		out = m.wrapPlainForTranscript(out)
-		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"           %s %s  %s  %s\n",
-			icon, nameStr,
-			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
-			out,
-		))
+		_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s  %s  %s\n", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)), out)
 
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"\n%s\n",
-				styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d",
-					p.Reason, p.UsedSteps, p.UsedTokens)),
-			))
-			m.plainBuf.WriteString(fmt.Sprintf("\n■ run ended: %s  steps=%d  tokens=%d\n", p.Reason, p.UsedSteps, p.UsedTokens))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d", p.Reason, p.UsedSteps, p.UsedTokens)))
+			_, _ = fmt.Fprintf(&m.plainBuf, "\n■ run ended: %s  steps=%d  tokens=%d\n", p.Reason, p.UsedSteps, p.UsedTokens)
 		}
 
 	case core.EventRunError:
 		var p core.RunErrorPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if sub {
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"       %s %s\n",
-				styleMuted.Render("◆"), styleFail.Render("error: "+p.Error),
-			))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "       %s %s\n", styleMuted.Render("◆"), styleFail.Render("error: "+p.Error))
 		} else {
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"\n%s  %s\n",
-				styleFail.Render("✗ error"),
-				styleFail.Render(p.Error),
-			))
-			m.plainBuf.WriteString(fmt.Sprintf("\nerror: %s\n", p.Error))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n", styleFail.Render("✗ error"), styleFail.Render(p.Error))
+			_, _ = fmt.Fprintf(&m.plainBuf, "\nerror: %s\n", p.Error)
 		}
 
 	case core.EventAgentStart:
@@ -640,11 +613,8 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if strings.TrimSpace(p.Agent) != "" {
 			label = "Dispatch:" + p.Agent
 		}
-		m.transcriptBuf.WriteString(fmt.Sprintf(
-			"\n%s\n",
-			styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)),
-		))
-		m.plainBuf.WriteString(fmt.Sprintf("\n● %s(%s)\n", label, task))
+		_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)))
+		_, _ = fmt.Fprintf(&m.plainBuf, "\n● %s(%s)\n", label, task)
 
 	case core.EventAgentEnd:
 		var p core.AgentEndPayload
@@ -666,21 +636,13 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if p.OK {
 			m.agentDoneCount++
 			m.lastAgentNote = fmt.Sprintf("done (%s)", summary)
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"  %s  %s\n",
-				styleMuted.Render("⎿"),
-				styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"),
-			))
-			m.plainBuf.WriteString(fmt.Sprintf("  ⎿  Done (%s)\n", summary))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"))
+			_, _ = fmt.Fprintf(&m.plainBuf, "  ⎿  Done (%s)\n", summary)
 		} else {
 			m.agentFailCount++
 			m.lastAgentNote = fmt.Sprintf("failed (%s)", summary)
-			m.transcriptBuf.WriteString(fmt.Sprintf(
-				"  %s  %s\n",
-				styleMuted.Render("⎿"),
-				styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"),
-			))
-			m.plainBuf.WriteString(fmt.Sprintf("  ⎿  Failed (%s)\n", summary))
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"))
+			_, _ = fmt.Fprintf(&m.plainBuf, "  ⎿  Failed (%s)\n", summary)
 		}
 	}
 
@@ -1309,7 +1271,7 @@ func (m *TUIModel) startRadio() {
 		return
 	}
 
-	args := []string{}
+	var args []string
 	switch m.radioPlayer {
 	case "mpv":
 		args = []string{"--no-video", "--no-terminal", "--really-quiet", fmt.Sprintf("--volume=%d", m.radioVolume), m.radioURL}
@@ -1527,7 +1489,7 @@ func fetchNowPlaying(stationID string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", "", err

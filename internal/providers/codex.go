@@ -139,7 +139,7 @@ func (p *CodexProvider) Complete(ctx context.Context, req CompleteRequest) (Comp
 	if err != nil {
 		return CompleteResponse{}, fmt.Errorf("codex: request: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode != http.StatusOK {
 		raw, err := io.ReadAll(httpResp.Body)

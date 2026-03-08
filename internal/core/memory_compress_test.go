@@ -49,7 +49,7 @@ func newCompressLoop(t *testing.T, prov providers.Provider, contextLimit int) *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { trace.Close() })
+	t.Cleanup(func() { _ = trace.Close() })
 
 	pol := policy.Default()
 	pol.ContextLimit = contextLimit
@@ -228,7 +228,7 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	pol := policy.Default()
 	pol.MemoryPath = memPath
@@ -277,7 +277,7 @@ func TestMemoryAbsentWhenFileNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	pol := policy.Default()
 	pol.MemoryPath = filepath.Join(dir, "MEMORY.md") // file does not exist

@@ -203,7 +203,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (
 	if err != nil {
 		return CompleteResponse{}, fmt.Errorf("anthropic: request: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode != http.StatusOK {
 		raw, err := io.ReadAll(httpResp.Body)
@@ -394,7 +394,7 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 
 	if httpResp.StatusCode != http.StatusOK {
 		raw, err := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
+		_ = httpResp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read error body: %w", err)
 		}
@@ -412,7 +412,7 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 	ch := make(chan StreamEvent, 100)
 	go func() {
 		defer close(ch)
-		defer httpResp.Body.Close()
+		defer func() { _ = httpResp.Body.Close() }()
 
 		scanner := bufio.NewScanner(httpResp.Body)
 		var currentToolID string
@@ -457,9 +457,10 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequ
 				}
 			case "content_block_delta":
 				if event.Delta != nil {
-					if event.Delta.Type == "text_delta" {
+					switch event.Delta.Type {
+					case "text_delta":
 						ch <- StreamEvent{Type: StreamToken, Text: event.Delta.Text}
-					} else if event.Delta.Type == "input_json_delta" {
+					case "input_json_delta":
 						ch <- StreamEvent{
 							Type:         StreamToolCallDelta,
 							ToolCallID:   currentToolID,

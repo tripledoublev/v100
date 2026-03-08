@@ -63,7 +63,7 @@ func TestLoopSnapshotsBeforeWorkspaceMutations(t *testing.T) {
 		}
 
 		loop, trace, dir, snaps := newSnapshotTestLoop(t, prov, []string{"fs_mkdir"})
-		defer trace.Close()
+		defer func() { _ = trace.Close() }()
 		loop.Tools.Register(tools.FSMkdir())
 
 		if err := loop.Step(context.Background(), "make dir"); err != nil {
@@ -104,7 +104,7 @@ func TestLoopSnapshotsBeforeWorkspaceMutations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer trace.Close()
+		defer func() { _ = trace.Close() }()
 
 		snaps := &mockSnapshotManager{}
 		reg := tools.NewRegistry([]string{"patch_apply"})
@@ -154,7 +154,7 @@ func TestLoopDoesNotSnapshotDangerousNonMutatingTool(t *testing.T) {
 	}
 
 	loop, trace, _, snaps := newSnapshotTestLoop(t, prov, []string{"mock_dangerous"})
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	dangerousTool := &mockDangerousTool{}
 	loop.Tools.Register(dangerousTool)

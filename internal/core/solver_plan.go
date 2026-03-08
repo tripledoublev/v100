@@ -116,10 +116,11 @@ func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, p
 			return "", err
 		}
 		for ev := range ch {
-			if ev.Type == providers.StreamToken {
+			switch ev.Type {
+			case providers.StreamToken:
 				assistantText.WriteString(ev.Text)
 				_, _ = l.emit(EventModelToken, stepID, map[string]string{"text": ev.Text})
-			} else if ev.Type == providers.StreamDone {
+			case providers.StreamDone:
 				usage = ev.Usage
 			}
 		}

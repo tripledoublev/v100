@@ -44,7 +44,7 @@ func TestLoopEmitsToolOutputDeltaEvents(t *testing.T) {
 	}
 
 	loop, trace := newTestLoop(t, prov, []string{"sh"})
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 	loop.Tools.Register(tools.Sh())
 	loop.Session = session
 	loop.Mapper = core.NewPathMapper(sourceDir, sandboxDir)

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os/exec"
 	"strings"
 	"time"
@@ -187,7 +187,7 @@ func runSem(ctx context.Context, call ToolCallContext, semArgs ...string) (ToolR
 
 func ensureSemanticSem(ctx context.Context) error {
 	if _, err := exec.LookPath("sem"); err != nil {
-		return fmt.Errorf(semanticSemHelp)
+		return errors.New(semanticSemHelp)
 	}
 
 	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -196,13 +196,13 @@ func ensureSemanticSem(ctx context.Context) error {
 	cmd := exec.CommandContext(checkCtx, "sem", "--help")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf(semanticSemHelp)
+		return errors.New(semanticSemHelp)
 	}
 	help := string(out)
 	if strings.Contains(help, "Semantic version control") && strings.Contains(help, "Show semantic diff of changes") {
 		return nil
 	}
-	return fmt.Errorf("%s\n\nFound a different 'sem' binary on PATH. Please install https://github.com/Ataraxy-Labs/sem and ensure it is first on PATH.", semanticSemHelp)
+	return errors.New(semanticSemHelp + "\n\nfound a different 'sem' binary on PATH. install https://github.com/Ataraxy-Labs/sem and ensure it is first on PATH")
 }
 
-const semanticSemHelp = "Tool 'sem' (Semantic Version Control) is not installed on this system.\nTo use semantic diffing, please install it from: https://github.com/Ataraxy-Labs/sem\n\nInstallation:\n  git clone https://github.com/Ataraxy-Labs/sem.git\n  cd sem/crates && cargo build --release\n  cp target/release/sem /usr/local/bin/sem"
+const semanticSemHelp = "tool 'sem' (Semantic Version Control) is not installed on this system\nuse semantic diffing by installing it from https://github.com/Ataraxy-Labs/sem\n\ninstallation:\n  git clone https://github.com/Ataraxy-Labs/sem.git\n  cd sem/crates && cargo build --release\n  cp target/release/sem /usr/local/bin/sem"

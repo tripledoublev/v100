@@ -200,7 +200,7 @@ func LoginWithConfig(ctx context.Context, cfg OAuthConfig) (*Token, error) {
 			ch <- callbackResult{err: fmt.Errorf("auth: no code in callback")}
 			return
 		}
-		fmt.Fprintln(w, "<html><body><h2>Authentication successful — you may close this tab.</h2></body></html>")
+		_, _ = fmt.Fprintln(w, "<html><body><h2>Authentication successful — you may close this tab.</h2></body></html>")
 		ch <- callbackResult{code: code}
 	})
 
@@ -339,7 +339,7 @@ func postTokenRequest(ctx context.Context, tokenURL string, form url.Values) (*T
 	if err != nil {
 		return nil, fmt.Errorf("auth: token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {

@@ -117,7 +117,7 @@ func (t *fsWriteTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	if err != nil {
 		return failResult(start, err.Error()), nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	n, err := f.WriteString(a.Content)
 	if err != nil {

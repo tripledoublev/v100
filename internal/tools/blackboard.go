@@ -101,7 +101,7 @@ func (t *blackboardWriteTool) Exec(ctx context.Context, call ToolCallContext, ar
 	if err != nil {
 		return failResult(start, "open: "+err.Error()), nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	n, err := f.WriteString(a.Content)
 	if err != nil {
 		return failResult(start, "write: "+err.Error()), nil

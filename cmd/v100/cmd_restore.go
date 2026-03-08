@@ -56,7 +56,7 @@ func restoreCmd(_ *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer trace.Close()
+			defer func() { _ = trace.Close() }()
 
 			payload, err := json.Marshal(core.SandboxRestorePayload{
 				SnapshotID: restoreResult.SnapshotID,

@@ -314,44 +314,44 @@ func hasToolLoop(seq []string) bool {
 // FormatMetrics renders metrics and inferred classification.
 func FormatMetrics(m RunMetrics, c RunClassification) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Run:                          %s\n", m.RunID))
-	b.WriteString(fmt.Sprintf("Classification:               %s\n", c.Label))
+	_, _ = fmt.Fprintf(&b, "Run:                          %s\n", m.RunID)
+	_, _ = fmt.Fprintf(&b, "Classification:               %s\n", c.Label)
 	if len(c.Evidence) > 0 {
 		b.WriteString("Classification evidence:\n")
 		for _, e := range c.Evidence {
-			b.WriteString(fmt.Sprintf("  - %s\n", e))
+			_, _ = fmt.Fprintf(&b, "  - %s\n", e)
 		}
 	}
 	b.WriteString("\nEfficiency metrics:\n")
-	b.WriteString(fmt.Sprintf("  steps_per_run:              %d\n", m.StepsPerRun))
-	b.WriteString(fmt.Sprintf("  tokens_per_run:             %d\n", m.TokensPerRun))
-	b.WriteString(fmt.Sprintf("  cost_per_run_usd:           %.4f\n", m.CostPerRunUSD))
-	b.WriteString(fmt.Sprintf("  tokens_per_successful_tool_step:  %.2f\n", m.TokensPerSuccessfulToolStep))
-	b.WriteString(fmt.Sprintf("  cost_per_successful_tool_step_usd: %.4f\n", m.CostPerSuccessfulToolStepUSD))
-	b.WriteString(fmt.Sprintf("  efficiency_score:           %.1f\n", m.EfficiencyScore))
+	_, _ = fmt.Fprintf(&b, "  steps_per_run:              %d\n", m.StepsPerRun)
+	_, _ = fmt.Fprintf(&b, "  tokens_per_run:             %d\n", m.TokensPerRun)
+	_, _ = fmt.Fprintf(&b, "  cost_per_run_usd:           %.4f\n", m.CostPerRunUSD)
+	_, _ = fmt.Fprintf(&b, "  tokens_per_successful_tool_step:  %.2f\n", m.TokensPerSuccessfulToolStep)
+	_, _ = fmt.Fprintf(&b, "  cost_per_successful_tool_step_usd: %.4f\n", m.CostPerSuccessfulToolStepUSD)
+	_, _ = fmt.Fprintf(&b, "  efficiency_score:           %.1f\n", m.EfficiencyScore)
 
 	b.WriteString("\nBehavior metrics:\n")
-	b.WriteString(fmt.Sprintf("  tool_call_success_rate:     %.2f\n", m.ToolCallSuccessRate))
-	b.WriteString(fmt.Sprintf("  tool_retry_rate:            %.2f\n", m.ToolRetryRate))
-	b.WriteString(fmt.Sprintf("  compression_frequency:      %.2f\n", m.CompressionFrequency))
-	b.WriteString(fmt.Sprintf("  avg_context_before_compression: %.0f\n", m.AvgContextBeforeCompression))
+	_, _ = fmt.Fprintf(&b, "  tool_call_success_rate:     %.2f\n", m.ToolCallSuccessRate)
+	_, _ = fmt.Fprintf(&b, "  tool_retry_rate:            %.2f\n", m.ToolRetryRate)
+	_, _ = fmt.Fprintf(&b, "  compression_frequency:      %.2f\n", m.CompressionFrequency)
+	_, _ = fmt.Fprintf(&b, "  avg_context_before_compression: %.0f\n", m.AvgContextBeforeCompression)
 
 	b.WriteString("\nTrajectory metrics:\n")
-	b.WriteString(fmt.Sprintf("  time_per_step_ms:           %.1f\n", m.TimePerStepMS))
-	b.WriteString(fmt.Sprintf("  latency_p50_ms:             %d\n", m.LatencyP50MS))
-	b.WriteString(fmt.Sprintf("  latency_p95_ms:             %d\n", m.LatencyP95MS))
-	b.WriteString(fmt.Sprintf("  tool_vs_reasoning_time_ratio: %.2f\n", m.ToolVsReasoningTimeRatio))
+	_, _ = fmt.Fprintf(&b, "  time_per_step_ms:           %.1f\n", m.TimePerStepMS)
+	_, _ = fmt.Fprintf(&b, "  latency_p50_ms:             %d\n", m.LatencyP50MS)
+	_, _ = fmt.Fprintf(&b, "  latency_p95_ms:             %d\n", m.LatencyP95MS)
+	_, _ = fmt.Fprintf(&b, "  tool_vs_reasoning_time_ratio: %.2f\n", m.ToolVsReasoningTimeRatio)
 	if m.DispatchCalls > 0 {
 		b.WriteString("\nDispatch metrics:\n")
-		b.WriteString(fmt.Sprintf("  dispatch_calls:              %d\n", m.DispatchCalls))
-		b.WriteString(fmt.Sprintf("  dispatch_success_rate:       %.2f\n", m.DispatchSuccessRate))
-		b.WriteString(fmt.Sprintf("  dispatch_tokens:             %d\n", m.DispatchTokens))
-		b.WriteString(fmt.Sprintf("  dispatch_cost_usd:           %.4f\n", m.DispatchCostUSD))
+		_, _ = fmt.Fprintf(&b, "  dispatch_calls:              %d\n", m.DispatchCalls)
+		_, _ = fmt.Fprintf(&b, "  dispatch_success_rate:       %.2f\n", m.DispatchSuccessRate)
+		_, _ = fmt.Fprintf(&b, "  dispatch_tokens:             %d\n", m.DispatchTokens)
+		_, _ = fmt.Fprintf(&b, "  dispatch_cost_usd:           %.4f\n", m.DispatchCostUSD)
 		if len(m.DispatchByRole) > 0 {
 			b.WriteString("  dispatch_by_role:\n")
 			for role, n := range m.DispatchByRole {
 				fail := m.DispatchFailuresByRole[role]
-				b.WriteString(fmt.Sprintf("    - %s: calls=%d failures=%d\n", role, n, fail))
+				_, _ = fmt.Fprintf(&b, "    - %s: calls=%d failures=%d\n", role, n, fail)
 			}
 		}
 	}
@@ -365,20 +365,20 @@ func FormatMetricCompare(metrics []RunMetrics) string {
 		return "no runs to compare\n"
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%-24s", ""))
+	_, _ = fmt.Fprintf(&b, "%-24s", "")
 	for _, m := range metrics {
 		id := m.RunID
 		if len(id) > 12 {
 			id = id[:12]
 		}
-		b.WriteString(fmt.Sprintf("  %-14s", id))
+		_, _ = fmt.Fprintf(&b, "  %-14s", id)
 	}
 	b.WriteString("\n")
 
 	row := func(label string, vals []string) {
-		b.WriteString(fmt.Sprintf("%-24s", label))
+		_, _ = fmt.Fprintf(&b, "%-24s", label)
 		for _, v := range vals {
-			b.WriteString(fmt.Sprintf("  %-14s", v))
+			_, _ = fmt.Fprintf(&b, "  %-14s", v)
 		}
 		b.WriteString("\n")
 	}

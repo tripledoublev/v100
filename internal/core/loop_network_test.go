@@ -52,7 +52,7 @@ func TestLoopBlocksNetworkToolWhenNetworkTierOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	netTool := &mockNetworkTool{}
 	reg := tools.NewRegistry([]string{"mock_network"})
@@ -124,7 +124,7 @@ func TestLoopAllowsNetworkToolWhenNetworkTierResearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	netTool := &mockNetworkTool{}
 	reg := tools.NewRegistry([]string{"mock_network"})

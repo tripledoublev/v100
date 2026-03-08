@@ -160,13 +160,6 @@ func buildSnapshotManager(cfg *config.Config, workspace string) core.SnapshotMan
 	return core.NewWorkspaceSnapshotManager(workspace, filepath.Join(filepath.Dir(workspace), "snapshots"))
 }
 
-func sourceWorkspaceFingerprint(cfg *config.Config, sourceWorkspace string) (string, error) {
-	if cfg == nil || !cfg.Sandbox.Enabled {
-		return "", nil
-	}
-	return core.WorkspaceFingerprint(sourceWorkspace)
-}
-
 func finalizeSandboxRun(cfg *config.Config, run *core.Run, reason string, mapper *core.PathMapper) (*core.SandboxFinalizeResult, error) {
 	if cfg == nil || !cfg.Sandbox.Enabled || run == nil || mapper == nil {
 		return nil, nil
@@ -817,7 +810,7 @@ func randBytes(n int) []byte {
 	if err != nil {
 		return b
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = f.Read(b)
 	return b
 }

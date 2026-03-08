@@ -114,32 +114,32 @@ func Percentile(sorted []int64, p float64) int64 {
 // FormatStats returns a human-readable stats table.
 func FormatStats(s RunStats) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Run:          %s\n", s.RunID))
-	b.WriteString(fmt.Sprintf("Provider:     %s\n", s.Provider))
-	b.WriteString(fmt.Sprintf("Model:        %s\n", s.Model))
+	_, _ = fmt.Fprintf(&b, "Run:          %s\n", s.RunID)
+	_, _ = fmt.Fprintf(&b, "Provider:     %s\n", s.Provider)
+	_, _ = fmt.Fprintf(&b, "Model:        %s\n", s.Model)
 	if s.ModelMetadata.ContextSize > 0 {
-		b.WriteString(fmt.Sprintf("Context:      %s\n", FormatContextSize(s.ModelMetadata.ContextSize)))
+		_, _ = fmt.Fprintf(&b, "Context:      %s\n", FormatContextSize(s.ModelMetadata.ContextSize))
 	}
 	if pricing := FormatModelPricing(s.ModelMetadata); pricing != "-" {
-		b.WriteString(fmt.Sprintf("Pricing:      %s\n", pricing))
+		_, _ = fmt.Fprintf(&b, "Pricing:      %s\n", pricing)
 	}
-	b.WriteString(fmt.Sprintf("Steps:        %d\n", s.TotalSteps))
-	b.WriteString(fmt.Sprintf("Model calls:  %d\n", s.ModelCalls))
-	b.WriteString(fmt.Sprintf("Tokens in:    %d\n", s.TokensIn))
-	b.WriteString(fmt.Sprintf("Tokens out:   %d\n", s.TokensOut))
-	b.WriteString(fmt.Sprintf("Cost:         $%.4f\n", s.TotalCostUSD))
-	b.WriteString(fmt.Sprintf("Wall clock:   %dms\n", s.WallClockMS))
+	_, _ = fmt.Fprintf(&b, "Steps:        %d\n", s.TotalSteps)
+	_, _ = fmt.Fprintf(&b, "Model calls:  %d\n", s.ModelCalls)
+	_, _ = fmt.Fprintf(&b, "Tokens in:    %d\n", s.TokensIn)
+	_, _ = fmt.Fprintf(&b, "Tokens out:   %d\n", s.TokensOut)
+	_, _ = fmt.Fprintf(&b, "Cost:         $%.4f\n", s.TotalCostUSD)
+	_, _ = fmt.Fprintf(&b, "Wall clock:   %dms\n", s.WallClockMS)
 	if len(s.ModelLatencyMS) > 0 {
-		b.WriteString(fmt.Sprintf("Latency p50:  %dms\n", Percentile(s.ModelLatencyMS, 50)))
-		b.WriteString(fmt.Sprintf("Latency p95:  %dms\n", Percentile(s.ModelLatencyMS, 95)))
-		b.WriteString(fmt.Sprintf("Latency max:  %dms\n", s.ModelLatencyMS[len(s.ModelLatencyMS)-1]))
+		_, _ = fmt.Fprintf(&b, "Latency p50:  %dms\n", Percentile(s.ModelLatencyMS, 50))
+		_, _ = fmt.Fprintf(&b, "Latency p95:  %dms\n", Percentile(s.ModelLatencyMS, 95))
+		_, _ = fmt.Fprintf(&b, "Latency max:  %dms\n", s.ModelLatencyMS[len(s.ModelLatencyMS)-1])
 	}
-	b.WriteString(fmt.Sprintf("Tool calls:   %d\n", s.ToolCalls))
-	b.WriteString(fmt.Sprintf("Tool fails:   %d\n", s.ToolFailures))
-	b.WriteString(fmt.Sprintf("Compressions: %d\n", s.Compressions))
-	b.WriteString(fmt.Sprintf("End reason:   %s\n", s.EndReason))
+	_, _ = fmt.Fprintf(&b, "Tool calls:   %d\n", s.ToolCalls)
+	_, _ = fmt.Fprintf(&b, "Tool fails:   %d\n", s.ToolFailures)
+	_, _ = fmt.Fprintf(&b, "Compressions: %d\n", s.Compressions)
+	_, _ = fmt.Fprintf(&b, "End reason:   %s\n", s.EndReason)
 	if s.Score != "" {
-		b.WriteString(fmt.Sprintf("Score:        %s\n", s.Score))
+		_, _ = fmt.Fprintf(&b, "Score:        %s\n", s.Score)
 	}
 
 	if len(s.ToolUsage) > 0 {
@@ -154,7 +154,7 @@ func FormatStats(s RunStats) string {
 		}
 		sort.Slice(pairs, func(i, j int) bool { return pairs[i].v > pairs[j].v })
 		for _, p := range pairs {
-			b.WriteString(fmt.Sprintf("  %-20s %d\n", p.k, p.v))
+			_, _ = fmt.Fprintf(&b, "  %-20s %d\n", p.k, p.v)
 		}
 	}
 	return b.String()
@@ -168,20 +168,20 @@ func FormatCompare(stats []RunStats) string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(fmt.Sprintf("%-14s", ""))
+	_, _ = fmt.Fprintf(&b, "%-14s", "")
 	for _, s := range stats {
 		id := s.RunID
 		if len(id) > 12 {
 			id = id[:12]
 		}
-		b.WriteString(fmt.Sprintf("  %-14s", id))
+		_, _ = fmt.Fprintf(&b, "  %-14s", id)
 	}
 	b.WriteString("\n")
 
 	row := func(label string, vals []string) {
-		b.WriteString(fmt.Sprintf("%-14s", label))
+		_, _ = fmt.Fprintf(&b, "%-14s", label)
 		for _, v := range vals {
-			b.WriteString(fmt.Sprintf("  %-14s", v))
+			_, _ = fmt.Fprintf(&b, "  %-14s", v)
 		}
 		b.WriteString("\n")
 	}

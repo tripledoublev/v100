@@ -85,7 +85,7 @@ func TestLoopSingleStep(t *testing.T) {
 		},
 	}
 	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	if err := loop.EmitRunStart(core.RunStartPayload{Provider: "mock", Model: "test"}); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestLoopToolCall(t *testing.T) {
 
 	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
 	loop.Run.Dir = dir
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	if err := loop.Step(context.Background(), "read the file"); err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestLoopBudgetExceeded(t *testing.T) {
 	dir := t.TempDir()
 	tracePath := filepath.Join(dir, "trace.jsonl")
 	trace, _ := core.OpenTrace(tracePath)
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	run := &core.Run{ID: "test", Dir: dir, TraceFile: tracePath}
 	budget := &core.Budget{MaxSteps: 1} // only 1 step allowed
@@ -203,10 +203,9 @@ func isErrBudgetExceeded(err error, target **core.ErrBudgetExceeded) bool {
 	if err == nil {
 		return false
 	}
-	type budgetExceeded interface {
-		Error() string
+	if target != nil && *target != nil {
+		return true
 	}
-	// Check if the message contains "budget exceeded"
 	return len(err.Error()) > 0
 }
 
@@ -247,7 +246,7 @@ func TestLoopGenParamsThreaded(t *testing.T) {
 	dir := t.TempDir()
 	tracePath := filepath.Join(dir, "trace.jsonl")
 	trace, _ := core.OpenTrace(tracePath)
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	run := &core.Run{ID: "test-gen", Dir: dir, TraceFile: tracePath}
 	budget := &core.Budget{MaxSteps: 10}
@@ -291,7 +290,7 @@ func TestLoopGenParamsThreaded(t *testing.T) {
 func TestEmitRunEndIdempotency(t *testing.T) {
 	prov := &mockProvider{}
 	loop, trace := newTestLoop(t, prov, nil)
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	if err := loop.EmitRunEnd("reason1"); err != nil {
 		t.Fatal(err)

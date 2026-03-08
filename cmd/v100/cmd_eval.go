@@ -199,11 +199,11 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					var s_workspace string
 					s_session, s_mapper, s_workspace, err = buildSandboxSession(cfg, runID, ".", "runs")
 					if err != nil {
-						trace.Close()
+						_ = trace.Close()
 						return err
 					}
 					if cfg.Sandbox.Enabled {
-						defer s_session.Close()
+						defer func() { _ = s_session.Close() }()
 					}
 
 					reg := buildToolRegistry(cfg)
@@ -212,7 +212,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					// Build provider from variant config
 					pc, ok := cfg.Providers[variant.Provider]
 					if !ok {
-						trace.Close()
+						_ = trace.Close()
 						return fmt.Errorf("provider %q not configured", variant.Provider)
 					}
 					if variant.Model != "" {
@@ -220,7 +220,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					}
 					prov, err := buildProviderFromConfig(pc)
 					if err != nil {
-						trace.Close()
+						_ = trace.Close()
 						return err
 					}
 
@@ -240,7 +240,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					case "react", "":
 						solver = &core.ReactSolver{}
 					default:
-						trace.Close()
+						_ = trace.Close()
 						return fmt.Errorf("variant %s: unknown solver %q", variant.Name, solverName)
 					}
 
@@ -292,7 +292,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						reason = "error"
 					}
 					_ = loop.EmitRunEnd(reason)
-					trace.Close()
+					_ = trace.Close()
 				}
 			}
 
@@ -524,11 +524,11 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					var s_workspace string
 					s_session, s_mapper, s_workspace, err = buildSandboxSession(cfg, runID, ".", "runs")
 					if err != nil {
-						trace.Close()
+						_ = trace.Close()
 						return err
 					}
 					if cfg.Sandbox.Enabled {
-						defer s_session.Close()
+						defer func() { _ = s_session.Close() }()
 					}
 
 					confirmFn := func(_, _ string) bool { return true } // auto-approve for experiments
@@ -570,7 +570,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						fmt.Printf("  warning: run %s ended with error: %v\n", runID, err)
 					}
 					_ = loop.EmitRunEnd(reason)
-					trace.Close()
+					_ = trace.Close()
 
 					exp.RunIDs = append(exp.RunIDs, runID)
 					_ = exp.Save("runs")

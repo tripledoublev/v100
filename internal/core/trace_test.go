@@ -32,7 +32,7 @@ func TestTraceWriteAndReadAll(t *testing.T) {
 	if err := tw.Write(ev); err != nil {
 		t.Fatal(err)
 	}
-	tw.Close()
+	_ = tw.Close()
 
 	events, err := core.ReadAll(path)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestTraceMultipleEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tw.Close()
+	_ = tw.Close()
 
 	events, err := core.ReadAll(path)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestOpenTraceCreatesParentDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tw.Close()
+	_ = tw.Close()
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("expected trace file to exist: %v", err)

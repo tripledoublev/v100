@@ -62,7 +62,7 @@ func ReadAll(path string) ([]Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("trace: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var events []Event
 	scanner := bufio.NewScanner(f)

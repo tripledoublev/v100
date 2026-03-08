@@ -128,7 +128,7 @@ func (p *GeminiProvider) loadCodeAssist(ctx context.Context, access string) (pro
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", "", fmt.Errorf("read body: %w", err)
@@ -197,7 +197,7 @@ func (p *GeminiProvider) onboardUser(ctx context.Context, access, tierID string)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
@@ -325,12 +325,12 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 
 	if httpResp.StatusCode == http.StatusOK {
 		resp, err := geminiParseSSE(httpResp.Body)
-		httpResp.Body.Close()
+		_ = httpResp.Body.Close()
 		return resp, err
 	}
 
 	raw, err := io.ReadAll(httpResp.Body)
-	httpResp.Body.Close()
+	_ = httpResp.Body.Close()
 	if err != nil {
 		return CompleteResponse{}, fmt.Errorf("read body: %w", err)
 	}

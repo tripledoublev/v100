@@ -23,7 +23,7 @@ func TestCheckpointRestoresWorkspaceState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "cp-run", Dir: workspace, TraceFile: tracePath},

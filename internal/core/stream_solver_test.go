@@ -51,7 +51,7 @@ func TestReactSolverStreaming(t *testing.T) {
 
 	runDir := t.TempDir()
 	trace, _ := OpenTrace(runDir + "/trace.jsonl")
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	pol := &policy.Policy{Streaming: true}
 

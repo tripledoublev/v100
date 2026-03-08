@@ -72,8 +72,14 @@ func configInitCmd() *cobra.Command {
 			if _, err := os.Stat(path); err == nil {
 				fmt.Println(ui.Warn("Config already exists at " + path))
 				fmt.Print(ui.Dim("Overwrite? [y/N] "))
-				var ans string
-				fmt.Scanln(&ans)
+				scanner := bufio.NewScanner(os.Stdin)
+				if !scanner.Scan() {
+					if err := scanner.Err(); err != nil {
+						return fmt.Errorf("read confirmation: %w", err)
+					}
+					return nil
+				}
+				ans := scanner.Text()
 				if strings.ToLower(strings.TrimSpace(ans)) != "y" {
 					return nil
 				}
@@ -390,8 +396,8 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			if err := os.MkdirAll(runsDir, 0o755); err == nil {
 				testFile := filepath.Join(runsDir, ".doctor_test")
 				if f, err := os.Create(testFile); err == nil {
-					f.Close()
-					os.Remove(testFile)
+					_ = f.Close()
+					_ = os.Remove(testFile)
 					fmt.Println(ui.OK("runs/ dir writable"))
 				} else {
 					fmt.Println(ui.Fail("runs/ dir not writable: " + err.Error()))

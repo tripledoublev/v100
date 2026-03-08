@@ -104,9 +104,7 @@ func TestSemTools(t *testing.T) {
 
 func TestSemGracefulFailure(t *testing.T) {
 	// Mock PATH to NOT include sem
-	oldPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", oldPath)
-	os.Setenv("PATH", "/usr/bin:/bin") // Assume sem is not in /usr/bin or /bin for this test
+	t.Setenv("PATH", "/usr/bin:/bin") // Assume sem is not in /usr/bin or /bin for this test
 
 	// If sem is in /usr/bin or /bin, this might still find it.
 	// But usually it's in /usr/local/bin or ~/.cargo/bin.

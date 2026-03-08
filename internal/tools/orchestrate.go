@@ -148,7 +148,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("[orchestrate pattern=%s tasks=%d]\n", a.Pattern, len(a.Tasks)))
+	_, _ = fmt.Fprintf(&b, "[orchestrate pattern=%s tasks=%d]\n", a.Pattern, len(a.Tasks))
 	for i, task := range a.Tasks {
 		res := results[i]
 		out := strings.TrimSpace(res.Result)
@@ -162,8 +162,8 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 		if !res.OK {
 			status = "fail"
 		}
-		b.WriteString(fmt.Sprintf("%d. [%s] %s  steps=%d tok=%d cost=$%.4f\n   %s\n",
-			i+1, status, task.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, out))
+		_, _ = fmt.Fprintf(&b, "%d. [%s] %s  steps=%d tok=%d cost=$%.4f\n   %s\n",
+			i+1, status, task.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, out)
 	}
 	jsonResults := make([]map[string]any, 0, len(a.Tasks))
 	for i, task := range a.Tasks {
@@ -200,7 +200,7 @@ func appendBlackboardDispatch(runID, pattern, agent, task string, res AgentRunRe
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st := "ok"
 	if !res.OK {
 		st = "fail"

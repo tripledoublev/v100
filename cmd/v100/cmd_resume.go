@@ -72,7 +72,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer trace.Close()
+			defer func() { _ = trace.Close() }()
 
 			run := &core.Run{
 				ID:        runID,
@@ -96,7 +96,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				if _, err := os.Stat(sandboxWorkspace); err != nil {
 					return fmt.Errorf("resume sandbox workspace: %w", err)
 				}
-				defer session.Close()
+				defer func() { _ = session.Close() }()
 			}
 
 			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)

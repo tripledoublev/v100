@@ -280,7 +280,7 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	ch := make(chan StreamEvent, 100)
 	go func() {
 		defer close(ch)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		for {
 			resp, err := stream.Recv()

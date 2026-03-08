@@ -56,7 +56,7 @@ func TestReactSolver(t *testing.T) {
 
 	runDir := t.TempDir()
 	trace, _ := OpenTrace(runDir + "/trace.jsonl")
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	l := &Loop{
 		Run:      &Run{ID: "test-run", Dir: runDir},
@@ -98,7 +98,7 @@ func TestPlanExecuteSolver(t *testing.T) {
 
 	runDir := t.TempDir()
 	trace, _ := OpenTrace(runDir + "/trace.jsonl")
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	l := &Loop{
 		Run:      &Run{ID: "test-run", Dir: runDir},

@@ -55,7 +55,7 @@ func TestPlanExecuteSolverRestoresCheckpointOnReplan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trace.Close()
+	defer func() { _ = trace.Close() }()
 
 	prov := &scriptedProvider{
 		steps: []providerStep{

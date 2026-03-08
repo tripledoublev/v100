@@ -92,7 +92,7 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	if err != nil {
 		return failResult(start, "request failed: "+err.Error()), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, a.MaxBytes))
 	if err != nil {

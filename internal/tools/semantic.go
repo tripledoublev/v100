@@ -112,11 +112,12 @@ func (t *fsOutlineTool) Exec(ctx context.Context, call ToolCallContext, args jso
 
 			// Get the parent declaration node to find the full range
 			declNode := node.Parent()
-			if capture.Index == 0 || capture.Index == 1 { // function or method
+			switch capture.Index {
+			case 0, 1: // function or method
 				for declNode != nil && declNode.Type() != "function_declaration" && declNode.Type() != "method_declaration" {
 					declNode = declNode.Parent()
 				}
-			} else { // type
+			default: // type
 				for declNode != nil && declNode.Type() != "type_declaration" {
 					declNode = declNode.Parent()
 				}
@@ -130,9 +131,10 @@ func (t *fsOutlineTool) Exec(ctx context.Context, call ToolCallContext, args jso
 			endPoint := declNode.EndPoint()
 
 			typeName := "function"
-			if capture.Index == 1 {
+			switch capture.Index {
+			case 1:
 				typeName = "method"
-			} else if capture.Index == 2 {
+			case 2:
 				typeName = "type"
 			}
 

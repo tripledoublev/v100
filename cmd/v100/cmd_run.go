@@ -146,7 +146,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer trace.Close()
+			defer func() { _ = trace.Close() }()
 
 			run := &core.Run{
 				ID:        runID,
@@ -165,7 +165,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 			if cfg.Sandbox.Enabled {
-				defer session.Close()
+				defer func() { _ = session.Close() }()
 			}
 
 			// Build tool registry
@@ -293,10 +293,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	loop.ModelMetadata = metadata
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
-	if err := loop.EmitRunStart(core.RunStartPayload{
-		Policy:        pol.Name,
-		Provider:      prov.Name(),
-		Model:         model,
+		if err := loop.EmitRunStart(core.RunStartPayload{
+			Policy:        pol.Name,
+			Provider:      prov.Name(),
+			Model:         model,
 		Workspace:     tracedWorkspace,
 		ModelMetadata: metadata,
 	}); err != nil {
@@ -363,7 +363,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		logPath := filepath.Join(filepath.Dir(run.TraceFile), "tui.debug.log")
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			logger = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
 			logger.Printf("start run_id=%s provider=%s model=%s alt=%t plain=%t", run.ID, prov.Name(), model, useAltScreen, plainTTY)
 		}
@@ -450,14 +450,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Model:         model,
 		Workspace:     tracedWorkspace,
 		ModelMetadata: metadata,
-	}); err != nil {
-		if logger != nil {
-			logger.Printf("emit run_start error: %v", err)
+		}); err != nil {
+			if logger != nil {
+				logger.Printf("emit run_start error: %v", err)
+			}
+			tui.Quit()
+			<-runErrCh
+			return err
 		}
-		tui.Quit()
-		_ = <-runErrCh
-		return err
-	}
 
 	if logger != nil {
 		logger.Printf("run_start emitted; waiting for tui loop")
