@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
@@ -65,10 +66,12 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 	pArg := fmt.Sprintf("-p%d", strip)
 	if call.Session != nil {
 		res, err := call.Session.Run(ctx, executor.RunRequest{
-			Command: "patch",
-			Args:    []string{pArg, "--batch"},
-			Dir:     ".",
-			Stdin:   a.Diff,
+			Command:      "patch",
+			Args:         []string{pArg, "--batch"},
+			Dir:          ".",
+			Stdin:        a.Diff,
+			StdoutWriter: outputDeltaWriter(call, "stdout"),
+			StderrWriter: outputDeltaWriter(call, "stderr"),
 		})
 		dur := time.Since(start).Milliseconds()
 		if err != nil {
@@ -88,8 +91,16 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 	cmd.Stdin = bytes.NewBufferString(a.Diff)
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var stdoutW io.Writer = &stdout
+	var stderrW io.Writer = &stderr
+	if w := outputDeltaWriter(call, "stdout"); w != nil {
+		stdoutW = io.MultiWriter(stdoutW, w)
+	}
+	if w := outputDeltaWriter(call, "stderr"); w != nil {
+		stderrW = io.MultiWriter(stderrW, w)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	err := cmd.Run()
 	dur := time.Since(start).Milliseconds()

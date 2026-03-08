@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"io"
 
 	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/providers"
@@ -26,14 +27,15 @@ type ToolEffects struct {
 
 // ToolCallContext provides runtime context to a tool execution.
 type ToolCallContext struct {
-	RunID        string
-	StepID       string
-	CallID       string
-	WorkspaceDir string // host path to active workspace (sandbox if enabled)
-	TimeoutMS    int
-	Provider     providers.Provider
-	Session      executor.Session // active sandbox session
-	Mapper       PathTranslator   // bidirectional path mapping
+	RunID           string
+	StepID          string
+	CallID          string
+	WorkspaceDir    string // host path to active workspace (sandbox if enabled)
+	TimeoutMS       int
+	Provider        providers.Provider
+	Session         executor.Session // active sandbox session
+	Mapper          PathTranslator   // bidirectional path mapping
+	EmitOutputDelta func(stream, text string) error
 }
 
 // PathTranslator defines the subset of core.PathMapper needed by tools.
@@ -72,4 +74,33 @@ func sanitizeToolResult(call ToolCallContext, result ToolResult) ToolResult {
 	result.Stdout = call.Mapper.SanitizeText(result.Stdout)
 	result.Stderr = call.Mapper.SanitizeText(result.Stderr)
 	return result
+}
+
+func outputDeltaWriter(call ToolCallContext, stream string) io.Writer {
+	if call.EmitOutputDelta == nil {
+		return nil
+	}
+	return toolOutputDeltaWriter{
+		call:   call,
+		stream: stream,
+	}
+}
+
+type toolOutputDeltaWriter struct {
+	call   ToolCallContext
+	stream string
+}
+
+func (w toolOutputDeltaWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	text := string(p)
+	if w.call.Mapper != nil {
+		text = w.call.Mapper.SanitizeText(text)
+	}
+	if err := w.call.EmitOutputDelta(w.stream, text); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

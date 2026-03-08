@@ -213,6 +213,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 			return err
 		}
 	}
+	var deltaMu sync.Mutex
 	callCtx := tools.ToolCallContext{
 		RunID:        l.Run.ID,
 		StepID:       stepID,
@@ -222,6 +223,23 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		Provider:     l.Provider,
 		Session:      l.Session,
 		Mapper:       l.Mapper,
+		EmitOutputDelta: func(stream, text string) error {
+			if strings.TrimSpace(text) == "" {
+				return nil
+			}
+			if l.Mapper != nil {
+				text = l.Mapper.SanitizeText(text)
+			}
+			deltaMu.Lock()
+			defer deltaMu.Unlock()
+			_, err := l.emit(EventToolOutputDelta, stepID, ToolOutputDeltaPayload{
+				CallID: tc.ID,
+				Name:   tc.Name,
+				Stream: stream,
+				Delta:  text,
+			})
+			return err
+		},
 	}
 
 	result, err := tool.Exec(ctx, callCtx, tc.Args)

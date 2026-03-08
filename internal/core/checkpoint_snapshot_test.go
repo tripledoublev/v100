@@ -36,8 +36,21 @@ func TestCheckpointRestoresWorkspaceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckpointWithContext returned error: %v", err)
 	}
+	if cp.ID == "" {
+		t.Fatal("expected checkpoint id to be populated")
+	}
 	if cp.SnapshotID == "" {
 		t.Fatal("expected checkpoint snapshot id to be populated")
+	}
+	stored, err := core.ReadCheckpoint(filepath.Dir(tracePath), cp.ID)
+	if err != nil {
+		t.Fatalf("ReadCheckpoint returned error: %v", err)
+	}
+	if stored.SnapshotID != cp.SnapshotID {
+		t.Fatalf("stored snapshot id = %q, want %q", stored.SnapshotID, cp.SnapshotID)
+	}
+	if len(stored.Messages) != 1 || stored.Messages[0].Content != "before" {
+		t.Fatalf("stored checkpoint messages = %+v", stored.Messages)
 	}
 
 	if err := os.WriteFile(filepath.Join(workspace, "state.txt"), []byte("after\n"), 0o644); err != nil {

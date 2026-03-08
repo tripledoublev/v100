@@ -2,12 +2,16 @@ package core
 
 import (
 	"context"
+	"path/filepath"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
 // Checkpoint represents a snapshot of the agent state.
 type Checkpoint struct {
+	ID         string    `json:"id"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
 	Messages   []providers.Message
 	StepCount  int
 	SnapshotID string
@@ -24,6 +28,7 @@ func (l *Loop) CheckpointWithContext(ctx context.Context) (Checkpoint, error) {
 	msgs := make([]providers.Message, len(l.Messages))
 	copy(msgs, l.Messages)
 	cp := Checkpoint{
+		CreatedAt: time.Now().UTC(),
 		Messages:  msgs,
 		StepCount: l.stepCount,
 	}
@@ -36,12 +41,21 @@ func (l *Loop) CheckpointWithContext(ctx context.Context) (Checkpoint, error) {
 			return Checkpoint{}, err
 		}
 		cp.SnapshotID = snap.ID
+		cp.ID = snap.ID
 		_, err = l.emit(EventSandboxSnapshot, "", SandboxSnapshotPayload{
 			SnapshotID: snap.ID,
 			Method:     snap.Method,
 			Reason:     "checkpoint",
 		})
 		if err != nil {
+			return Checkpoint{}, err
+		}
+	}
+	if cp.ID == "" {
+		cp.ID = "cp-" + newID()
+	}
+	if l.Run != nil && l.Run.TraceFile != "" {
+		if err := PersistCheckpoint(filepath.Dir(l.Run.TraceFile), cp); err != nil {
 			return Checkpoint{}, err
 		}
 	}

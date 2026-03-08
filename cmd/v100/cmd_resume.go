@@ -44,7 +44,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// Reconstruct message history from trace
-			msgs, providerName, model, tracedWorkspace := reconstructHistory(events)
+			msgs, providerName, model, tracedWorkspace := reconstructHistory(runDir, events)
 
 			// Load meta to get original source workspace
 			meta, _ := core.ReadMeta(runDir)

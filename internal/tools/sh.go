@@ -86,9 +86,11 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 	}
 
 	res, err := call.Session.Run(ctx, executor.RunRequest{
-		Command: "sh",
-		Args:    []string{"-c", a.Cmd},
-		Dir:     ".",
+		Command:      "sh",
+		Args:         []string{"-c", a.Cmd},
+		Dir:          ".",
+		StdoutWriter: outputDeltaWriter(call, "stdout"),
+		StderrWriter: outputDeltaWriter(call, "stderr"),
 	})
 	if err != nil {
 		return failResult(start, "exec error: "+err.Error()), nil

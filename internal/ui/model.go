@@ -930,6 +930,18 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 		var p core.ToolCallPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		return sep + "  " + indent + styleWarn.Render(toolGlyph(p.Name)) + "  " + styleWarn.Render(p.Name)
+	case core.EventToolOutputDelta:
+		var p core.ToolOutputDeltaPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		delta := strings.TrimSpace(strings.ReplaceAll(p.Delta, "\n", " "))
+		if len(delta) > 48 {
+			delta = delta[:48] + "…"
+		}
+		if delta == "" {
+			delta = p.Stream
+		}
+		return sep + "  " + indent + styleMuted.Render("↳↳") + "  " + styleMuted.Render(
+			fmt.Sprintf("%s  %s", p.Stream, delta))
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
@@ -1082,6 +1094,13 @@ func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
 			"executing tool call",
 			"collecting evidence",
 			"digging through files",
+		})
+	case core.EventToolOutputDelta:
+		m.statusMode = "tooling"
+		m.statusLine = pickStatusLine(m.statusTick, []string{
+			"streaming tool output",
+			"watching command output",
+			"tool still running",
 		})
 	case core.EventToolResult:
 		m.statusMode = "thinking"

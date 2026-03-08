@@ -18,6 +18,7 @@ const (
 	EventModelToken      EventType = "model.token"
 	EventToolCall        EventType = "tool.call"
 	EventToolCallDelta   EventType = "tool.call_delta"
+	EventToolOutputDelta EventType = "tool.output_delta"
 	EventToolResult      EventType = "tool.result"
 	EventToolReflect     EventType = "tool.reflect"
 	EventRunError        EventType = "run.error"
@@ -149,6 +150,14 @@ type ToolCallPayload struct {
 // ToolCallDeltaPayload is the Payload for EventToolCallDelta.
 type ToolCallDeltaPayload struct {
 	CallID string `json:"call_id"`
+	Delta  string `json:"delta"`
+}
+
+// ToolOutputDeltaPayload is the Payload for EventToolOutputDelta.
+type ToolOutputDeltaPayload struct {
+	CallID string `json:"call_id"`
+	Name   string `json:"name"`
+	Stream string `json:"stream"`
 	Delta  string `json:"delta"`
 }
 

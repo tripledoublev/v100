@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -205,9 +206,11 @@ func runGit(ctx context.Context, call ToolCallContext, gitArgs ...string) (ToolR
 
 	if call.Session != nil {
 		res, err := call.Session.Run(ctx, executor.RunRequest{
-			Command: "git",
-			Args:    gitArgs,
-			Dir:     ".",
+			Command:      "git",
+			Args:         gitArgs,
+			Dir:          ".",
+			StdoutWriter: outputDeltaWriter(call, "stdout"),
+			StderrWriter: outputDeltaWriter(call, "stderr"),
 		})
 		dur := time.Since(start).Milliseconds()
 		if err != nil {
@@ -226,8 +229,16 @@ func runGit(ctx context.Context, call ToolCallContext, gitArgs ...string) (ToolR
 	}
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var stdoutW io.Writer = &stdout
+	var stderrW io.Writer = &stderr
+	if w := outputDeltaWriter(call, "stdout"); w != nil {
+		stdoutW = io.MultiWriter(stdoutW, w)
+	}
+	if w := outputDeltaWriter(call, "stderr"); w != nil {
+		stderrW = io.MultiWriter(stderrW, w)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	err := cmd.Run()
 	dur := time.Since(start).Milliseconds()

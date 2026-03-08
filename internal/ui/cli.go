@@ -88,6 +88,22 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		// We could print a dot or just ignore and wait for the final tool call result.
 		// For research fidelity, we'll ignore in CLI but log in trace.
 
+	case core.EventToolOutputDelta:
+		if r.inSubAgent > 0 {
+			break
+		}
+		var p core.ToolOutputDeltaPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		delta := strings.ReplaceAll(p.Delta, "\n", " ↵ ")
+		if len(delta) > 200 {
+			delta = delta[:200] + "…"
+		}
+		fmt.Printf("           %s %s  %s\n",
+			styleMuted.Render("↳"),
+			styleMuted.Render(p.Stream),
+			delta,
+		)
+
 	case core.EventToolCall:
 		// Suppress sub-agent tool calls; top-level shown inline in EventModelResp.
 		break
@@ -356,6 +372,19 @@ func PrintReplayEvent(ev core.Event) {
 			icon, nameStyle,
 			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
 			strings.ReplaceAll(out, "\n", "\n    "),
+		)
+
+	case core.EventToolOutputDelta:
+		var p core.ToolOutputDeltaPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		delta := p.Delta
+		if len(delta) > 500 {
+			delta = delta[:500] + "\n  … (truncated)"
+		}
+		fmt.Printf("  %s %s\n    %s\n",
+			styleMuted.Render("↳ "+p.Stream),
+			styleMuted.Render(p.Name),
+			strings.ReplaceAll(delta, "\n", "\n    "),
 		)
 
 	case core.EventRunError:

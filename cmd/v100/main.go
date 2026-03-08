@@ -27,6 +27,7 @@ func rootCmd() *cobra.Command {
 	root.AddCommand(
 		runCmd(&cfgPath),
 		resumeCmd(&cfgPath),
+		restoreCmd(&cfgPath),
 		replayCmd(&cfgPath),
 		toolsCmd(&cfgPath),
 		providersCmd(&cfgPath),

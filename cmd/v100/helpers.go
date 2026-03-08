@@ -651,7 +651,7 @@ func buildConfirmFn(mode string) core.ConfirmFn {
 	}
 }
 
-func reconstructHistory(events []core.Event) ([]providers.Message, string, string, string) {
+func reconstructHistory(runDir string, events []core.Event) ([]providers.Message, string, string, string) {
 	var msgs []providers.Message
 	var providerName, model, workspace string
 
@@ -687,6 +687,19 @@ func reconstructHistory(events []core.Event) ([]providers.Message, string, strin
 				ToolCallID: p.CallID,
 				Name:       p.Name,
 			})
+
+		case core.EventSandboxRestore:
+			var p core.SandboxRestorePayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if strings.TrimSpace(p.SnapshotID) == "" {
+				continue
+			}
+			cp, err := core.ReadCheckpoint(runDir, p.SnapshotID)
+			if err != nil {
+				continue
+			}
+			msgs = make([]providers.Message, len(cp.Messages))
+			copy(msgs, cp.Messages)
 		}
 	}
 	return msgs, providerName, model, workspace
