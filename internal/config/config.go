@@ -116,7 +116,7 @@ func DefaultConfig() *Config {
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
-				"fs_read", "fs_write", "fs_list", "fs_mkdir",
+				"fs_read", "fs_write", "fs_list", "fs_mkdir", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame",
 			},
@@ -279,6 +279,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	// Backward-compatible tool migrations for older config files.
+	ensureString(&cfg.Tools.Enabled, "sh")
+	ensureString(&cfg.Tools.Dangerous, "sh")
 	ensureString(&cfg.Tools.Enabled, "git_push")
 	ensureString(&cfg.Tools.Dangerous, "git_push")
 	ensureString(&cfg.Tools.Enabled, "curl_fetch")

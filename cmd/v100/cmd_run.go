@@ -349,6 +349,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 
 	_ = loop.EmitRunEnd(reason)
+
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
+
 	fmt.Println(ui.Dim("budget: " + budget.Summary()))
 	return nil
 }
@@ -487,5 +494,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
 	_ = loop.EmitRunEnd(reason)
+
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		if logger != nil {
+			logger.Printf("sandbox finalize error: %v", err)
+		}
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
+
 	return nil
 }

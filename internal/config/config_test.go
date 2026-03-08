@@ -26,6 +26,29 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Providers["anthropic"].Auth.Env != "ANTHROPIC_API_KEY" {
 		t.Errorf("expected ANTHROPIC_API_KEY, got %s", cfg.Providers["anthropic"].Auth.Env)
 	}
+
+	// Verify sh tool is enabled and dangerous by default
+	shEnabled := false
+	for _, tool := range cfg.Tools.Enabled {
+		if tool == "sh" {
+			shEnabled = true
+			break
+		}
+	}
+	if !shEnabled {
+		t.Error("expected sh tool to be enabled by default")
+	}
+
+	shDangerous := false
+	for _, tool := range cfg.Tools.Dangerous {
+		if tool == "sh" {
+			shDangerous = true
+			break
+		}
+	}
+	if !shDangerous {
+		t.Error("expected sh tool to be dangerous by default")
+	}
 }
 
 func TestLoadConfig(t *testing.T) {
@@ -71,6 +94,18 @@ budget_steps = 25
 	}
 	if _, ok := cfg.Providers["anthropic"]; !ok {
 		t.Error("expected anthropic in providers")
+	}
+
+	// Verify sh is migrated if missing
+	shEnabled := false
+	for _, tool := range cfg.Tools.Enabled {
+		if tool == "sh" {
+			shEnabled = true
+			break
+		}
+	}
+	if !shEnabled {
+		t.Error("expected sh tool to be enabled after migration")
 	}
 }
 
