@@ -20,6 +20,7 @@ func (t *patchApplyTool) Description() string {
 	return "Apply a unified diff patch to files in the workspace."
 }
 func (t *patchApplyTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *patchApplyTool) Effects() ToolEffects     { return ToolEffects{MutatesWorkspace: true} }
 
 func (t *patchApplyTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

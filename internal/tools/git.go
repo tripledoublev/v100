@@ -22,6 +22,7 @@ func GitStatus() Tool { return &gitStatusTool{} }
 func (t *gitStatusTool) Name() string             { return "git_status" }
 func (t *gitStatusTool) Description() string      { return "Run git status in the workspace directory." }
 func (t *gitStatusTool) DangerLevel() DangerLevel { return Safe }
+func (t *gitStatusTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *gitStatusTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type": "object", "properties": {}}`)
@@ -46,6 +47,7 @@ func GitDiff() Tool { return &gitDiffTool{} }
 func (t *gitDiffTool) Name() string             { return "git_diff" }
 func (t *gitDiffTool) Description() string      { return "Show git diff of unstaged changes." }
 func (t *gitDiffTool) DangerLevel() DangerLevel { return Safe }
+func (t *gitDiffTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *gitDiffTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -82,6 +84,7 @@ func GitCommit() Tool { return &gitCommitTool{} }
 func (t *gitCommitTool) Name() string             { return "git_commit" }
 func (t *gitCommitTool) Description() string      { return "Stage all changes and commit with a message." }
 func (t *gitCommitTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *gitCommitTool) Effects() ToolEffects     { return ToolEffects{MutatesWorkspace: true} }
 
 func (t *gitCommitTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -137,6 +140,9 @@ func GitPush() Tool { return &gitPushTool{} }
 func (t *gitPushTool) Name() string             { return "git_push" }
 func (t *gitPushTool) Description() string      { return "Push commits to a remote branch." }
 func (t *gitPushTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *gitPushTool) Effects() ToolEffects {
+	return ToolEffects{MutatesWorkspace: true, NeedsNetwork: true, ExternalSideEffect: true}
+}
 
 func (t *gitPushTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

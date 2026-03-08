@@ -47,6 +47,14 @@ func NewAgent(runFn AgentRunFn) Tool {
 func (t *agentTool) Name() string             { return "agent" }
 func (t *agentTool) Description() string      { return "Spawn a sub-agent to handle a focused task." }
 func (t *agentTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *agentTool) Effects() ToolEffects {
+	return ToolEffects{
+		MutatesWorkspace:   true,
+		MutatesRunState:    true,
+		NeedsNetwork:       true,
+		ExternalSideEffect: true,
+	}
+}
 
 func (t *agentTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

@@ -22,9 +22,12 @@ func BlackboardWrite() Tool  { return &blackboardWriteTool{} }
 func BlackboardSearch() Tool { return &blackboardSearchTool{} }
 func BlackboardStore() Tool  { return &blackboardStoreTool{} }
 
-func (t *blackboardReadTool) Name() string             { return "blackboard_read" }
-func (t *blackboardReadTool) Description() string      { return "Read shared run blackboard content (legacy text format)." }
+func (t *blackboardReadTool) Name() string { return "blackboard_read" }
+func (t *blackboardReadTool) Description() string {
+	return "Read shared run blackboard content (legacy text format)."
+}
 func (t *blackboardReadTool) DangerLevel() DangerLevel { return Safe }
+func (t *blackboardReadTool) Effects() ToolEffects     { return ToolEffects{} }
 func (t *blackboardReadTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
@@ -53,6 +56,7 @@ func (t *blackboardWriteTool) Description() string {
 	return "Append or overwrite shared run blackboard content (legacy text format)."
 }
 func (t *blackboardWriteTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *blackboardWriteTool) Effects() ToolEffects     { return ToolEffects{MutatesRunState: true} }
 func (t *blackboardWriteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
@@ -113,9 +117,12 @@ func (t *blackboardWriteTool) Exec(ctx context.Context, call ToolCallContext, ar
 // Vector Tools
 // ─────────────────────────────────────────
 
-func (t *blackboardSearchTool) Name() string        { return "blackboard_search" }
-func (t *blackboardSearchTool) Description() string { return "Search vectorized blackboard memory." }
+func (t *blackboardSearchTool) Name() string             { return "blackboard_search" }
+func (t *blackboardSearchTool) Description() string      { return "Search vectorized blackboard memory." }
 func (t *blackboardSearchTool) DangerLevel() DangerLevel { return Safe }
+func (t *blackboardSearchTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
 func (t *blackboardSearchTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
@@ -169,9 +176,14 @@ func (t *blackboardSearchTool) Exec(ctx context.Context, call ToolCallContext, a
 	}, nil
 }
 
-func (t *blackboardStoreTool) Name() string             { return "blackboard_store" }
-func (t *blackboardStoreTool) Description() string      { return "Store a memory record in the vectorized blackboard." }
+func (t *blackboardStoreTool) Name() string { return "blackboard_store" }
+func (t *blackboardStoreTool) Description() string {
+	return "Store a memory record in the vectorized blackboard."
+}
 func (t *blackboardStoreTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *blackboardStoreTool) Effects() ToolEffects {
+	return ToolEffects{MutatesRunState: true, NeedsNetwork: true, ExternalSideEffect: true}
+}
 func (t *blackboardStoreTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",

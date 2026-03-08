@@ -16,9 +16,12 @@ type semDiffTool struct{}
 
 func SemDiff() Tool { return &semDiffTool{} }
 
-func (t *semDiffTool) Name() string             { return "sem_diff" }
-func (t *semDiffTool) Description() string      { return "Show semantic diff of changes using 'sem'. Understands code entities (functions, classes) instead of just lines." }
+func (t *semDiffTool) Name() string { return "sem_diff" }
+func (t *semDiffTool) Description() string {
+	return "Show semantic diff of changes using 'sem'. Understands code entities (functions, classes) instead of just lines."
+}
 func (t *semDiffTool) DangerLevel() DangerLevel { return Safe }
+func (t *semDiffTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *semDiffTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -70,9 +73,12 @@ type semImpactTool struct{}
 
 func SemImpact() Tool { return &semImpactTool{} }
 
-func (t *semImpactTool) Name() string             { return "sem_impact" }
-func (t *semImpactTool) Description() string      { return "Analyze the impact of changing a specific entity (function, class, etc.)." }
+func (t *semImpactTool) Name() string { return "sem_impact" }
+func (t *semImpactTool) Description() string {
+	return "Analyze the impact of changing a specific entity (function, class, etc.)."
+}
 func (t *semImpactTool) DangerLevel() DangerLevel { return Safe }
+func (t *semImpactTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *semImpactTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -109,6 +115,7 @@ func SemBlame() Tool { return &semBlameTool{} }
 func (t *semBlameTool) Name() string             { return "sem_blame" }
 func (t *semBlameTool) Description() string      { return "Show entity-level blame for a file." }
 func (t *semBlameTool) DangerLevel() DangerLevel { return Safe }
+func (t *semBlameTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *semBlameTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

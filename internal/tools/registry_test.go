@@ -47,6 +47,40 @@ func TestRegistryDangerLevel(t *testing.T) {
 	}
 }
 
+func TestRegistryEffects(t *testing.T) {
+	reg := tools.NewRegistry([]string{
+		"fs_mkdir",
+		"blackboard_write",
+		"curl_fetch",
+		"git_push",
+		"sh",
+	})
+	reg.Register(tools.FSMkdir())
+	reg.Register(tools.BlackboardWrite())
+	reg.Register(tools.CurlFetch())
+	reg.Register(tools.GitPush())
+	reg.Register(tools.Sh())
+
+	if eff := reg.Effects("fs_mkdir"); !eff.MutatesWorkspace || eff.MutatesRunState {
+		t.Fatalf("fs_mkdir effects = %+v, want workspace mutation only", eff)
+	}
+	if eff := reg.Effects("blackboard_write"); !eff.MutatesRunState || eff.MutatesWorkspace {
+		t.Fatalf("blackboard_write effects = %+v, want run-state mutation only", eff)
+	}
+	if eff := reg.Effects("curl_fetch"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
+		t.Fatalf("curl_fetch effects = %+v, want network + external side effect", eff)
+	}
+	if eff := reg.Effects("git_push"); !eff.MutatesWorkspace || !eff.NeedsNetwork || !eff.ExternalSideEffect {
+		t.Fatalf("git_push effects = %+v, want workspace mutation + network + external side effect", eff)
+	}
+	if eff := reg.Effects("sh"); !eff.MutatesWorkspace || !eff.NeedsNetwork || !eff.ExternalSideEffect {
+		t.Fatalf("sh effects = %+v, want workspace mutation + network + external side effect", eff)
+	}
+	if eff := reg.Effects("nonexistent"); eff != (tools.ToolEffects{}) {
+		t.Fatalf("unknown tool effects = %+v, want zero value", eff)
+	}
+}
+
 func TestRegistrySpecs(t *testing.T) {
 	reg := tools.NewRegistry([]string{"fs_read", "fs_list"})
 	reg.Register(tools.FSRead())

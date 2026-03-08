@@ -16,6 +16,14 @@ const (
 	Dangerous DangerLevel = "dangerous"
 )
 
+// ToolEffects captures execution semantics independent of confirmation risk.
+type ToolEffects struct {
+	MutatesWorkspace   bool
+	MutatesRunState    bool
+	NeedsNetwork       bool
+	ExternalSideEffect bool
+}
+
 // ToolCallContext provides runtime context to a tool execution.
 type ToolCallContext struct {
 	RunID        string
@@ -52,6 +60,7 @@ type Tool interface {
 	InputSchema() json.RawMessage
 	OutputSchema() json.RawMessage
 	DangerLevel() DangerLevel
+	Effects() ToolEffects
 	Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error)
 }
 

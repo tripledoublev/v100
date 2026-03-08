@@ -24,6 +24,14 @@ func (t *dispatchTool) Description() string {
 	return "Dispatch a task to a named specialist agent role."
 }
 func (t *dispatchTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *dispatchTool) Effects() ToolEffects {
+	return ToolEffects{
+		MutatesWorkspace:   true,
+		MutatesRunState:    true,
+		NeedsNetwork:       true,
+		ExternalSideEffect: true,
+	}
+}
 
 func (t *dispatchTool) InputSchema() json.RawMessage {
 	agents := []string{}

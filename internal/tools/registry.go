@@ -55,6 +55,17 @@ func (r *Registry) IsDangerous(name string) bool {
 	return t.DangerLevel() == Dangerous
 }
 
+// Effects returns the execution effects metadata for a registered tool.
+func (r *Registry) Effects(name string) ToolEffects {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tools[name]
+	if !ok {
+		return ToolEffects{}
+	}
+	return t.Effects()
+}
+
 // Specs returns ToolSpec slices for all enabled tools (used to send to provider).
 func (r *Registry) Specs() []providers.ToolSpec {
 	r.mu.RLock()

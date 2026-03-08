@@ -20,6 +20,7 @@ func (t *projectSearchTool) Description() string {
 	return "Search for a pattern in project files using ripgrep (rg)."
 }
 func (t *projectSearchTool) DangerLevel() DangerLevel { return Safe }
+func (t *projectSearchTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *projectSearchTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

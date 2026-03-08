@@ -26,6 +26,14 @@ func (t *orchestrateTool) Description() string {
 	return "Coordinate multiple dispatched specialist agents."
 }
 func (t *orchestrateTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *orchestrateTool) Effects() ToolEffects {
+	return ToolEffects{
+		MutatesWorkspace:   true,
+		MutatesRunState:    true,
+		NeedsNetwork:       true,
+		ExternalSideEffect: true,
+	}
+}
 func (t *orchestrateTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",

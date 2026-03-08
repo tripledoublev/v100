@@ -29,6 +29,9 @@ func (t *shTool) Description() string {
 	return "Execute a shell command with a timeout. Use carefully."
 }
 func (t *shTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *shTool) Effects() ToolEffects {
+	return ToolEffects{MutatesWorkspace: true, NeedsNetwork: true, ExternalSideEffect: true}
+}
 
 func (t *shTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

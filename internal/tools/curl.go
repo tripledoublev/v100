@@ -21,6 +21,9 @@ func (t *curlFetchTool) Description() string {
 	return "Fetch a URL over HTTP(S) and return readable text."
 }
 func (t *curlFetchTool) DangerLevel() DangerLevel { return Safe }
+func (t *curlFetchTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
 
 func (t *curlFetchTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

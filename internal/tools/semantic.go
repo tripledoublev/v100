@@ -15,9 +15,12 @@ type fsOutlineTool struct{}
 
 func FSOutline() Tool { return &fsOutlineTool{} }
 
-func (t *fsOutlineTool) Name() string        { return "fs_outline" }
-func (t *fsOutlineTool) Description() string { return "List functions and types in a file using semantic parsing." }
+func (t *fsOutlineTool) Name() string { return "fs_outline" }
+func (t *fsOutlineTool) Description() string {
+	return "List functions and types in a file using semantic parsing."
+}
 func (t *fsOutlineTool) DangerLevel() DangerLevel { return Safe }
+func (t *fsOutlineTool) Effects() ToolEffects     { return ToolEffects{} }
 
 func (t *fsOutlineTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -79,7 +82,7 @@ func (t *fsOutlineTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	}
 
 	var entities []map[string]any
-	
+
 	// Query for function declarations and type declarations in Go
 	queryString := `
 		(function_declaration name: (identifier) @func_name)
@@ -103,7 +106,7 @@ func (t *fsOutlineTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		for _, capture := range m.Captures {
 			node := capture.Node
 			name := node.Content(content)
-			
+
 			// Get the parent declaration node to find the full range
 			declNode := node.Parent()
 			if capture.Index == 0 || capture.Index == 1 { // function or method
