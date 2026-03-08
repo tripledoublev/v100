@@ -89,22 +89,39 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if solverFlag != "" {
 				cfg.Defaults.Solver = solverFlag
 			}
-			if authFlag != "" {
-				parts := strings.SplitN(authFlag, ":", 2)
-				if len(parts) == 2 {
-					if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-						pc.Auth.Username = parts[0]
-						pc.Auth.Password = parts[1]
-						cfg.Providers[cfg.Defaults.Provider] = pc
+
+			// Ensure the active provider exists in config so we can apply overrides
+			if _, ok := cfg.Providers[cfg.Defaults.Provider]; !ok {
+				// Initialize from defaults if missing
+				defaults := config.DefaultConfig()
+				if pc, ok := defaults.Providers[cfg.Defaults.Provider]; ok {
+					cfg.Providers[cfg.Defaults.Provider] = pc
+				} else {
+					// Create a generic entry if totally unknown
+					cfg.Providers[cfg.Defaults.Provider] = config.ProviderConfig{
+						Type: cfg.Defaults.Provider,
 					}
 				}
 			}
-			if baseURLFlag != "" {
-				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-					pc.BaseURL = baseURLFlag
-					cfg.Providers[cfg.Defaults.Provider] = pc
+
+			// Apply overrides to the ACTIVE provider
+			if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
+				if authFlag != "" {
+					parts := strings.SplitN(authFlag, ":", 2)
+					if len(parts) == 2 {
+						pc.Auth.Username = parts[0]
+						pc.Auth.Password = parts[1]
+					}
 				}
+				if baseURLFlag != "" {
+					pc.BaseURL = baseURLFlag
+				}
+				if modelFlag != "" {
+					pc.DefaultModel = modelFlag
+				}
+				cfg.Providers[cfg.Defaults.Provider] = pc
 			}
+
 			if cmd.Flags().Changed("sandbox") {
 				cfg.Sandbox.Enabled = sandboxFlag
 			}

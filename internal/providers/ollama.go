@@ -27,33 +27,50 @@ type OllamaProvider struct {
 }
 
 func NewOllamaProvider(baseURL, defaultModel, username, password string) (*OllamaProvider, error) {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = os.Getenv("OLLAMA_BASE_URL")
-		if baseURL == "" {
-			baseURL = os.Getenv("OLLAMA_HOST")
+	// 1. Check environment variables first (allows .env to be the source of truth)
+	envBaseURL := os.Getenv("OLLAMA_BASE_URL")
+	if envBaseURL == "" {
+		envBaseURL = os.Getenv("OLLAMA_HOST")
+	}
+	envModel := os.Getenv("OLLAMA_MODEL")
+	envUser := os.Getenv("OLLAMA_USER")
+	envPass := os.Getenv("OLLAMA_PASS")
+
+	// 2. Use passed-in values if they are NOT the hardcoded defaults and NOT empty.
+	// Otherwise, use environment or hardcoded default.
+	finalBaseURL := baseURL
+	if finalBaseURL == "" || finalBaseURL == ollamaDefaultBaseURL {
+		if envBaseURL != "" {
+			finalBaseURL = envBaseURL
+		} else if finalBaseURL == "" {
+			finalBaseURL = ollamaDefaultBaseURL
 		}
-		if baseURL == "" {
-			baseURL = ollamaDefaultBaseURL
+	}
+
+	finalModel := defaultModel
+	if finalModel == "" || finalModel == ollamaDefaultModel {
+		if envModel != "" {
+			finalModel = envModel
+		} else if finalModel == "" {
+			finalModel = ollamaDefaultModel
 		}
 	}
-	if strings.TrimSpace(defaultModel) == "" {
-		defaultModel = os.Getenv("OLLAMA_MODEL")
-		if defaultModel == "" {
-			defaultModel = ollamaDefaultModel
-		}
+
+	finalUser := username
+	if finalUser == "" {
+		finalUser = envUser
 	}
-	if username == "" {
-		username = os.Getenv("OLLAMA_USER")
+	finalPass := password
+	if finalPass == "" {
+		finalPass = envPass
 	}
-	if password == "" {
-		password = os.Getenv("OLLAMA_PASS")
-	}
+
 	return &OllamaProvider{
 		client:       &http.Client{Timeout: 180 * time.Second},
-		baseURL:      strings.TrimRight(baseURL, "/"),
-		defaultModel: defaultModel,
-		username:     username,
-		password:     password,
+		baseURL:      strings.TrimRight(finalBaseURL, "/"),
+		defaultModel: finalModel,
+		username:     finalUser,
+		password:     finalPass,
 	}, nil
 }
 
