@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
@@ -156,5 +157,23 @@ func TestNormalizeModelOverride(t *testing.T) {
 					tt.providerType, tt.in, got, changed, tt.want, tt.wantChanged)
 			}
 		})
+	}
+}
+
+func TestNormalizedProviderConfig(t *testing.T) {
+	pc := normalizedProviderConfig(config.ProviderConfig{
+		Type:         "codex",
+		DefaultModel: "gpt-5.3-codex",
+	})
+	if pc.DefaultModel != "gpt-5.4" {
+		t.Fatalf("normalizedProviderConfig default model = %q, want %q", pc.DefaultModel, "gpt-5.4")
+	}
+
+	other := normalizedProviderConfig(config.ProviderConfig{
+		Type:         "openai",
+		DefaultModel: "gpt-4o",
+	})
+	if other.DefaultModel != "gpt-4o" {
+		t.Fatalf("normalizedProviderConfig should leave non-codex models unchanged, got %q", other.DefaultModel)
 	}
 }

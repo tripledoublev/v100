@@ -131,7 +131,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if meta.Model == "" {
 				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-					meta.Model = pc.DefaultModel
+					meta.Model = normalizedProviderConfig(pc).DefaultModel
 				}
 			}
 			if meta.Provider == "" {
@@ -204,7 +204,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			model := modelFlag
 			if model == "" {
 				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-					model = pc.DefaultModel
+					model = normalizedProviderConfig(pc).DefaultModel
 				}
 			}
 

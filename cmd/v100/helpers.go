@@ -39,10 +39,15 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 	return buildProviderFromConfig(pc)
 }
 
-func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
+func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
 	if pc.Type == "codex" {
 		pc.DefaultModel, _ = normalizeCodexModelOverride(pc.DefaultModel)
 	}
+	return pc
+}
+
+func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
+	pc = normalizedProviderConfig(pc)
 	switch pc.Type {
 	case "codex":
 		return providers.NewCodexProvider("", pc.DefaultModel)

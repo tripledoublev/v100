@@ -55,6 +55,7 @@ func providersCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 			for name, pc := range cfg.Providers {
+				pc = normalizedProviderConfig(pc)
 				fmt.Printf("%-15s type=%-10s model=%s\n", name, pc.Type, pc.DefaultModel)
 			}
 			return nil

@@ -428,12 +428,12 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 				}
 
 				// Resolve model
-				model := variant.Model
-				if model == "" {
-					if pc, ok := cfg.Providers[provName]; ok {
-						model = pc.DefaultModel
+					model := variant.Model
+					if model == "" {
+						if pc, ok := cfg.Providers[provName]; ok {
+							model = normalizedProviderConfig(pc).DefaultModel
+						}
 					}
-				}
 
 				// Resolve solver
 				var solver core.Solver
