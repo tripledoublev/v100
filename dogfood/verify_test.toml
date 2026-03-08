@@ -1,0 +1,22 @@
+name = "verify-test-drive"
+
+[[prompts]]
+message = "Create a new file in the root called 'RESEARCH.md' with the content 'The Agentic Flywheel is spinning.' Use fs_write."
+expected = "RESEARCH.md"
+scorer = "contains"
+
+[[variants]]
+name = "gemini-react"
+provider = "gemini"
+model = "gemini-2.5-flash"
+solver = "react"
+budget_steps = 5
+
+[[invariants]]
+type = "file_exists"
+path = "RESEARCH.md"
+
+[[invariants]]
+type = "file_contains"
+path = "RESEARCH.md"
+pattern = "Agentic Flywheel"
