@@ -200,3 +200,73 @@ func isErrBudgetExceeded(err error, target **core.ErrBudgetExceeded) bool {
 	// Check if the message contains "budget exceeded"
 	return len(err.Error()) > 0
 }
+
+// genParamCapturingProvider records the CompleteRequest for GenParams inspection.
+type genParamCapturingProvider struct {
+	lastReq   providers.CompleteRequest
+	response  providers.CompleteResponse
+	callCount int
+}
+
+func (p *genParamCapturingProvider) Name() string { return "gpcapturing" }
+func (p *genParamCapturingProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{ToolCalls: true}
+}
+func (p *genParamCapturingProvider) Complete(_ context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	p.lastReq = req
+	p.callCount++
+	return p.response, nil
+}
+
+func TestLoopGenParamsThreaded(t *testing.T) {
+	temp := 0.7
+	topP := 0.9
+	seed := 42
+
+	prov := &genParamCapturingProvider{
+		response: providers.CompleteResponse{AssistantText: "done"},
+	}
+
+	dir := t.TempDir()
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, _ := core.OpenTrace(tracePath)
+	defer trace.Close()
+
+	run := &core.Run{ID: "test-gen", Dir: dir, TraceFile: tracePath}
+	budget := &core.Budget{MaxSteps: 10}
+
+	loop := &core.Loop{
+		Run:      run,
+		Provider: prov,
+		Tools:    tools.NewRegistry(nil),
+		Policy:   policy.Default(),
+		Trace:    trace,
+		Budget:   core.NewBudgetTracker(budget),
+		GenParams: providers.GenParams{
+			Temperature: &temp,
+			TopP:        &topP,
+			MaxTokens:   2048,
+			Seed:        &seed,
+		},
+	}
+
+	if err := loop.Step(context.Background(), "test gen params"); err != nil {
+		t.Fatal(err)
+	}
+
+	if prov.callCount != 1 {
+		t.Errorf("expected 1 call, got %d", prov.callCount)
+	}
+	if prov.lastReq.GenParams.Temperature == nil || *prov.lastReq.GenParams.Temperature != 0.7 {
+		t.Error("expected temperature 0.7 in request")
+	}
+	if prov.lastReq.GenParams.TopP == nil || *prov.lastReq.GenParams.TopP != 0.9 {
+		t.Error("expected top_p 0.9 in request")
+	}
+	if prov.lastReq.GenParams.MaxTokens != 2048 {
+		t.Errorf("expected max_tokens 2048, got %d", prov.lastReq.GenParams.MaxTokens)
+	}
+	if prov.lastReq.GenParams.Seed == nil || *prov.lastReq.GenParams.Seed != 42 {
+		t.Error("expected seed 42 in request")
+	}
+}

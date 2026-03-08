@@ -274,6 +274,19 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 
 	promptID := fmt.Sprintf("%x", time.Now().UnixNano())
 
+	var genCfg *geminiGenerationConfig
+	gp := req.GenParams
+	if gp.Temperature != nil || gp.TopP != nil || gp.TopK != nil || gp.MaxTokens > 0 || len(gp.StopSequences) > 0 || gp.Seed != nil {
+		genCfg = &geminiGenerationConfig{
+			Temperature:     gp.Temperature,
+			TopP:            gp.TopP,
+			TopK:            gp.TopK,
+			MaxOutputTokens: gp.MaxTokens,
+			StopSequences:   gp.StopSequences,
+			Seed:            gp.Seed,
+		}
+	}
+
 	envelope := geminiEnvelope{
 		Model:              model,
 		Project:            projectID,
@@ -283,6 +296,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 			Contents:          contents,
 			SystemInstruction: sysInstruction,
 			Tools:             tools,
+			GenerationConfig:  genCfg,
 		},
 	}
 
@@ -351,10 +365,20 @@ type geminiEnvelope struct {
 	Request            geminiRequest `json:"request"`
 }
 
+type geminiGenerationConfig struct {
+	Temperature     *float64 `json:"temperature,omitempty"`
+	TopP            *float64 `json:"topP,omitempty"`
+	TopK            *int     `json:"topK,omitempty"`
+	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
+	StopSequences   []string `json:"stopSequences,omitempty"`
+	Seed            *int     `json:"seed,omitempty"`
+}
+
 type geminiRequest struct {
-	Contents          []geminiContent  `json:"contents"`
-	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
-	Tools             []geminiToolDef  `json:"tools,omitempty"`
+	Contents          []geminiContent         `json:"contents"`
+	SystemInstruction *geminiContent          `json:"systemInstruction,omitempty"`
+	Tools             []geminiToolDef         `json:"tools,omitempty"`
+	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
 type geminiContent struct {

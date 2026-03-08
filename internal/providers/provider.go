@@ -36,14 +36,26 @@ type Hints struct {
 	MaxToolCalls  int
 }
 
+// GenParams holds generation parameters for controlling model output.
+// Pointer fields are optional — nil means use provider default.
+type GenParams struct {
+	Temperature   *float64 `json:"temperature,omitempty"`
+	TopP          *float64 `json:"top_p,omitempty"`
+	TopK          *int     `json:"top_k,omitempty"`
+	MaxTokens     int      `json:"max_tokens,omitempty"`
+	StopSequences []string `json:"stop_sequences,omitempty"`
+	Seed          *int     `json:"seed,omitempty"`
+}
+
 // CompleteRequest is a provider completion request.
 type CompleteRequest struct {
-	RunID    string
-	StepID   string
-	Messages []Message
-	Tools    []ToolSpec
-	Hints    Hints
-	Model    string
+	RunID     string
+	StepID    string
+	Messages  []Message
+	Tools     []ToolSpec
+	Hints     Hints
+	GenParams GenParams
+	Model     string
 }
 
 // ToolCall is a tool invocation returned by the model.

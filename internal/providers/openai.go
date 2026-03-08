@@ -98,6 +98,21 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 	if len(tools) > 0 {
 		creq.Tools = tools
 	}
+	if req.GenParams.Temperature != nil {
+		creq.Temperature = float32(*req.GenParams.Temperature)
+	}
+	if req.GenParams.TopP != nil {
+		creq.TopP = float32(*req.GenParams.TopP)
+	}
+	if req.GenParams.MaxTokens > 0 {
+		creq.MaxTokens = req.GenParams.MaxTokens
+	}
+	if req.GenParams.Seed != nil {
+		creq.Seed = req.GenParams.Seed
+	}
+	if len(req.GenParams.StopSequences) > 0 {
+		creq.Stop = req.GenParams.StopSequences
+	}
 
 	resp, err := p.client.CreateChatCompletion(ctx, creq)
 	if err != nil {

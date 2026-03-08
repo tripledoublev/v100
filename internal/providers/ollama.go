@@ -138,12 +138,36 @@ func (p *OllamaProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		})
 	}
 
-	body, err := json.Marshal(ollamaChatRequest{
+	options := map[string]any{}
+	if req.GenParams.Temperature != nil {
+		options["temperature"] = *req.GenParams.Temperature
+	}
+	if req.GenParams.TopP != nil {
+		options["top_p"] = *req.GenParams.TopP
+	}
+	if req.GenParams.TopK != nil {
+		options["top_k"] = *req.GenParams.TopK
+	}
+	if req.GenParams.Seed != nil {
+		options["seed"] = *req.GenParams.Seed
+	}
+	if req.GenParams.MaxTokens > 0 {
+		options["num_predict"] = req.GenParams.MaxTokens
+	}
+	if len(req.GenParams.StopSequences) > 0 {
+		options["stop"] = req.GenParams.StopSequences
+	}
+
+	oReq := ollamaChatRequest{
 		Model:    model,
 		Messages: messages,
 		Tools:    tools,
 		Stream:   false,
-	})
+	}
+	if len(options) > 0 {
+		oReq.Options = options
+	}
+	body, err := json.Marshal(oReq)
 	if err != nil {
 		return CompleteResponse{}, err
 	}

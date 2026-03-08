@@ -16,15 +16,22 @@ type BenchConfig struct {
 
 // BenchPrompt is a single prompt in a bench config.
 type BenchPrompt struct {
-	Message string `toml:"message"`
+	Message  string `toml:"message"`
+	Expected string `toml:"expected"`
+	Scorer   string `toml:"scorer"` // "exact_match", "contains", "regex", "script:<cmd>", "model_graded"
 }
 
 // BenchVariant describes a provider/model configuration to test.
 type BenchVariant struct {
-	Name        string `toml:"name"`
-	Provider    string `toml:"provider"`
-	Model       string `toml:"model"`
-	BudgetSteps int    `toml:"budget_steps"`
+	Name        string   `toml:"name"`
+	Provider    string   `toml:"provider"`
+	Model       string   `toml:"model"`
+	BudgetSteps int      `toml:"budget_steps"`
+	Temperature *float64 `toml:"temperature"`
+	TopP        *float64 `toml:"top_p"`
+	TopK        *int     `toml:"top_k"`
+	MaxTokens   int      `toml:"max_tokens"`
+	Seed        *int     `toml:"seed"`
 }
 
 // LoadBenchConfig parses a TOML bench file.

@@ -55,14 +55,19 @@ type AgentConfig struct {
 
 // DefaultsConfig holds run-level defaults.
 type DefaultsConfig struct {
-	Provider            string  `toml:"provider"`
-	ConfirmTools        string  `toml:"confirm_tools"` // always | dangerous | never
-	BudgetSteps         int     `toml:"budget_steps"`
-	BudgetTokens        int     `toml:"budget_tokens"`
-	BudgetCostUSD       float64 `toml:"budget_cost_usd"`
-	ToolTimeoutMS       int     `toml:"tool_timeout_ms"`
-	MaxToolCallsPerStep int     `toml:"max_tool_calls_per_step"`
-	ContextLimit        int     `toml:"context_limit"` // estimated token threshold for compression (0 = disabled, default 80000)
+	Provider            string   `toml:"provider"`
+	ConfirmTools        string   `toml:"confirm_tools"` // always | dangerous | never
+	BudgetSteps         int      `toml:"budget_steps"`
+	BudgetTokens        int      `toml:"budget_tokens"`
+	BudgetCostUSD       float64  `toml:"budget_cost_usd"`
+	ToolTimeoutMS       int      `toml:"tool_timeout_ms"`
+	MaxToolCallsPerStep int      `toml:"max_tool_calls_per_step"`
+	ContextLimit        int      `toml:"context_limit"` // estimated token threshold for compression (0 = disabled, default 80000)
+	Temperature         *float64 `toml:"temperature"`
+	TopP                *float64 `toml:"top_p"`
+	TopK                *int     `toml:"top_k"`
+	MaxTokens           int      `toml:"max_tokens"`
+	Seed                *int     `toml:"seed"`
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -87,6 +92,11 @@ func DefaultConfig() *Config {
 			"gemini": {
 				Type:         "gemini",
 				DefaultModel: "gemini-2.5-flash",
+			},
+			"anthropic": {
+				Type:         "anthropic",
+				DefaultModel: "claude-sonnet-4-20250514",
+				Auth:         AuthConfig{Env: "ANTHROPIC_API_KEY"},
 			},
 		},
 		Tools: ToolsConfig{
@@ -171,6 +181,13 @@ base_url = "http://localhost:11434"
 [providers.gemini]
 type = "gemini"
 default_model = "gemini-2.5-flash"
+
+# ── Anthropic provider (pay-as-you-go API) ─────────────────────────────────
+[providers.anthropic]
+type = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+[providers.anthropic.auth]
+env = "ANTHROPIC_API_KEY"
 
 [tools]
 enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame"]

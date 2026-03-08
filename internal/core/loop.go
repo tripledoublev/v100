@@ -33,6 +33,7 @@ type Loop struct {
 	Messages  []providers.Message
 	ConfirmFn ConfirmFn
 	OutputFn  OutputFn
+	GenParams providers.GenParams
 	stepCount int // running step counter for step.summary events
 }
 
@@ -78,11 +79,12 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 		})
 		t0 := time.Now()
 		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
-			RunID:    l.Run.ID,
-			StepID:   stepID,
-			Messages: msgs,
-			Tools:    toolSpecs,
-			Model:    "",
+			RunID:     l.Run.ID,
+			StepID:    stepID,
+			Messages:  msgs,
+			Tools:     toolSpecs,
+			Model:     "",
+			GenParams: l.GenParams,
 			Hints: providers.Hints{
 				MaxToolCalls: maxToolCalls - toolCallsUsed,
 			},
@@ -327,13 +329,17 @@ func (l *Loop) buildMessages() []providers.Message {
 	return msgs
 }
 
-// estimateTokens returns a rough token count for a message slice (1 token ≈ 4 chars).
+// estimateTokens returns an estimated token count for a message slice.
+// Uses ~3.3 chars/token (more accurate than len/4 for mixed code/text) plus
+// per-message framing overhead and tool call structure tokens.
 func estimateTokens(msgs []providers.Message) int {
 	n := 0
 	for _, m := range msgs {
-		n += len(m.Content) / 4
+		n += 4 // per-message framing (role markers, separators)
+		n += len(m.Content)*10/33 + 1
 		for _, tc := range m.ToolCalls {
-			n += len(tc.Args) / 4
+			n += 10 // tool call framing (id, name, type fields)
+			n += len(tc.Args)*10/33 + 1
 		}
 	}
 	return n

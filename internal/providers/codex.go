@@ -104,14 +104,24 @@ func (p *CodexProvider) Complete(ctx context.Context, req CompleteRequest) (Comp
 		})
 	}
 
-	body, err := json.Marshal(codexRequest{
+	cReq := codexRequest{
 		Model:        model,
 		Instructions: instructions,
 		Input:        input,
 		Tools:        tools,
 		Stream:       true,
 		Store:        false,
-	})
+	}
+	if req.GenParams.Temperature != nil {
+		cReq.Temperature = req.GenParams.Temperature
+	}
+	if req.GenParams.TopP != nil {
+		cReq.TopP = req.GenParams.TopP
+	}
+	if req.GenParams.MaxTokens > 0 {
+		cReq.MaxTokens = req.GenParams.MaxTokens
+	}
+	body, err := json.Marshal(cReq)
 	if err != nil {
 		return CompleteResponse{}, err
 	}
@@ -150,6 +160,9 @@ type codexRequest struct {
 	Tools        []codexToolDef `json:"tools,omitempty"`
 	Stream       bool           `json:"stream"`
 	Store        bool           `json:"store"`
+	Temperature  *float64       `json:"temperature,omitempty"`
+	TopP         *float64       `json:"top_p,omitempty"`
+	MaxTokens    int            `json:"max_output_tokens,omitempty"`
 }
 
 type codexInput struct {
