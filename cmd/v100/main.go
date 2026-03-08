@@ -50,6 +50,7 @@ func rootCmd() *cobra.Command {
 		diffCmd(),
 		verifyCmd(),
 		queryCmd(),
+		runsCmd(),
 	)
 	return root
 }
