@@ -254,18 +254,19 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
-						Run:       run,
-						Provider:  prov,
-						Tools:     reg,
-						Policy:    pol,
-						Trace:     trace,
-						Budget:    budget,
-						ConfirmFn: confirmFn,
-						OutputFn:  outputFn,
-						GenParams: genParams,
-						Solver:    solver,
-						Session:   s_session,
-						Mapper:    s_mapper,
+						Run:         run,
+						Provider:    prov,
+						Tools:       reg,
+						Policy:      pol,
+						Trace:       trace,
+						Budget:      budget,
+						ConfirmFn:   confirmFn,
+						OutputFn:    outputFn,
+						GenParams:   genParams,
+						Solver:      solver,
+						Session:     s_session,
+						Mapper:      s_mapper,
+						NetworkTier: loopNetworkTier(cfg),
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
@@ -517,18 +518,19 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
-						Run:       coreRun,
-						Provider:  prov,
-						Tools:     reg,
-						Policy:    pol,
-						Trace:     trace,
-						Budget:    budget,
-						ConfirmFn: confirmFn,
-						OutputFn:  outputFn,
-						Solver:    solver,
-						GenParams: providers.GenParams{},
-						Session:   s_session,
-						Mapper:    s_mapper,
+						Run:         coreRun,
+						Provider:    prov,
+						Tools:       reg,
+						Policy:      pol,
+						Trace:       trace,
+						Budget:      budget,
+						ConfirmFn:   confirmFn,
+						OutputFn:    outputFn,
+						Solver:      solver,
+						GenParams:   providers.GenParams{},
+						Session:     s_session,
+						Mapper:      s_mapper,
+						NetworkTier: loopNetworkTier(cfg),
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{

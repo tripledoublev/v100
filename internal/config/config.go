@@ -254,6 +254,12 @@ budget_cost_usd = 0.0
 tool_timeout_ms = 30000
 max_tool_calls_per_step = 50
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
+
+[sandbox]
+enabled = false
+backend = "host"            # host | docker
+network_tier = "off"        # off | research | open
+apply_back = "manual"       # manual | on_success | never
 `
 }
 

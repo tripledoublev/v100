@@ -114,6 +114,22 @@ func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase str
 	return session, mapper, sandboxWorkspace, nil
 }
 
+func loopNetworkTier(cfg *config.Config) string {
+	if cfg == nil || !cfg.Sandbox.Enabled {
+		return "open"
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Sandbox.NetworkTier)) {
+	case "", "off":
+		return "off"
+	case "research":
+		return "research"
+	case "open":
+		return "open"
+	default:
+		return "off"
+	}
+}
+
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
 	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
 
@@ -296,16 +312,17 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			})
 
 		childLoop := &core.Loop{
-			Run:       childRun,
-			Provider:  prov,
-			Tools:     childReg,
-			Policy:    childPolicy,
-			Trace:     trace,
-			Budget:    childBudget,
-			ConfirmFn: confirmFn,
-			OutputFn:  childOutputFn,
-			Session:   session,
-			Mapper:    mapper,
+			Run:         childRun,
+			Provider:    prov,
+			Tools:       childReg,
+			Policy:      childPolicy,
+			Trace:       trace,
+			Budget:      childBudget,
+			ConfirmFn:   confirmFn,
+			OutputFn:    childOutputFn,
+			Session:     session,
+			Mapper:      mapper,
+			NetworkTier: loopNetworkTier(cfg),
 		}
 
 		var result string

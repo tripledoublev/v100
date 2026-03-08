@@ -127,6 +127,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, "ANTHROPIC_API_KEY") {
 		t.Error("default TOML should reference ANTHROPIC_API_KEY")
 	}
+	if !contains(toml, "[sandbox]") {
+		t.Error("default TOML should contain sandbox section")
+	}
+	if !contains(toml, `network_tier = "off"`) {
+		t.Error("default TOML should default sandbox network_tier to off")
+	}
 }
 
 func contains(s, substr string) bool {

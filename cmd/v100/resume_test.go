@@ -14,11 +14,11 @@ func TestResolveResumeSourceWorkspace(t *testing.T) {
 	origWD := t.TempDir()
 
 	tests := []struct {
-		name           string
-		workspaceFlag  string
+		name            string
+		workspaceFlag   string
 		tracedWorkspace string
-		meta           core.RunMeta
-		want           string
+		meta            core.RunMeta
+		want            string
 	}{
 		{
 			name:          "explicit flag wins",
@@ -27,20 +27,20 @@ func TestResolveResumeSourceWorkspace(t *testing.T) {
 			want:          filepath.Join(runDir, "flag-workspace"),
 		},
 		{
-			name: "meta source workspace wins over trace",
-			meta: core.RunMeta{SourceWorkspace: filepath.Join(runDir, "meta-workspace")},
+			name:            "meta source workspace wins over trace",
+			meta:            core.RunMeta{SourceWorkspace: filepath.Join(runDir, "meta-workspace")},
 			tracedWorkspace: filepath.Join(runDir, "trace-workspace"),
-			want: filepath.Join(runDir, "meta-workspace"),
+			want:            filepath.Join(runDir, "meta-workspace"),
 		},
 		{
-			name: "real traced workspace is reused",
+			name:            "real traced workspace is reused",
 			tracedWorkspace: filepath.Join(runDir, "trace-workspace"),
-			want: filepath.Join(runDir, "trace-workspace"),
+			want:            filepath.Join(runDir, "trace-workspace"),
 		},
 		{
-			name:           "virtual traced workspace falls back to cwd",
+			name:            "virtual traced workspace falls back to cwd",
 			tracedWorkspace: "/workspace",
-			want:           origWD,
+			want:            origWD,
 		},
 	}
 
@@ -82,6 +82,25 @@ func TestBuildSandboxSessionDisabledUsesSourceWorkspace(t *testing.T) {
 	wantPath := filepath.Join(sourceDir, "child.txt")
 	if gotPath != wantPath {
 		t.Fatalf("SecurePath(child.txt) = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestLoopNetworkTier(t *testing.T) {
+	cfg := testConfig()
+
+	if got := loopNetworkTier(cfg); got != "open" {
+		t.Fatalf("loopNetworkTier() with sandbox disabled = %q, want open", got)
+	}
+
+	cfg.Sandbox.Enabled = true
+	cfg.Sandbox.NetworkTier = ""
+	if got := loopNetworkTier(cfg); got != "off" {
+		t.Fatalf("loopNetworkTier() with empty sandbox network tier = %q, want off", got)
+	}
+
+	cfg.Sandbox.NetworkTier = "research"
+	if got := loopNetworkTier(cfg); got != "research" {
+		t.Fatalf("loopNetworkTier() with research tier = %q, want research", got)
 	}
 }
 

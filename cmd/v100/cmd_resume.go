@@ -108,17 +108,18 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), sandboxWorkspace, pol.MaxToolCallsPerStep, session, mapper)
 
 			loop := &core.Loop{
-				Run:       run,
-				Provider:  prov,
-				Tools:     reg,
-				Policy:    pol,
-				Trace:     trace,
-				Budget:    budget,
-				Messages:  msgs,
-				ConfirmFn: buildConfirmFn(cfg.Defaults.ConfirmTools),
-				OutputFn:  outputFn,
-				Session:   session,
-				Mapper:    mapper,
+				Run:         run,
+				Provider:    prov,
+				Tools:       reg,
+				Policy:      pol,
+				Trace:       trace,
+				Budget:      budget,
+				Messages:    msgs,
+				ConfirmFn:   buildConfirmFn(cfg.Defaults.ConfirmTools),
+				OutputFn:    outputFn,
+				Session:     session,
+				Mapper:      mapper,
+				NetworkTier: loopNetworkTier(cfg),
 			}
 			loop.OutputFn = outputFn
 

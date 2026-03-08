@@ -26,22 +26,23 @@ type OutputFn func(event Event)
 
 // Loop is the main agent execution engine.
 type Loop struct {
-	Run       *Run
-	Provider  providers.Provider
-	Tools     *tools.Registry
-	Policy    *policy.Policy
-	Trace     *TraceWriter
-	Budget    *BudgetTracker
-	Messages  []providers.Message
-	ConfirmFn ConfirmFn
-	OutputFn  OutputFn
-	GenParams providers.GenParams
-	Solver    Solver
-	Session   executor.Session
-	Mapper    *PathMapper
-	stepCount int // running step counter for step.summary events
-	ended     bool
-	mu        sync.Mutex
+	Run         *Run
+	Provider    providers.Provider
+	Tools       *tools.Registry
+	Policy      *policy.Policy
+	Trace       *TraceWriter
+	Budget      *BudgetTracker
+	Messages    []providers.Message
+	ConfirmFn   ConfirmFn
+	OutputFn    OutputFn
+	GenParams   providers.GenParams
+	Solver      Solver
+	Session     executor.Session
+	Mapper      *PathMapper
+	NetworkTier string
+	stepCount   int // running step counter for step.summary events
+	ended       bool
+	mu          sync.Mutex
 }
 
 // Step processes a single user input through the full model + tool execution cycle.
@@ -119,6 +120,23 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if !ok {
 		result := tools.ToolResult{OK: false, Output: fmt.Sprintf("tool %q not found or not enabled", tc.Name)}
 		return l.emitToolResult(stepID, tc, result)
+	}
+
+	if tool.Effects().NeedsNetwork && !l.networkAllowed() {
+		result := tools.ToolResult{
+			OK:     false,
+			Output: fmt.Sprintf("network access is disabled by sandbox policy (network_tier=%q)", l.effectiveNetworkTier()),
+		}
+		if err := l.emitToolResult(stepID, tc, result); err != nil {
+			return err
+		}
+		l.Messages = append(l.Messages, providers.Message{
+			Role:       "tool",
+			Content:    "ERROR: " + result.Output,
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+		})
+		return nil
 	}
 
 	// Confirm dangerous tools
@@ -206,6 +224,23 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	})
 
 	return nil
+}
+
+func (l *Loop) networkAllowed() bool {
+	switch l.effectiveNetworkTier() {
+	case "open", "research":
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *Loop) effectiveNetworkTier() string {
+	tier := strings.ToLower(strings.TrimSpace(l.NetworkTier))
+	if tier == "" {
+		return "open"
+	}
+	return tier
 }
 
 func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools.ToolResult) error {
