@@ -23,11 +23,14 @@ import (
 
 func resumeCmd(cfgPath *string) *cobra.Command {
 	var (
-		tuiFlag      bool
-		tuiNoAltFlag bool
-		tuiPlainFlag bool
-		tuiDebugFlag bool
-		workspaceFlag string
+		tuiFlag          bool
+		tuiNoAltFlag     bool
+		tuiPlainFlag     bool
+		tuiDebugFlag     bool
+		workspaceFlag    string
+		budgetStepsFlag  int
+		budgetTokensFlag int
+		budgetCostFlag   float64
 	)
 
 	cmd := &cobra.Command{
@@ -74,9 +77,25 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			if cfg.Defaults.ContextLimit > 0 {
 				pol.ContextLimit = cfg.Defaults.ContextLimit
 			}
+
+			// Build budget with overrides
+			maxSteps := budgetStepsFlag
+			if maxSteps == 0 {
+				maxSteps = cfg.Defaults.BudgetSteps
+			}
+			maxTokens := budgetTokensFlag
+			if maxTokens == 0 {
+				maxTokens = cfg.Defaults.BudgetTokens
+			}
+			maxCost := budgetCostFlag
+			if maxCost == 0 {
+				maxCost = cfg.Defaults.BudgetCostUSD
+			}
+
 			budget := core.NewBudgetTracker(&core.Budget{
-				MaxSteps:  cfg.Defaults.BudgetSteps,
-				MaxTokens: cfg.Defaults.BudgetTokens,
+				MaxSteps:   maxSteps,
+				MaxTokens:  maxTokens,
+				MaxCostUSD: maxCost,
 			})
 
 			trace, err := core.OpenTrace(tracePath)
@@ -125,6 +144,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
+	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
+	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")
+	cmd.Flags().Float64Var(&budgetCostFlag, "budget-cost", 0, "max cost in USD (0=config default)")
 	return cmd
 }
 
