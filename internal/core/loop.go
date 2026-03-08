@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/policy"
@@ -36,6 +37,8 @@ type Loop struct {
 	GenParams providers.GenParams
 	Solver    Solver
 	stepCount int // running step counter for step.summary events
+	ended     bool
+	mu        sync.Mutex
 }
 
 // Step processes a single user input through the full model + tool execution cycle.
@@ -363,6 +366,14 @@ func (l *Loop) EmitRunStart(payload RunStartPayload) error {
 
 // EmitRunEnd records the run.end event.
 func (l *Loop) EmitRunEnd(reason string) error {
+	l.mu.Lock()
+	if l.ended {
+		l.mu.Unlock()
+		return nil
+	}
+	l.ended = true
+	l.mu.Unlock()
+
 	b := l.Budget.Budget()
 	_, err := l.emit(EventRunEnd, "", RunEndPayload{
 		Reason:     reason,
