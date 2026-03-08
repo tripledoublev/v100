@@ -166,8 +166,8 @@ func DefaultConfig() *Config {
 			},
 		},
 		Defaults: DefaultsConfig{
-			Provider:            "codex",
-			SmartProvider:       "gemini",
+			Provider:            "minimax",
+			SmartProvider:       "minimax",
 			CheapProvider:       "ollama",
 			ConfirmTools:        "dangerous",
 			BudgetSteps:         50,
@@ -234,8 +234,8 @@ system_prompt_path = "~/.config/v100/policies/default.md"
 max_tool_calls_per_step = 50
 
 [defaults]
-provider = "codex"            # use ChatGPT subscription by default
-smart_provider = "gemini"     # for router solver escalation
+provider = "minimax"          # use MiniMax subscription by default
+smart_provider = "minimax"    # for router solver escalation
 cheap_provider = "ollama"     # for router solver discovery
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
