@@ -47,6 +47,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tagFlags         []string
 		solverFlag       string
 		authFlag         string
+		baseURLFlag      string
 		temperatureFlag  float64
 		topPFlag         float64
 		topKFlag         int
@@ -96,6 +97,12 @@ func runCmd(cfgPath *string) *cobra.Command {
 						pc.Auth.Password = parts[1]
 						cfg.Providers[cfg.Defaults.Provider] = pc
 					}
+				}
+			}
+			if baseURLFlag != "" {
+				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
+					pc.BaseURL = baseURLFlag
+					cfg.Providers[cfg.Defaults.Provider] = pc
 				}
 			}
 			if cmd.Flags().Changed("sandbox") {
@@ -246,6 +253,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
 	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth credentials (user:password) for providers like ollama")
+	cmd.Flags().StringVar(&baseURLFlag, "base-url", "", "override the provider's base API URL")
 	cmd.Flags().IntVar(&maxReplansFlag, "max-replans", 0, "max replans for plan_execute solver")
 	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
 	cmd.Flags().Float64Var(&topPFlag, "top-p", 0, "nucleus sampling top-p (0=provider default)")

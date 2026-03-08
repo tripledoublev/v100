@@ -27,6 +27,17 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected ANTHROPIC_API_KEY, got %s", cfg.Providers["anthropic"].Auth.Env)
 	}
 
+	// Check that minimax provider exists in defaults
+	if _, ok := cfg.Providers["minimax"]; !ok {
+		t.Error("expected minimax provider in defaults")
+	}
+	if cfg.Providers["minimax"].Type != "minimax" {
+		t.Errorf("expected type minimax, got %s", cfg.Providers["minimax"].Type)
+	}
+	if cfg.Providers["minimax"].DefaultModel != "MiniMax-M2.5" {
+		t.Errorf("expected MiniMax-M2.5, got %s", cfg.Providers["minimax"].DefaultModel)
+	}
+
 	// Verify sh tool is enabled and dangerous by default
 	shEnabled := false
 	for _, tool := range cfg.Tools.Enabled {
@@ -161,6 +172,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "ANTHROPIC_API_KEY") {
 		t.Error("default TOML should reference ANTHROPIC_API_KEY")
+	}
+	if !contains(toml, "[providers.minimax]") {
+		t.Error("default TOML should contain minimax provider section")
+	}
+	if !contains(toml, "MiniMax-M2.5") {
+		t.Error("default TOML should reference MiniMax-M2.5 model")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

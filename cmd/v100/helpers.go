@@ -69,6 +69,8 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 			authEnv = "ANTHROPIC_API_KEY"
 		}
 		raw, err = providers.NewAnthropicProvider(authEnv, pc.DefaultModel)
+	case "minimax":
+		raw, err = providers.NewMiniMaxProvider("", pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}

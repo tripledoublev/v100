@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,14 +52,15 @@ type ToolsConfig struct {
 	Dangerous []string `toml:"dangerous"`
 }
 
-// PolicyConfig points to a policy definition.
+// PolicyConfig holds specific named policies.
 type PolicyConfig struct {
 	SystemPromptPath    string `toml:"system_prompt_path"`
+	SystemPrompt        string `toml:"system_prompt"` // inline prompt override
 	MaxToolCallsPerStep int    `toml:"max_tool_calls_per_step"`
 	Streaming           bool   `toml:"streaming"`
 }
 
-// AgentConfig defines a named specialist agent role.
+// AgentConfig holds sub-agent persona definitions.
 type AgentConfig struct {
 	SystemPrompt  string   `toml:"system_prompt"`
 	Tools         []string `toml:"tools"`
@@ -81,7 +83,7 @@ type DefaultsConfig struct {
 	BudgetCostUSD       float64  `toml:"budget_cost_usd"`
 	ToolTimeoutMS       int      `toml:"tool_timeout_ms"`
 	MaxToolCallsPerStep int      `toml:"max_tool_calls_per_step"`
-	ContextLimit        int      `toml:"context_limit"` // estimated token threshold for compression (0 = disabled, default 80000)
+	ContextLimit        int      `toml:"context_limit"`
 	Temperature         *float64 `toml:"temperature"`
 	TopP                *float64 `toml:"top_p"`
 	TopK                *int     `toml:"top_k"`
@@ -89,7 +91,7 @@ type DefaultsConfig struct {
 	Seed                *int     `toml:"seed"`
 }
 
-// DefaultConfig returns a sensible default configuration.
+// DefaultConfig returns a built-in baseline configuration.
 func DefaultConfig() *Config {
 	return &Config{
 		Providers: map[string]ProviderConfig{
@@ -117,6 +119,12 @@ func DefaultConfig() *Config {
 				DefaultModel: "claude-sonnet-4-20250514",
 				Auth:         AuthConfig{Env: "ANTHROPIC_API_KEY"},
 			},
+			"minimax": {
+				Type:         "minimax",
+				DefaultModel: "MiniMax-M2.5",
+				BaseURL:      "https://api.minimax.chat/v1",
+				Auth:         AuthConfig{Env: "MINIMAX_API_KEY"},
+			},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
@@ -126,33 +134,35 @@ func DefaultConfig() *Config {
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
 		},
-		Policies: map[string]PolicyConfig{
-			"default": {
-				SystemPromptPath:    "~/.config/v100/policies/default.md",
-				MaxToolCallsPerStep: 50,
-			},
-		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
 				SystemPrompt: "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files.",
 				Tools:        []string{"fs_read", "fs_list", "project_search"},
 				Model:        "",
-				BudgetSteps:  15,
-				BudgetTokens: 20000,
-			},
-			"implementer": {
-				SystemPrompt: "You are an implementation agent. Read files first, then make focused code changes.",
-				Tools:        []string{"fs_read", "fs_write", "patch_apply", "sh"},
-				Model:        "",
-				BudgetSteps:  30,
-				BudgetTokens: 50000,
-			},
-			"reviewer": {
-				SystemPrompt: "You are a review agent. Review diffs for bugs, regressions, and risks.",
-				Tools:        []string{"fs_read", "git_diff", "project_search"},
-				Model:        "",
 				BudgetSteps:  10,
 				BudgetTokens: 15000,
+			},
+			"coder": {
+				SystemPrompt:  "You are an implementation agent. Read files first, then make focused code changes.",
+				Tools:         []string{"fs_read", "fs_write", "patch_apply", "sh", "project_search"},
+				Model:         "",
+				BudgetSteps:   30,
+				BudgetTokens:  50000,
+				BudgetCostUSD: 0.0,
+			},
+			"reviewer": {
+				SystemPrompt:  "You are a review agent. Review diffs for bugs, regressions, and risks.",
+				Tools:         []string{"fs_read", "git_diff", "project_search"},
+				Model:         "",
+				BudgetSteps:   10,
+				BudgetTokens:  15000,
+				BudgetCostUSD: 0.0,
+			},
+		},
+		Policies: map[string]PolicyConfig{
+			"default": {
+				SystemPromptPath:    "~/.config/v100/policies/default.md",
+				MaxToolCallsPerStep: 50,
 			},
 		},
 		Defaults: DefaultsConfig{
@@ -182,15 +192,10 @@ func DefaultConfig() *Config {
 func DefaultTOML() string {
 	return `# v100 agent harness configuration
 
-# ── Codex provider (ChatGPT Plus/Pro subscription — no API billing) ──────────
-# Put OAuth client values in ~/.config/v100/oauth_credentials.json first,
-# then run 'v100 login' to authenticate via browser OAuth.
-# Token is stored at ~/.config/v100/auth.json automatically.
 [providers.codex]
 type = "codex"
 default_model = "gpt-5.4"
 
-# ── OpenAI API provider (pay-as-you-go) ──────────────────────────────────────
 [providers.openai]
 type = "openai"
 default_model = "gpt-4o"
@@ -198,54 +203,31 @@ base_url = "https://api.openai.com/v1"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
 
-# ── Ollama local provider (no API key required) ────────────────────────────
 [providers.ollama]
 type = "ollama"
 default_model = "qwen3.5:2b"
 base_url = "http://localhost:11434"
 
-# ── Gemini provider (Gemini Pro / Google One AI Premium — no API billing) ──
-# Put OAuth client values in ~/.config/v100/oauth_credentials.json first,
-# then run 'v100 login --provider gemini' to authenticate via browser OAuth.
-# Token is stored at ~/.config/v100/gemini_auth.json automatically.
 [providers.gemini]
 type = "gemini"
 default_model = "gemini-2.5-flash"
 
-# ── Anthropic provider (pay-as-you-go API) ─────────────────────────────────
 [providers.anthropic]
 type = "anthropic"
 default_model = "claude-sonnet-4-20250514"
 [providers.anthropic.auth]
 env = "ANTHROPIC_API_KEY"
 
+[providers.minimax]
+type = "minimax"
+default_model = "MiniMax-M2.5"
+base_url = "https://api.minimax.chat/v1"
+[providers.minimax.auth]
+env = "MINIMAX_API_KEY"
+
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame", "inspect_tool"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"]
-
-[agents.researcher]
-system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
-tools = ["fs_read", "fs_list", "project_search"]
-model = ""
-budget_steps = 15
-budget_tokens = 20000
-budget_cost_usd = 0.0
-
-[agents.implementer]
-system_prompt = "You are an implementation agent. Read files first, then make focused code changes."
-tools = ["fs_read", "fs_write", "patch_apply", "sh"]
-model = ""
-budget_steps = 30
-budget_tokens = 50000
-budget_cost_usd = 0.0
-
-[agents.reviewer]
-system_prompt = "You are a review agent. Review diffs for bugs, regressions, and risks."
-tools = ["fs_read", "git_diff", "project_search"]
-model = ""
-budget_steps = 10
-budget_tokens = 15000
-budget_cost_usd = 0.0
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -276,6 +258,9 @@ apply_back = "manual"       # manual | on_success | never
 
 // Load reads and parses a TOML config file, expanding ~ in paths.
 func Load(path string) (*Config, error) {
+	// Try loading .env first if it exists in the current directory or parent
+	_ = LoadDotEnv(".env")
+
 	path = expandHome(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -318,11 +303,39 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadDotEnv is a minimal .env file parser.
+func LoadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		// Remove quotes if present
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+		}
+	}
+	return scanner.Err()
+}
+
 // XDGConfigPath returns the default XDG config path for v100.
 func XDGConfigPath() string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "v100", "config.toml")
-	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "v100", "config.toml")
 }
@@ -335,13 +348,13 @@ func expandHome(path string) string {
 	return path
 }
 
-func ensureString(items *[]string, want string) {
-	for _, s := range *items {
-		if s == want {
+func ensureString(slice *[]string, val string) {
+	for _, s := range *slice {
+		if s == val {
 			return
 		}
 	}
-	*items = append(*items, want)
+	*slice = append(*slice, val)
 }
 
 func applySandboxDefaults(dst *SandboxConfig, defaults SandboxConfig) {

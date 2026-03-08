@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -27,10 +28,25 @@ type OllamaProvider struct {
 
 func NewOllamaProvider(baseURL, defaultModel, username, password string) (*OllamaProvider, error) {
 	if strings.TrimSpace(baseURL) == "" {
-		baseURL = ollamaDefaultBaseURL
+		baseURL = os.Getenv("OLLAMA_BASE_URL")
+		if baseURL == "" {
+			baseURL = os.Getenv("OLLAMA_HOST")
+		}
+		if baseURL == "" {
+			baseURL = ollamaDefaultBaseURL
+		}
 	}
 	if strings.TrimSpace(defaultModel) == "" {
-		defaultModel = ollamaDefaultModel
+		defaultModel = os.Getenv("OLLAMA_MODEL")
+		if defaultModel == "" {
+			defaultModel = ollamaDefaultModel
+		}
+	}
+	if username == "" {
+		username = os.Getenv("OLLAMA_USER")
+	}
+	if password == "" {
+		password = os.Getenv("OLLAMA_PASS")
 	}
 	return &OllamaProvider{
 		client:       &http.Client{Timeout: 180 * time.Second},

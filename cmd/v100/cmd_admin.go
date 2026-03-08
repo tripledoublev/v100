@@ -185,13 +185,26 @@ func loginCmd() *cobra.Command {
 				fmt.Println(ui.OK("API key saved"))
 				fmt.Println(ui.Dim("Stored at: ") + path)
 
+			case "minimax":
+				fmt.Println(ui.Info("Starting OAuth Device Flow (MiniMax Coding Plan)…"))
+				t, err := auth.LoginMiniMax(ctx)
+				if err != nil {
+					return fmt.Errorf("login: %w", err)
+				}
+				path := auth.DefaultMiniMaxTokenPath()
+				if err := auth.SaveMiniMax(path, t); err != nil {
+					return fmt.Errorf("login: save token: %w", err)
+				}
+				fmt.Println(ui.OK("Logged in to MiniMax successfully"))
+				fmt.Println(ui.Dim("Token saved to: ") + path)
+
 			default:
-				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini, anthropic)", provider)
+				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini, anthropic, minimax)", provider)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini, anthropic)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini, anthropic, minimax)")
 	return cmd
 }
 
@@ -209,8 +222,10 @@ func logoutCmd() *cobra.Command {
 				path = auth.DefaultGeminiTokenPath()
 			case "anthropic":
 				path = auth.DefaultClaudeTokenPath()
+			case "minimax":
+				path = auth.DefaultMiniMaxTokenPath()
 			default:
-				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini, anthropic)", provider)
+				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini, anthropic, minimax)", provider)
 			}
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
@@ -223,7 +238,7 @@ func logoutCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "provider (codex, gemini, anthropic)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "provider (codex, gemini, anthropic, minimax)")
 	return cmd
 }
 
@@ -351,6 +366,16 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
 					} else {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv)))
+						ok = false
+					}
+				case "minimax":
+					_, credsErr := auth.LoadMiniMaxCredentials()
+					printOAuthConfigStatus(name, credsErr)
+					tokenPath := auth.DefaultMiniMaxTokenPath()
+					if _, err := os.Stat(tokenPath); err == nil {
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
+					} else {
+						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider minimax'", name, tokenPath)))
 						ok = false
 					}
 				default:
