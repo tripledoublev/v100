@@ -83,7 +83,10 @@ func TestFSReadExec(t *testing.T) {
 	// Write file first using FSWrite
 	writeTool := tools.FSWrite()
 	ctx := context.Background()
-	call := tools.ToolCallContext{WorkspaceDir: dir}
+	call := tools.ToolCallContext{
+		WorkspaceDir: dir,
+		Mapper:       &tools.MockMapper{Dir: dir},
+	}
 
 	writeArgs, _ := json.Marshal(map[string]string{
 		"path":    "test.txt",
@@ -115,7 +118,10 @@ func TestFSReadExec(t *testing.T) {
 func TestFSListExec(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
-	call := tools.ToolCallContext{WorkspaceDir: dir}
+	call := tools.ToolCallContext{
+		WorkspaceDir: dir,
+		Mapper:       &tools.MockMapper{Dir: dir},
+	}
 
 	// Create some files via FSMkdir and FSWrite
 	mkdirTool := tools.FSMkdir()

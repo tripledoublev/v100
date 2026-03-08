@@ -58,6 +58,7 @@ func newCompressLoop(t *testing.T, prov providers.Provider, contextLimit int) *c
 		Trace:     trace,
 		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 50, MaxTokens: 1_000_000}),
 		ConfirmFn: func(_, _ string) bool { return true },
+		Mapper:    core.NewPathMapper(dir, dir),
 	}
 }
 

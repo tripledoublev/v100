@@ -110,15 +110,19 @@ func runCmd(cfgPath *string) *cobra.Command {
 				_ = os.WriteFile(blackboardPath, []byte("# Blackboard\n\n"), 0o644)
 			}
 
+			// Set workspace grounding
+			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
+
 			// Write meta.json
 			tags := parseTags(tagFlags)
 			meta := core.RunMeta{
-				RunID:     runID,
-				Name:      nameFlag,
-				Tags:      tags,
-				Provider:  cfg.Defaults.Provider,
-				Model:     modelFlag,
-				CreatedAt: time.Now().UTC(),
+				RunID:           runID,
+				Name:            nameFlag,
+				Tags:            tags,
+				Provider:        cfg.Defaults.Provider,
+				Model:           modelFlag,
+				SourceWorkspace: sourceWorkspace,
+				CreatedAt:       time.Now().UTC(),
 			}
 			if meta.Model == "" {
 				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
@@ -148,30 +152,14 @@ func runCmd(cfgPath *string) *cobra.Command {
 				},
 			}
 
-			// Set workspace grounding
-			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
-
 			// Build sandbox session
-			execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
+			session, mapper, workspace, err := buildSandboxSession(cfg, runID, sourceWorkspace, runBase)
 			if err != nil {
 				return err
 			}
-			session, err := execFactory.NewSession(runID, sourceWorkspace)
-			if err != nil {
-				return err
-			}
-			
-			sandboxWorkspace := sourceWorkspace
 			if cfg.Sandbox.Enabled {
-				if err := session.Start(context.Background()); err != nil {
-					return err
-				}
 				defer session.Close()
-				sandboxWorkspace = session.Workspace()
 			}
-
-			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
-			workspace = sandboxWorkspace
 
 			// Build provider
 			prov, err := buildProvider(cfg, cfg.Defaults.Provider)
@@ -194,9 +182,6 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if cmd.Flags().Changed("streaming") {
 				pol.Streaming = streamingFlag
 			}
-
-			// Override workspace for tools
-			_ = workspace
 
 			// Budget tracker
 			budget := core.NewBudgetTracker(&run.Budget)
@@ -221,23 +206,6 @@ func runCmd(cfgPath *string) *cobra.Command {
 			// Build generation params from flags and config defaults
 			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
 
-			// Build sandbox session
-			execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
-			if err != nil {
-				return err
-			}
-			session, err := execFactory.NewSession(runID, workspace)
-			if err != nil {
-				return err
-			}
-			if cfg.Sandbox.Enabled {
-				if err := session.Start(context.Background()); err != nil {
-					return err
-				}
-				defer session.Close()
-				workspace = session.Workspace() // Use sandbox path
-			}
-
 			// Build solver
 			var solver core.Solver
 			switch cfg.Defaults.Solver {
@@ -257,7 +225,6 @@ func runCmd(cfgPath *string) *cobra.Command {
 				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, genParams, solver, strings.Join(args, " "), session, mapper)
 			}
 			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, genParams, solver, strings.Join(args, " "), session, mapper)
-
 		},
 	}
 
@@ -301,7 +268,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	confirmFn := buildConfirmFn(confirmMode)
 
 	outputFn := core.OutputFn(renderer.RenderEvent)
-	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop := &core.Loop{
 		Run:       run,
@@ -443,7 +410,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 
 	tuiOutputFn := core.OutputFn(func(ev core.Event) { tui.SendEvent(ev) })
-	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep)
+	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop = &core.Loop{
 		Run:       run,

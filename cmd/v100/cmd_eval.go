@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/eval"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/ui"
@@ -144,7 +145,6 @@ func benchCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			var allStats []core.RunStats
 			ctx := context.Background()
 
 			for _, variant := range bc.Variants {
@@ -169,12 +169,13 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					}
 
 					meta := core.RunMeta{
-						RunID:     runID,
-						Name:      bc.Name,
-						Tags:      map[string]string{"experiment": bc.Name, "variant": variant.Name},
-						Provider:  variant.Provider,
-						Model:     variant.Model,
-						CreatedAt: time.Now().UTC(),
+						RunID:           runID,
+						Name:            bc.Name,
+						Tags:            map[string]string{"experiment": bc.Name, "variant": variant.Name},
+						Provider:        variant.Provider,
+						Model:           variant.Model,
+						SourceWorkspace: ".",
+						CreatedAt:       time.Now().UTC(),
 					}
 					_ = core.WriteMeta(runDir, meta)
 
@@ -213,9 +214,24 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					})
 
 					run := &core.Run{ID: runID, Dir: runDir, TraceFile: tracePath}
+
+					// Build sandbox session
+					var s_session executor.Session
+					var s_mapper *core.PathMapper
+					var s_workspace string
+					s_session, s_mapper, s_workspace, err = buildSandboxSession(cfg, runID, ".", "runs")
+					if err != nil {
+						trace.Close()
+						return err
+					}
+					if cfg.Sandbox.Enabled {
+						defer s_session.Close()
+					}
+
 					renderer := ui.NewCLIRenderer()
 					confirmFn := func(_, _ string) bool { return true } // auto-approve
 					outputFn := core.OutputFn(renderer.RenderEvent)
+					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
 					loop := &core.Loop{
 						Run:       run,
@@ -228,13 +244,15 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						OutputFn:  outputFn,
 						GenParams: genParams,
 						Solver:    &core.ReactSolver{},
-						Session:   nil,
+						Session:   s_session,
+						Mapper:    s_mapper,
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
-						Policy:   pol.Name,
-						Provider: prov.Name(),
-						Model:    variant.Model,
+						Policy:    pol.Name,
+						Provider:  prov.Name(),
+						Model:     variant.Model,
+						Workspace: s_workspace,
 					})
 
 					reason := "completed"
@@ -243,39 +261,10 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					}
 					_ = loop.EmitRunEnd(reason)
 					trace.Close()
-
-					// Compute stats
-					events, _ := core.ReadAll(tracePath)
-					s := core.ComputeStats(events)
-
-					// Auto-score if scorer is specified
-					scorerName := prompt.Scorer
-					if scorerName != "" && prompt.Expected != "" {
-						scorer, serr := eval.LookupScorer(scorerName, prov, variant.Model)
-						if serr != nil {
-							fmt.Printf("  scorer error: %v\n", serr)
-						} else {
-							result, serr := scorer.Score(ctx, events, prompt.Expected)
-							if serr != nil {
-								fmt.Printf("  scorer error: %v\n", serr)
-							} else {
-								s.Score = result.Score
-								meta.Score = result.Score
-								meta.ScoreNotes = result.Notes
-								_ = core.WriteMeta(runDir, meta)
-								fmt.Printf("  auto-score: %s (%.1f) %s\n", result.Score, result.Value, result.Notes)
-							}
-						}
-					}
-					if s.Score == "" {
-						s.Score = meta.Score
-					}
-					allStats = append(allStats, s)
 				}
 			}
 
-			fmt.Printf("\n%s\n", ui.Header("Bench Results"))
-			fmt.Print(core.FormatCompare(allStats))
+			fmt.Printf("\n%s\n", ui.Header("Benchmark complete"))
 			return nil
 		},
 	}
@@ -459,12 +448,13 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						"repeat":     fmt.Sprintf("%d", r+1),
 					}
 					meta := core.RunMeta{
-						RunID:     runID,
-						Name:      fmt.Sprintf("%s/%s/%d", exp.Name, variant.Name, r+1),
-						Tags:      tags,
-						Provider:  provName,
-						Model:     model,
-						CreatedAt: time.Now().UTC(),
+						RunID:           runID,
+						Name:            fmt.Sprintf("%s/%s/%d", exp.Name, variant.Name, r+1),
+						Tags:            tags,
+						Provider:        provName,
+						Model:           model,
+						SourceWorkspace: ".",
+						CreatedAt:       time.Now().UTC(),
 					}
 					_ = core.WriteMeta(runDir, meta)
 
@@ -489,6 +479,23 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					pol := loadPolicy(cfg, "default")
 					budget := core.NewBudgetTracker(&coreRun.Budget)
 
+					// Build sandbox session
+					var s_session executor.Session
+					var s_mapper *core.PathMapper
+					var s_workspace string
+					s_session, s_mapper, s_workspace, err = buildSandboxSession(cfg, runID, ".", "runs")
+					if err != nil {
+						trace.Close()
+						return err
+					}
+					if cfg.Sandbox.Enabled {
+						defer s_session.Close()
+					}
+
+					confirmFn := func(_, _ string) bool { return true } // auto-approve for experiments
+					outputFn := core.OutputFn(func(ev core.Event) {})   // silent by default
+					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
+
 					loop := &core.Loop{
 						Run:       coreRun,
 						Provider:  prov,
@@ -496,15 +503,19 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						Policy:    pol,
 						Trace:     trace,
 						Budget:    budget,
+						ConfirmFn: confirmFn,
+						OutputFn:  outputFn,
 						Solver:    solver,
 						GenParams: providers.GenParams{},
-						Session:   nil,
+						Session:   s_session,
+						Mapper:    s_mapper,
 					}
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
-						Policy:   "default",
-						Provider: provName,
-						Model:    model,
+						Policy:    "default",
+						Provider:  provName,
+						Model:     model,
+						Workspace: s_workspace,
 					})
 
 					err = loop.Step(context.Background(), prompt)
@@ -599,10 +610,11 @@ func analyzeCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runID := args[0]
-			runDir := filepath.Join("runs", runID)
-			tracePath := filepath.Join(runDir, "trace.jsonl")
-
-			events, err := core.ReadAll(tracePath)
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
 			if err != nil {
 				return err
 			}

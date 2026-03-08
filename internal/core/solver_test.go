@@ -62,6 +62,7 @@ func TestReactSolver(t *testing.T) {
 		Trace:    trace,
 		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
 		Solver:   &ReactSolver{},
+		Mapper:   NewPathMapper(runDir, runDir),
 	}
 
 	res, err := l.Solver.Solve(ctx, l, "Read test.txt")
@@ -103,6 +104,7 @@ func TestPlanExecuteSolver(t *testing.T) {
 		Trace:    trace,
 		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
 		Solver:   &PlanExecuteSolver{MaxReplans: 1},
+		Mapper:   NewPathMapper(runDir, runDir),
 	}
 
 	res, err := l.Solver.Solve(ctx, l, "Read test.txt with a plan")

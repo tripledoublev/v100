@@ -19,7 +19,10 @@ func TestSemTools(t *testing.T) {
 
 	ctx := context.Background()
 	dir := t.TempDir()
-	call := tools.ToolCallContext{WorkspaceDir: dir}
+	call := tools.ToolCallContext{
+		WorkspaceDir: dir,
+		Mapper:       &tools.MockMapper{Dir: dir},
+	}
 
 	// Initialize git repo in temp dir
 	runGit := func(args ...string) {

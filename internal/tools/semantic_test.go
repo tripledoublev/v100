@@ -34,6 +34,7 @@ func (g *Greeter) Greet() {
 	ctx := context.Background()
 	call := ToolCallContext{
 		WorkspaceDir: dir,
+		Mapper:       &MockMapper{Dir: dir},
 	}
 	args := json.RawMessage(`{"path": "test.go"}`)
 

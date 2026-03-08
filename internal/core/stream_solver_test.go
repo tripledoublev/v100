@@ -59,6 +59,7 @@ func TestReactSolverStreaming(t *testing.T) {
 		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
 		Solver:   &ReactSolver{},
 		Policy:   pol,
+		Mapper:   NewPathMapper(runDir, runDir),
 	}
 
 	_, err := l.Solver.Solve(ctx, l, "List files")

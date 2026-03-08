@@ -46,6 +46,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			// Reconstruct message history from trace
 			msgs, providerName, model, tracedWorkspace := reconstructHistory(events)
 
+			// Load meta to get original source workspace
+			meta, _ := core.ReadMeta(runDir)
+
 			if providerName == "" {
 				providerName = cfg.Defaults.Provider
 			}
@@ -78,15 +81,18 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			}
 			// Source workspace grounding
 			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
-			if workspaceFlag == "" && strings.TrimSpace(tracedWorkspace) != "" {
-				// If we resumed a sandboxed run, the traced workspace is "/workspace"
-				// but we need the real host source workspace.
-				// In a real implementation, we'd store the source path in meta.json.
-				if tracedWorkspace == "/workspace" {
-					// for now assume current host source is same as original
-					sourceWorkspace = resolveWorkspace("", runDir)
-				} else {
-					sourceWorkspace = resolveWorkspace(tracedWorkspace, runDir)
+			if workspaceFlag == "" {
+				if meta.SourceWorkspace != "" {
+					sourceWorkspace = meta.SourceWorkspace
+				} else if strings.TrimSpace(tracedWorkspace) != "" {
+					// If we resumed a sandboxed run, the traced workspace is "/workspace"
+					// but we need the real host source workspace.
+					if tracedWorkspace == "/workspace" {
+						// for now assume current host source is same as original
+						sourceWorkspace = resolveWorkspace("", runDir)
+					} else {
+						sourceWorkspace = resolveWorkspace(tracedWorkspace, runDir)
+					}
 				}
 			}
 
@@ -105,6 +111,10 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			run.Dir = sandboxWorkspace
 			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
+			renderer := ui.NewCLIRenderer()
+			outputFn := core.OutputFn(renderer.RenderEvent)
+			registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), sandboxWorkspace, pol.MaxToolCallsPerStep, session, mapper)
+
 			loop := &core.Loop{
 				Run:       run,
 				Provider:  prov,
@@ -114,15 +124,14 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				Budget:    budget,
 				Messages:  msgs,
 				ConfirmFn: buildConfirmFn(cfg.Defaults.ConfirmTools),
+				OutputFn:  outputFn,
 				Session:   session,
 				Mapper:    mapper,
 			}
-
-			renderer := ui.NewCLIRenderer()
-			loop.OutputFn = renderer.RenderEvent
+			loop.OutputFn = outputFn
 
 			fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", runID, len(events))))
-			fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
+			fmt.Println(ui.Info(ui.Dim("workspace: ") + sandboxWorkspace))
 			_ = model
 			_ = tuiFlag
 

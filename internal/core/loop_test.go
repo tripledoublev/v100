@@ -69,6 +69,7 @@ func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (
 		Trace:     trace,
 		Budget:    core.NewBudgetTracker(budget),
 		ConfirmFn: func(_, _ string) bool { return true },
+		Mapper:    core.NewPathMapper(dir, dir),
 	}
 	return loop, trace
 }

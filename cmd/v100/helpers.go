@@ -14,6 +14,7 @@ import (
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -91,8 +92,30 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	return reg
 }
 
+func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase string) (executor.Session, *core.PathMapper, string, error) {
+	execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	session, err := execFactory.NewSession(runID, sourceWorkspace)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	sandboxWorkspace := sourceWorkspace
+	if cfg.Sandbox.Enabled {
+		if err := session.Start(context.Background()); err != nil {
+			return nil, nil, "", err
+		}
+		sandboxWorkspace = session.Workspace()
+	}
+
+	mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
+	return session, mapper, sandboxWorkspace, nil
+}
+
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
-	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int) {
+	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
 
 	providerBuilder := func(model string) (providers.Provider, string, error) {
 		pc, ok := cfg.Providers[cfg.Defaults.Provider]
@@ -281,7 +304,8 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Budget:    childBudget,
 			ConfirmFn: confirmFn,
 			OutputFn:  childOutputFn,
-			Session:   nil,
+			Session:   session,
+			Mapper:    mapper,
 		}
 
 		var result string
