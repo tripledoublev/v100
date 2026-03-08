@@ -30,13 +30,14 @@ Agents currently view code as "text blocks." The strategic move is toward **Grap
 
 ## 3. The Roadmap: A Multi-Phase Evolution
 
-### Phase 1: Epistemic Foundation (The "Smart" Environment)
-*   **Vectorized Blackboard:** Replace the flat `blackboard.md` with a local vector database. This allows agents to "query" the shared memory for relevant past decisions without saturating their context window.
-*   **Uncertainty-Aware Tooling:** Implement a `reflect` step where the agent must estimate its confidence before calling a "Dangerous" tool. If confidence is low, the harness automatically injects a `researcher` sub-agent to gather more context.
-*   **Semantic Navigation (Tree-Sitter):** Native integration with Tree-Sitter to provide `fs_outline` and `fs_dependents` tools, enabling agents to "jump to definition" across the workspace.
+### Phase 1: Epistemic Foundation (COMPLETED)
+*   **Vectorized Blackboard:** Replaced the flat `blackboard.md` with a local vector database. Implemented `blackboard_store` and `blackboard_search`.
+*   **Uncertainty-Aware Tooling:** Implemented a `reflect` step for dangerous tools with confidence-based rejection thresholds.
+*   **Semantic Navigation (Tree-Sitter):** Integrated Tree-Sitter with `fs_outline` tool for Go files.
 
-### Phase 2: Meta-Cognitive Supervision (The "Aware" Harness)
-*   **Automated Root Cause Analysis (ARCA):** When the `metrics` engine detects a `tool_loop` or `context_collapse`, it should autonomously launch a **Diagnostic Replay**. It tests the same prompt with a higher-temperature setting or a different provider to see if the loop is "Model-Specific" or "Prompt-Specific."
+### Phase 2: Meta-Cognitive Supervision (In Progress)
+*   **Solver Abstractions (2a COMPLETED):** Refactored the core loop into pluggable `Solver` implementations (`react`, `plan_execute`). Added checkpointing and backtracking support.
+*   **Automated Root Cause Analysis (ARCA):** When the `metrics` engine detects a `tool_loop` or `context_collapse`, it should autonomously launch a **Diagnostic Replay**.
 *   **Adversarial Benchmarking:** A new `v100 stress` command that introduces artificial "hallucinations" (e.g., a tool returns a slightly wrong file path) to measure how effectively an agent can recover using its own internal verification logic.
 *   **Human-in-the-Loop (HITL) Nudging:** Enhance the TUI to allow researchers to inject "Cognitive Anchors"—short, high-priority instructions that persist across compressions—to guide agents out of reasoning dead-ends.
 

@@ -8,6 +8,7 @@ type Policy struct {
 	ToolTimeoutMS       int
 	MemoryPath          string // path to MEMORY.md in workspace; injected into every buildMessages call
 	ContextLimit        int    // estimated token threshold for compression (0 = disabled)
+	Streaming           bool   // enable streaming for providers that support it
 }
 
 // DefaultSystemPrompt is the built-in "agent that builds the agent" prompt.

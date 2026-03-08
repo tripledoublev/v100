@@ -15,6 +15,7 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 	p := &Policy{
 		Name:                name,
 		MaxToolCallsPerStep: cfg.MaxToolCallsPerStep,
+		Streaming:           cfg.Streaming,
 	}
 	if p.MaxToolCallsPerStep == 0 {
 		p.MaxToolCallsPerStep = 20
@@ -44,6 +45,7 @@ func Default() *Policy {
 		SystemPrompt:        DefaultSystemPrompt,
 		MaxToolCallsPerStep: 20,
 		ToolTimeoutMS:       30000,
+		Streaming:           true,
 	}
 }
 

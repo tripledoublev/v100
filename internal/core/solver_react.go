@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/providers"
@@ -52,46 +54,111 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			ToolNames:    toolNames,
 			MaxToolCalls: maxToolCalls - toolCallsUsed,
 		})
-		t0 := time.Now()
-		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
-			RunID:     l.Run.ID,
-			StepID:    stepID,
-			Messages:  msgs,
-			Tools:     toolSpecs,
-			Model:     "",
-			GenParams: l.GenParams,
-			Hints: providers.Hints{
-				MaxToolCalls: maxToolCalls - toolCallsUsed,
-			},
-		})
-		durMS := time.Since(t0).Milliseconds()
-		modelCalls++
-		if err != nil {
-			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
-			l.emitErrorAssistance(ctx, stepID, err)
-			return SolveResult{}, fmt.Errorf("provider: %w", err)
+
+		var (
+			assistantText strings.Builder
+			toolCalls     []providers.ToolCall
+			tcMap         = make(map[string]*providers.ToolCall)
+			usage         providers.Usage
+			durMS         int64
+			ttft          int64
+			t0            = time.Now()
+		)
+
+		streamer, isStreamer := l.Provider.(providers.Streamer)
+		if isStreamer && l.Policy != nil && l.Policy.Streaming {
+			ch, err := streamer.StreamComplete(ctx, providers.CompleteRequest{
+				RunID:     l.Run.ID,
+				StepID:    stepID,
+				Messages:  msgs,
+				Tools:     toolSpecs,
+				GenParams: l.GenParams,
+				Hints: providers.Hints{
+					MaxToolCalls: maxToolCalls - toolCallsUsed,
+				},
+			})
+			if err != nil {
+				return SolveResult{}, fmt.Errorf("provider stream: %w", err)
+			}
+
+			for ev := range ch {
+				switch ev.Type {
+				case providers.StreamToken:
+					if ttft == 0 {
+						ttft = time.Since(t0).Milliseconds()
+					}
+					assistantText.WriteString(ev.Text)
+					_, _ = l.emit(EventModelToken, stepID, map[string]string{"text": ev.Text})
+				case providers.StreamToolCallStart:
+					if ttft == 0 {
+						ttft = time.Since(t0).Milliseconds()
+					}
+					tc := &providers.ToolCall{ID: ev.ToolCallID, Name: ev.ToolCallName}
+					toolCalls = append(toolCalls, *tc)
+					tcMap[ev.ToolCallID] = &toolCalls[len(toolCalls)-1]
+					_, _ = l.emit(EventToolCall, stepID, ToolCallPayload{
+						CallID: ev.ToolCallID,
+						Name:   ev.ToolCallName,
+					})
+				case providers.StreamToolCallDelta:
+					if tc, ok := tcMap[ev.ToolCallID]; ok {
+						args := string(tc.Args) + ev.ToolCallArgs
+						tc.Args = json.RawMessage(args)
+						_, _ = l.emit(EventToolCallDelta, stepID, ToolCallDeltaPayload{
+							CallID: ev.ToolCallID,
+							Delta:  ev.ToolCallArgs,
+						})
+					}
+				case providers.StreamDone:
+					usage = ev.Usage
+				case providers.StreamError:
+					return SolveResult{}, ev.Err
+				}
+			}
+			durMS = time.Since(t0).Milliseconds()
+		} else {
+			resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+				RunID:     l.Run.ID,
+				StepID:    stepID,
+				Messages:  msgs,
+				Tools:     toolSpecs,
+				GenParams: l.GenParams,
+				Hints: providers.Hints{
+					MaxToolCalls: maxToolCalls - toolCallsUsed,
+				},
+			})
+			durMS = time.Since(t0).Milliseconds()
+			if err != nil {
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+				l.emitErrorAssistance(ctx, stepID, err)
+				return SolveResult{}, fmt.Errorf("provider: %w", err)
+			}
+			assistantText.WriteString(resp.AssistantText)
+			toolCalls = resp.ToolCalls
+			usage = resp.Usage
 		}
 
-		if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+		if err := l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens); err != nil {
 			return SolveResult{}, err
 		}
-		if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
+		if err := l.Budget.AddCost(usage.CostUSD); err != nil {
 			return SolveResult{}, err
 		}
 
-		tcPayload := make([]ToolCall, len(resp.ToolCalls))
-		for i, tc := range resp.ToolCalls {
+		tcPayload := make([]ToolCall, len(toolCalls))
+		for i, tc := range toolCalls {
 			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
 		}
 		_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
-			Text:      resp.AssistantText,
+			Text:      assistantText.String(),
 			ToolCalls: tcPayload,
 			Usage: Usage{
-				InputTokens:  resp.Usage.InputTokens,
-				OutputTokens: resp.Usage.OutputTokens,
-				CostUSD:      resp.Usage.CostUSD,
+				InputTokens:  usage.InputTokens,
+				OutputTokens: usage.OutputTokens,
+				CostUSD:      usage.CostUSD,
 			},
 			DurationMS: durMS,
+			TTFT:       ttft,
 		})
 		if err != nil {
 			return SolveResult{}, err
@@ -99,17 +166,18 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 
 		l.Messages = append(l.Messages, providers.Message{
 			Role:      "assistant",
-			Content:   resp.AssistantText,
-			ToolCalls: resp.ToolCalls,
+			Content:   assistantText.String(),
+			ToolCalls: toolCalls,
 		})
 
-		finalText = resp.AssistantText
+		finalText = assistantText.String()
+		modelCalls++
 
-		if len(resp.ToolCalls) == 0 {
+		if len(toolCalls) == 0 {
 			break
 		}
 
-		for _, tc := range resp.ToolCalls {
+		for _, tc := range toolCalls {
 			if toolCallsUsed >= maxToolCalls {
 				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
 					Error: fmt.Sprintf("max tool calls per step reached (%d)", maxToolCalls),

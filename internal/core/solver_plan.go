@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/providers"
 )
@@ -66,17 +68,58 @@ func (s *PlanExecuteSolver) plan(ctx context.Context, l *Loop, stepID string, us
 	msgs := append([]providers.Message{}, l.buildMessages()...)
 	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})
 
-	resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
-		RunID:    l.Run.ID,
-		StepID:   stepID,
-		Messages: msgs,
-		Tools:    nil, // No tools in planning phase
-	})
-	if err != nil {
-		return "", err
+	var assistantText strings.Builder
+	var usage providers.Usage
+	t0 := time.Now()
+
+	streamer, isStreamer := l.Provider.(providers.Streamer)
+	if isStreamer && l.Policy != nil && l.Policy.Streaming {
+		ch, err := streamer.StreamComplete(ctx, providers.CompleteRequest{
+			RunID:    l.Run.ID,
+			StepID:   stepID,
+			Messages: msgs,
+			Tools:    nil,
+		})
+		if err != nil {
+			return "", err
+		}
+		for ev := range ch {
+			if ev.Type == providers.StreamToken {
+				assistantText.WriteString(ev.Text)
+				_, _ = l.emit(EventModelToken, stepID, map[string]string{"text": ev.Text})
+			} else if ev.Type == providers.StreamDone {
+				usage = ev.Usage
+			}
+		}
+	} else {
+		resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+			RunID:    l.Run.ID,
+			StepID:   stepID,
+			Messages: msgs,
+			Tools:    nil, // No tools in planning phase
+		})
+		if err != nil {
+			return "", err
+		}
+		assistantText.WriteString(resp.AssistantText)
+		usage = resp.Usage
 	}
 
-	plan := resp.AssistantText
+	durMS := time.Since(t0).Milliseconds()
+	_ = l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens)
+	_ = l.Budget.AddCost(usage.CostUSD)
+
+	_, _ = l.emit(EventModelResp, stepID, ModelRespPayload{
+		Text: assistantText.String(),
+		Usage: Usage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			CostUSD:      usage.CostUSD,
+		},
+		DurationMS: durMS,
+	})
+
+	plan := assistantText.String()
 	_, _ = l.emit(EventSolverPlan, stepID, map[string]string{"plan": plan})
 
 	// Add the plan to the message history so subsequent steps see it.

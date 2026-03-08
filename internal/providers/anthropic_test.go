@@ -111,7 +111,7 @@ func TestAnthropicParseResponse(t *testing.T) {
 		"stop_reason": "end_turn"
 	}`
 
-	resp, err := anthropicParseResponse([]byte(raw), "claude-sonnet-4-20250514")
+	resp, err := anthropicParseResponse("claude-sonnet-4-20250514", []byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}

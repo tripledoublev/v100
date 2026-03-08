@@ -41,6 +41,7 @@ type ToolsConfig struct {
 type PolicyConfig struct {
 	SystemPromptPath    string `toml:"system_prompt_path"`
 	MaxToolCallsPerStep int    `toml:"max_tool_calls_per_step"`
+	Streaming           bool   `toml:"streaming"`
 }
 
 // AgentConfig defines a named specialist agent role.

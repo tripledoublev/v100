@@ -82,6 +82,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		workspaceFlag    string
 		unsafeFlag       bool
 		autoFlag         bool
+		streamingFlag    bool
 		budgetStepsFlag  int
 		budgetTokensFlag int
 		budgetCostFlag   float64
@@ -216,6 +217,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if cfg.Defaults.ContextLimit > 0 {
 				pol.ContextLimit = cfg.Defaults.ContextLimit
 			}
+			if cmd.Flags().Changed("streaming") {
+				pol.Streaming = streamingFlag
+			}
 
 			// Override workspace for tools
 			_ = workspace
@@ -272,6 +276,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations")
 	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "disable path guardrails and confirmations")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&streamingFlag, "streaming", false, "enable real-time token streaming")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
 	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")
 	cmd.Flags().Float64Var(&budgetCostFlag, "budget-cost", 0, "max cost in USD (0=config default)")

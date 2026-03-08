@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -41,7 +42,7 @@ func NewOpenAIProvider(authEnv, baseURL, defaultModel string) (*OpenAIProvider, 
 func (p *OpenAIProvider) Name() string { return "openai" }
 
 func (p *OpenAIProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: true, Streaming: false}
+	return Capabilities{ToolCalls: true, JSONMode: true, Streaming: true}
 }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
@@ -178,6 +179,131 @@ func (p *OpenAIProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 			CostUSD:     (float64(resp.Usage.TotalTokens) / 1_000_000) * 0.02, // approx for 3-small
 		},
 	}, nil
+}
+
+func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
+	model := req.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	msgs := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		msg := openai.ChatCompletionMessage{Role: m.Role, Content: m.Content, Name: m.Name}
+		if m.Role == "tool" {
+			msg.ToolCallID = m.ToolCallID
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+					ID:       tc.ID,
+					Type:     openai.ToolTypeFunction,
+					Function: openai.FunctionCall{Name: tc.Name, Arguments: string(tc.Args)},
+				})
+			}
+		}
+		msgs = append(msgs, msg)
+	}
+
+	var tools []openai.Tool
+	for _, ts := range req.Tools {
+		tools = append(tools, openai.Tool{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        ts.Name,
+				Description: ts.Description,
+				Parameters:  ts.InputSchema,
+			},
+		})
+	}
+
+	oReq := openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: msgs,
+		Tools:    tools,
+		Stream:   true,
+	}
+	if req.GenParams.Temperature != nil {
+		oReq.Temperature = float32(*req.GenParams.Temperature)
+	}
+	if req.GenParams.TopP != nil {
+		oReq.TopP = float32(*req.GenParams.TopP)
+	}
+	if req.GenParams.MaxTokens > 0 {
+		oReq.MaxTokens = req.GenParams.MaxTokens
+	}
+	if len(req.GenParams.StopSequences) > 0 {
+		oReq.Stop = req.GenParams.StopSequences
+	}
+	if req.GenParams.Seed != nil {
+		oReq.Seed = req.GenParams.Seed
+	}
+
+	stream, err := p.client.CreateChatCompletionStream(ctx, oReq)
+	if err != nil {
+		return nil, fmt.Errorf("openai: stream: %w", err)
+	}
+
+	ch := make(chan StreamEvent, 100)
+	go func() {
+		defer close(ch)
+		defer stream.Close()
+
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					ch <- StreamEvent{Type: StreamDone}
+					return
+				}
+				ch <- StreamEvent{Type: StreamError, Err: err}
+				return
+			}
+
+			if len(resp.Choices) == 0 {
+				continue
+			}
+			choice := resp.Choices[0]
+
+			// Text delta
+			if choice.Delta.Content != "" {
+				ch <- StreamEvent{Type: StreamToken, Text: choice.Delta.Content}
+			}
+
+			// Tool call deltas
+			for _, tc := range choice.Delta.ToolCalls {
+				if tc.Function.Name != "" {
+					ch <- StreamEvent{
+						Type:         StreamToolCallStart,
+						ToolCallID:   tc.ID,
+						ToolCallName: tc.Function.Name,
+					}
+				}
+				if tc.Function.Arguments != "" {
+					ch <- StreamEvent{
+						Type:         StreamToolCallDelta,
+						ToolCallID:   tc.ID,
+						ToolCallArgs: tc.Function.Arguments,
+					}
+				}
+			}
+
+			// Usage (only available in some models/responses)
+			if resp.Usage != nil {
+				ch <- StreamEvent{
+					Type: StreamDone,
+					Usage: Usage{
+						InputTokens:  resp.Usage.PromptTokens,
+						OutputTokens: resp.Usage.CompletionTokens,
+						CostUSD:      estimateCost(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens),
+					},
+				}
+				return
+			}
+		}
+	}()
+
+	return ch, nil
 }
 
 // estimateCost returns a rough USD cost estimate.

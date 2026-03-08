@@ -92,10 +92,39 @@ type EmbedResponse struct {
 	Usage     Usage
 }
 
+// StreamEventType identifies the type of streaming event.
+type StreamEventType int
+
+const (
+	StreamToken StreamEventType = iota
+	StreamToolCallStart
+	StreamToolCallDelta
+	StreamToolCallEnd
+	StreamDone
+	StreamError
+)
+
+// StreamEvent is a single chunk from a streaming completion.
+type StreamEvent struct {
+	Type         StreamEventType
+	Text         string          // for StreamToken
+	ToolCallID   string          // for tool call events
+	ToolCallName string          // for StreamToolCallStart
+	ToolCallArgs string          // for StreamToolCallDelta (incremental JSON)
+	Usage        Usage           // populated on StreamDone
+	Err          error           // populated on StreamError
+	Raw          json.RawMessage // provider-specific raw chunk
+}
+
 // Provider is the interface all LLM backends implement.
 type Provider interface {
 	Name() string
 	Capabilities() Capabilities
 	Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error)
 	Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error)
+}
+
+// Streamer is an optional interface for providers that support streaming.
+type Streamer interface {
+	StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error)
 }

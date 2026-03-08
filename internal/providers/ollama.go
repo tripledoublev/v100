@@ -40,7 +40,122 @@ func NewOllamaProvider(baseURL, defaultModel string) (*OllamaProvider, error) {
 func (p *OllamaProvider) Name() string { return "ollama" }
 
 func (p *OllamaProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: false}
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+}
+
+func (p *OllamaProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	messages := make([]ollamaChatMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		msg := ollamaChatMessage{Role: m.Role, Content: m.Content, Name: m.Name}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			msg.ToolCalls = make([]ollamaToolCallOut, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, ollamaToolCallOut{
+					Function: ollamaToolCallFunctionOut{Name: tc.Name, Arguments: tc.Args},
+				})
+			}
+		}
+		messages = append(messages, msg)
+	}
+
+	tools := make([]ollamaToolDef, 0, len(req.Tools))
+	for _, t := range req.Tools {
+		tools = append(tools, ollamaToolDef{
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			},
+		})
+	}
+
+	oReq := ollamaChatRequest{
+		Model:    model,
+		Messages: messages,
+		Tools:    tools,
+		Stream:   true,
+	}
+	body, err := json.Marshal(oReq)
+	if err != nil {
+		return nil, err
+	}
+
+	url := p.baseURL + "/api/chat"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: stream request: %w", err)
+	}
+
+	ch := make(chan StreamEvent, 100)
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+
+		dec := json.NewDecoder(resp.Body)
+		var toolCallIdx int
+		for {
+			var chunk struct {
+				Done    bool                `json:"done"`
+				Message ollamaChatMessageIn `json:"message"`
+				ollamaChatResponse          // usage fields
+			}
+			if err := dec.Decode(&chunk); err != nil {
+				if err == io.EOF {
+					return
+				}
+				ch <- StreamEvent{Type: StreamError, Err: err}
+				return
+			}
+
+			if chunk.Message.Content != "" {
+				ch <- StreamEvent{Type: StreamToken, Text: chunk.Message.Content}
+			}
+
+			for _, tc := range chunk.Message.ToolCalls {
+				id := fmt.Sprintf("ollama-call-%d", toolCallIdx+1)
+				if tc.Function.Name != "" {
+					ch <- StreamEvent{
+						Type:         StreamToolCallStart,
+						ToolCallID:   id,
+						ToolCallName: tc.Function.Name,
+					}
+				}
+				if tc.Function.Arguments != nil {
+					ch <- StreamEvent{
+						Type:         StreamToolCallDelta,
+						ToolCallID:   id,
+						ToolCallArgs: string(tc.Function.Arguments),
+					}
+				}
+				toolCallIdx++
+			}
+
+			if chunk.Done {
+				ch <- StreamEvent{
+					Type: StreamDone,
+					Usage: Usage{
+						InputTokens:  chunk.PromptEval,
+						OutputTokens: chunk.EvalCount,
+					},
+				}
+				return
+			}
+		}
+	}()
+
+	return ch, nil
 }
 
 type ollamaChatRequest struct {

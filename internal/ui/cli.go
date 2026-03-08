@@ -70,6 +70,24 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			)
 		}
 
+	case core.EventModelToken:
+		if r.inSubAgent > 0 {
+			break
+		}
+		var p map[string]string
+		_ = json.Unmarshal(ev.Payload, &p)
+		fmt.Print(p["text"])
+
+	case core.EventToolCallDelta:
+		if r.inSubAgent > 0 {
+			break
+		}
+		var p core.ToolCallDeltaPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		// Tool call deltas are hard to render cleanly in line-by-line CLI.
+		// We could print a dot or just ignore and wait for the final tool call result.
+		// For research fidelity, we'll ignore in CLI but log in trace.
+
 	case core.EventToolCall:
 		// Suppress sub-agent tool calls; top-level shown inline in EventModelResp.
 		break

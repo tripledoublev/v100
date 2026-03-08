@@ -15,7 +15,9 @@ const (
 	EventUserMsg       EventType = "user.message"
 	EventModelCall     EventType = "model.call"
 	EventModelResp     EventType = "model.response"
+	EventModelToken    EventType = "model.token"
 	EventToolCall      EventType = "tool.call"
+	EventToolCallDelta EventType = "tool.call_delta"
 	EventToolResult    EventType = "tool.result"
 	EventToolReflect   EventType = "tool.reflect"
 	EventRunError      EventType = "run.error"
@@ -105,6 +107,7 @@ type ModelRespPayload struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	Usage      Usage      `json:"usage"`
 	DurationMS int64      `json:"duration_ms,omitempty"`
+	TTFT       int64      `json:"ttft,omitempty"` // Time To First Token in ms
 }
 
 // CompressPayload is the Payload for EventCompress.
@@ -132,6 +135,12 @@ type ToolCallPayload struct {
 	CallID string `json:"call_id"`
 	Name   string `json:"name"`
 	Args   string `json:"args"`
+}
+
+// ToolCallDeltaPayload is the Payload for EventToolCallDelta.
+type ToolCallDeltaPayload struct {
+	CallID string `json:"call_id"`
+	Delta  string `json:"delta"`
 }
 
 // ToolResultPayload is the Payload for EventToolResult.
