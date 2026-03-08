@@ -10,15 +10,16 @@ import (
 
 // RunMeta holds metadata for a run, persisted as meta.json in the run directory.
 type RunMeta struct {
-	RunID           string            `json:"run_id"`
-	Name            string            `json:"name,omitempty"`
-	Tags            map[string]string `json:"tags,omitempty"`
-	Provider        string            `json:"provider"`
-	Model           string            `json:"model"`
-	SourceWorkspace string            `json:"source_workspace,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	Score           string            `json:"score,omitempty"`       // pass|fail|partial
-	ScoreNotes      string            `json:"score_notes,omitempty"`
+	RunID             string            `json:"run_id"`
+	Name              string            `json:"name,omitempty"`
+	Tags              map[string]string `json:"tags,omitempty"`
+	Provider          string            `json:"provider"`
+	Model             string            `json:"model"`
+	SourceWorkspace   string            `json:"source_workspace,omitempty"`
+	SourceFingerprint string            `json:"source_fingerprint,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	Score             string            `json:"score,omitempty"` // pass|fail|partial
+	ScoreNotes        string            `json:"score_notes,omitempty"`
 }
 
 // WriteMeta writes meta.json to the given directory.

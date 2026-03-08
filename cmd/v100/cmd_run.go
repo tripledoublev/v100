@@ -112,17 +112,22 @@ func runCmd(cfgPath *string) *cobra.Command {
 
 			// Set workspace grounding
 			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
+			sourceFingerprint, err := sourceWorkspaceFingerprint(cfg, sourceWorkspace)
+			if err != nil {
+				return fmt.Errorf("fingerprint source workspace: %w", err)
+			}
 
 			// Write meta.json
 			tags := parseTags(tagFlags)
 			meta := core.RunMeta{
-				RunID:           runID,
-				Name:            nameFlag,
-				Tags:            tags,
-				Provider:        cfg.Defaults.Provider,
-				Model:           modelFlag,
-				SourceWorkspace: sourceWorkspace,
-				CreatedAt:       time.Now().UTC(),
+				RunID:             runID,
+				Name:              nameFlag,
+				Tags:              tags,
+				Provider:          cfg.Defaults.Provider,
+				Model:             modelFlag,
+				SourceWorkspace:   sourceWorkspace,
+				SourceFingerprint: sourceFingerprint,
+				CreatedAt:         time.Now().UTC(),
 			}
 			if meta.Model == "" {
 				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
@@ -319,6 +324,11 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
 				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
 				_ = loop.EmitRunEnd(reason)
+				if result, finalizeErr := finalizeSandboxRun(cfg, run, reason, mapper); finalizeErr != nil {
+					fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+finalizeErr.Error()))
+				} else if result != nil {
+					fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+				}
 				return nil
 			}
 			fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
@@ -351,6 +361,11 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 
 	_ = loop.EmitRunEnd(reason)
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
 	fmt.Println(ui.Dim("budget: " + budget.Summary()))
 	return nil
 }
@@ -484,5 +499,10 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
 	_ = loop.EmitRunEnd(reason)
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
 	return nil
 }

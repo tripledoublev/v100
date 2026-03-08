@@ -104,6 +104,84 @@ func TestLoopNetworkTier(t *testing.T) {
 	}
 }
 
+func TestFinalizeSandboxRunUsesStoredFingerprint(t *testing.T) {
+	cfg := testConfig()
+	cfg.Sandbox.Enabled = true
+	cfg.Sandbox.ApplyBack = "on_success"
+
+	runDir := t.TempDir()
+	tracePath := filepath.Join(runDir, "trace.jsonl")
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	sandboxDir := filepath.Join(t.TempDir(), "sandbox")
+
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sandboxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tracePath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sandboxDir, "file.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fingerprint, err := core.WorkspaceFingerprint(sourceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := core.WriteMeta(runDir, core.RunMeta{
+		RunID:             "run-1",
+		SourceWorkspace:   sourceDir,
+		SourceFingerprint: fingerprint,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("source-edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := finalizeSandboxRun(cfg, &core.Run{ID: "run-1", TraceFile: tracePath}, "user_exit", core.NewPathMapper(sourceDir, sandboxDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected sandbox finalize result")
+	}
+	if !result.Conflict {
+		t.Fatal("expected source fingerprint mismatch to block apply-back")
+	}
+	if result.SkippedReason != "source_workspace_changed" {
+		t.Fatalf("skipped_reason = %q, want source_workspace_changed", result.SkippedReason)
+	}
+}
+
+func TestRunReasonAllowsApplyBack(t *testing.T) {
+	tests := []struct {
+		reason string
+		want   bool
+	}{
+		{reason: "user_exit", want: true},
+		{reason: "completed", want: true},
+		{reason: "budget_steps", want: false},
+		{reason: "error", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := runReasonAllowsApplyBack(tt.reason); got != tt.want {
+			t.Fatalf("runReasonAllowsApplyBack(%q) = %v, want %v", tt.reason, got, tt.want)
+		}
+	}
+}
+
 func testConfig() *config.Config {
 	return config.DefaultConfig()
 }

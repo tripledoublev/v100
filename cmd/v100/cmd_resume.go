@@ -150,6 +150,11 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				}
 			}
 			_ = loop.EmitRunEnd(reason)
+			if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+				fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
+			} else if result != nil {
+				fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+			}
 			return nil
 		},
 	}

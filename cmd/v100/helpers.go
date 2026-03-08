@@ -137,6 +137,73 @@ func buildSnapshotManager(cfg *config.Config, workspace string) core.SnapshotMan
 	return core.NewWorkspaceSnapshotManager(workspace, filepath.Join(filepath.Dir(workspace), "snapshots"))
 }
 
+func sourceWorkspaceFingerprint(cfg *config.Config, sourceWorkspace string) (string, error) {
+	if cfg == nil || !cfg.Sandbox.Enabled {
+		return "", nil
+	}
+	return core.WorkspaceFingerprint(sourceWorkspace)
+}
+
+func finalizeSandboxRun(cfg *config.Config, run *core.Run, reason string, mapper *core.PathMapper) (*core.SandboxFinalizeResult, error) {
+	if cfg == nil || !cfg.Sandbox.Enabled || run == nil || mapper == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(mapper.HostRoot) == "" || strings.TrimSpace(mapper.SandboxRoot) == "" {
+		return nil, nil
+	}
+	if filepath.Clean(mapper.HostRoot) == filepath.Clean(mapper.SandboxRoot) {
+		return nil, nil
+	}
+
+	meta, err := core.ReadMeta(filepath.Dir(run.TraceFile))
+	if err != nil {
+		meta = core.RunMeta{}
+	}
+	result, err := core.FinalizeSandboxWorkspace(core.SandboxFinalizeOptions{
+		Mode:                cfg.Sandbox.ApplyBack,
+		Success:             runReasonAllowsApplyBack(reason),
+		SourceWorkspace:     mapper.HostRoot,
+		SandboxWorkspace:    mapper.SandboxRoot,
+		BaselineFingerprint: meta.SourceFingerprint,
+		ArtifactDir:         filepath.Join(filepath.Dir(run.TraceFile), "artifacts"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func runReasonAllowsApplyBack(reason string) bool {
+	switch reason {
+	case "user_exit", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func sandboxFinalizeMessage(result core.SandboxFinalizeResult) string {
+	total := len(result.Diff.Added) + len(result.Diff.Modified) + len(result.Diff.Deleted)
+	switch {
+	case result.Applied:
+		return fmt.Sprintf("sandbox apply-back complete: %d change(s) synced to source workspace", total)
+	case result.Conflict:
+		return fmt.Sprintf("sandbox apply-back blocked: source workspace changed; review %s", result.ArtifactPath)
+	case result.Mode == "manual":
+		return fmt.Sprintf("sandbox changes ready for review: %d change(s); see %s", total, result.ArtifactPath)
+	case result.Mode == "never":
+		return fmt.Sprintf("sandbox changes retained without apply-back: %d change(s); see %s", total, result.ArtifactPath)
+	case result.SkippedReason == "run_not_successful":
+		return fmt.Sprintf("sandbox apply-back skipped because the run did not end successfully; review %s", result.ArtifactPath)
+	case result.SkippedReason == "missing_source_fingerprint":
+		return fmt.Sprintf("sandbox apply-back skipped: missing source fingerprint; review %s", result.ArtifactPath)
+	case result.SkippedReason == "no_changes":
+		return "sandbox apply-back: no workspace changes"
+	default:
+		return fmt.Sprintf("sandbox apply-back skipped (%s); review %s", result.SkippedReason, result.ArtifactPath)
+	}
+}
+
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
 	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
 
