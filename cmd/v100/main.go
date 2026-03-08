@@ -66,6 +66,7 @@ func rootCmd() *cobra.Command {
 		benchCmd(&cfgPath),
 		experimentCmd(&cfgPath),
 		analyzeCmd(),
+		diffCmd(),
 		queryCmd(),
 	)
 	return root
@@ -2397,6 +2398,45 @@ func analyzeCmd() *cobra.Command {
 			for _, l := range report.Labels {
 				fmt.Printf("  [%s] %s (conf: %.2f)\n", ui.Warn(l.Name), l.Evidence, l.Confidence)
 			}
+			return nil
+		},
+	}
+}
+
+// ─────────────────────────────────────────
+// diff command
+// ─────────────────────────────────────────
+
+func diffCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "diff <run_id_a> <run_id_b>",
+		Short: "Find the point of divergence between two run traces",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runA := args[0]
+			runB := args[1]
+
+			eventsA, err := core.ReadAll(filepath.Join("runs", runA, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+			eventsB, err := core.ReadAll(filepath.Join("runs", runB, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+
+			diff := eval.DiffTraces(runA, runB, eventsA, eventsB)
+
+			fmt.Printf("Comparing %s vs %s\n", ui.Info(runA), ui.Info(runB))
+			if diff.DivergeType == "none" {
+				fmt.Println(ui.OK("No divergence detected. Traces are structurally identical."))
+				return nil
+			}
+
+			fmt.Printf("Divergence Type: %s\n", ui.Warn(diff.DivergeType))
+			fmt.Printf("Common Prefix:   %d events\n", diff.CommonPrefix)
+			fmt.Printf("Evidence:        %s\n", diff.DiffEvidence)
+
 			return nil
 		},
 	}

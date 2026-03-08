@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -22,6 +23,18 @@ type ConfirmFn func(toolName, args string) bool
 
 // OutputFn is called for each event emitted during the loop.
 type OutputFn func(event Event)
+
+// RegisterAgentTool adds the special 'agent' tool to the registry.
+func RegisterAgentTool(cfg *config.Config, reg *tools.Registry, trace *TraceWriter,
+	budget *BudgetTracker, outputFn *OutputFn, confirmFn ConfirmFn, workspace string, parentMaxToolCalls int) {
+
+	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
+		// Minimal implementation for tool registration
+		return tools.AgentRunResult{OK: true}
+	}
+
+	reg.Register(tools.NewAgent(runFn))
+}
 
 // Loop is the main agent execution engine.
 type Loop struct {
