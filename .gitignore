@@ -4,3 +4,4 @@ runs/
 /v100
 .gocache/
 *.local
+*.pdf
