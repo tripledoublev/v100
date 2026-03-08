@@ -735,7 +735,15 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 		case core.EventModelResp:
 			var p core.ModelRespPayload
 			_ = json.Unmarshal(ev.Payload, &p)
-			msgs = append(msgs, providers.Message{Role: "assistant", Content: p.Text})
+			var toolCalls []providers.ToolCall
+			for _, tc := range p.ToolCalls {
+				toolCalls = append(toolCalls, providers.ToolCall{
+					ID:   tc.ID,
+					Name: tc.Name,
+					Args: json.RawMessage(tc.ArgsJSON),
+				})
+			}
+			msgs = append(msgs, providers.Message{Role: "assistant", Content: p.Text, ToolCalls: toolCalls})
 
 		case core.EventToolResult:
 			var p core.ToolResultPayload

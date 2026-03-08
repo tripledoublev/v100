@@ -4,20 +4,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/core/executor"
+	"github.com/tripledoublev/v100/internal/policy"
+	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/tools"
 	"github.com/tripledoublev/v100/internal/ui"
 )
 
 func resumeCmd(cfgPath *string) *cobra.Command {
-	var tuiFlag bool
-	var workspaceFlag string
+	var (
+		tuiFlag      bool
+		tuiNoAltFlag bool
+		tuiPlainFlag bool
+		tuiDebugFlag bool
+		workspaceFlag string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "resume <run_id>",
@@ -103,66 +114,194 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			run.Dir = sandboxWorkspace
 			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
-			renderer := ui.NewCLIRenderer()
-			outputFn := core.OutputFn(renderer.RenderEvent)
-			registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), sandboxWorkspace, pol.MaxToolCallsPerStep, session, mapper)
-
-			loop := &core.Loop{
-				Run:           run,
-				Provider:      prov,
-				Tools:         reg,
-				Policy:        pol,
-				Trace:         trace,
-				Budget:        budget,
-				Messages:      msgs,
-				ConfirmFn:     buildConfirmFn(cfg.Defaults.ConfirmTools),
-				OutputFn:      outputFn,
-				Session:       session,
-				Mapper:        mapper,
-				ModelMetadata: metadata,
-				NetworkTier:   loopNetworkTier(cfg),
-				Snapshots:     buildSnapshotManager(cfg, sandboxWorkspace),
+			if tuiFlag {
+				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata)
 			}
-			loop.OutputFn = outputFn
-			persistModelMetadata(runDir, metadata)
-
-			fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", runID, len(events))))
-			fmt.Println(ui.Info(ui.Dim("workspace: ") + sandboxWorkspace))
-			_ = model
-			_ = tuiFlag
-
-			ctx := context.Background()
-			reason := "user_exit"
-			for {
-				input, err := ui.Prompt("")
-				if err != nil {
-					break
-				}
-				input = strings.TrimSpace(input)
-				if input == "" {
-					continue
-				}
-				if err := loop.Step(ctx, input); err != nil {
-					var budgetErr *core.ErrBudgetExceeded
-					if errors.As(err, &budgetErr) {
-						reason = "budget_exceeded"
-						break
-					}
-					fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				}
-			}
-			_ = loop.EmitRunEnd(reason)
-			if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
-				fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
-			} else if result != nil {
-				fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
-			}
-			return nil
+			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, session, mapper, metadata)
 		},
 	}
-	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable TUI")
+	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable Bubble Tea TUI")
+	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
+	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
+	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
 	return cmd
+}
+
+func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
+
+	renderer := ui.NewCLIRenderer()
+	outputFn := core.OutputFn(renderer.RenderEvent)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), workspace, pol.MaxToolCallsPerStep, session, mapper)
+
+	loop := &core.Loop{
+		Run:           run,
+		Provider:      prov,
+		Tools:         reg,
+		Policy:        pol,
+		Trace:         trace,
+		Budget:        budget,
+		Messages:      msgs,
+		ConfirmFn:     buildConfirmFn(cfg.Defaults.ConfirmTools),
+		OutputFn:      outputFn,
+		Session:       session,
+		Mapper:        mapper,
+		ModelMetadata: metadata,
+		NetworkTier:   loopNetworkTier(cfg),
+		Snapshots:     buildSnapshotManager(cfg, workspace),
+	}
+	loop.OutputFn = outputFn
+	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
+
+	fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", run.ID, len(events))))
+	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
+
+	ctx := context.Background()
+	reason := "user_exit"
+	for {
+		input, err := ui.Prompt("")
+		if err != nil {
+			break
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
+		}
+		if input == "/quit" || input == "/exit" {
+			break
+		}
+		if err := loop.Step(ctx, input); err != nil {
+			var budgetErr *core.ErrBudgetExceeded
+			if errors.As(err, &budgetErr) {
+				reason = "budget_exceeded"
+				break
+			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+	}
+	_ = loop.EmitRunEnd(reason)
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
+	return nil
+}
+
+func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
+
+	var logger *log.Logger
+	if debug {
+		logPath := filepath.Join(filepath.Dir(run.TraceFile), "tui.resume.debug.log")
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err == nil {
+			defer func() { _ = f.Close() }()
+			logger = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
+			logger.Printf("resume run_id=%s provider=%s model=%s alt=%t plain=%t", run.ID, prov.Name(), model, useAltScreen, plainTTY)
+		}
+	}
+
+	var tui *ui.TUI
+	ctx := context.Background()
+	reason := "user_exit"
+
+	var loop *core.Loop
+
+	submitFn := func(input string) {
+		if logger != nil {
+			logger.Printf("submit input_len=%d", len(input))
+		}
+		inputTrim := strings.TrimSpace(input)
+		if inputTrim == "/quit" || inputTrim == "/exit" {
+			reason = "user_exit"
+			tui.Quit()
+			return
+		}
+		if err := loop.Step(ctx, input); err != nil {
+			if logger != nil {
+				logger.Printf("step error: %v", err)
+			}
+			var budgetErr *core.ErrBudgetExceeded
+			if errors.As(err, &budgetErr) {
+				_ = loop.EmitRunEnd("budget_exceeded")
+				tui.Quit()
+			}
+		}
+	}
+
+	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
+
+	confirmFn := func(toolName, args string) bool {
+		if cfg.Defaults.ConfirmTools == "never" {
+			return true
+		}
+		if cfg.Defaults.ConfirmTools == "always" || (cfg.Defaults.ConfirmTools == "dangerous" && reg.IsDangerous(toolName)) {
+			return tui.RequestConfirm(toolName, args)
+		}
+		return true
+	}
+
+	tuiOutputFn := core.OutputFn(func(ev core.Event) { tui.SendEvent(ev) })
+	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
+
+	loop = &core.Loop{
+		Run:           run,
+		Provider:      prov,
+		Tools:         reg,
+		Policy:        pol,
+		Trace:         trace,
+		Budget:        budget,
+		Messages:      msgs,
+		ConfirmFn:     confirmFn,
+		OutputFn:      tuiOutputFn,
+		Session:       session,
+		Mapper:        mapper,
+		ModelMetadata: metadata,
+		NetworkTier:   loopNetworkTier(cfg),
+		Snapshots:     buildSnapshotManager(cfg, workspace),
+	}
+	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
+
+	// Start Bubble Tea first: Program.Send blocks before Run initializes.
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- tui.Run()
+	}()
+
+	// Feed historical events into TUI
+	go func() {
+		time.Sleep(100 * time.Millisecond) // Give TUI a moment to start
+		for _, ev := range events {
+			tui.SendEvent(ev)
+		}
+		if logger != nil {
+			logger.Printf("fed %d historical events to TUI", len(events))
+		}
+	}()
+
+	if err := <-runErrCh; err != nil {
+		if logger != nil {
+			logger.Printf("tui run error: %v", err)
+		}
+		return err
+	}
+
+	if logger != nil {
+		logger.Printf("tui loop ended reason=%s", reason)
+	}
+	_ = loop.EmitRunEnd(reason)
+
+	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
+		if logger != nil {
+			logger.Printf("sandbox finalize error: %v", err)
+		}
+	} else if result != nil {
+		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
+	}
+
+	return nil
 }
 
 func resolveResumeSourceWorkspace(workspaceFlag, runDir, tracedWorkspace string, meta core.RunMeta) string {
