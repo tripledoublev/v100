@@ -9,19 +9,19 @@ import (
 
 // TraceDiff identifies the point and nature of divergence between two runs.
 type TraceDiff struct {
-	RunA          string
-	RunB          string
-	DivergeStep   int
-	DivergeType   string // "tool_choice", "tool_args", "plan_diff", "none"
-	CommonPrefix  int    // number of identical events
-	DiffEvidence  string
+	RunA         string
+	RunB         string
+	DivergeStep  int
+	DivergeType  string // "tool_choice", "tool_args", "plan_diff", "none"
+	CommonPrefix int    // number of identical events
+	DiffEvidence string
 }
 
 // DiffTraces compares two trajectories to find the first meaningful divergence.
 func DiffTraces(runA, runB string, eventsA, eventsB []core.Event) TraceDiff {
 	diff := TraceDiff{
-		RunA: runA,
-		RunB: runB,
+		RunA:        runA,
+		RunB:        runB,
 		DivergeType: "none",
 	}
 
@@ -59,7 +59,7 @@ func DiffTraces(runA, runB string, eventsA, eventsB []core.Event) TraceDiff {
 				diff.DiffEvidence = fmt.Sprintf("Tool %s args differ", pA.Name)
 				return diff
 			}
-		
+
 		case core.EventSolverPlan:
 			var pA, pB map[string]string
 			_ = json.Unmarshal(evA.Payload, &pA)

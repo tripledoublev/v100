@@ -26,26 +26,26 @@ type OutputFn func(event Event)
 
 // Loop is the main agent execution engine.
 type Loop struct {
-	Run         *Run
-	Provider    providers.Provider
-	Tools       *tools.Registry
-	Policy      *policy.Policy
-	Trace       *TraceWriter
-	Budget      *BudgetTracker
-	Messages    []providers.Message
-	ConfirmFn   ConfirmFn
-	OutputFn    OutputFn
-	GenParams   providers.GenParams
+	Run           *Run
+	Provider      providers.Provider
+	Tools         *tools.Registry
+	Policy        *policy.Policy
+	Trace         *TraceWriter
+	Budget        *BudgetTracker
+	Messages      []providers.Message
+	ConfirmFn     ConfirmFn
+	OutputFn      OutputFn
+	GenParams     providers.GenParams
 	Solver        Solver
 	Session       executor.Session
 	Mapper        *PathMapper
 	ModelMetadata providers.ModelMetadata
 	NetworkTier   string
 
-	Snapshots   SnapshotManager
-	stepCount   int // running step counter for step.summary events
-	ended       bool
-	mu          sync.Mutex
+	Snapshots SnapshotManager
+	stepCount int // running step counter for step.summary events
+	ended     bool
+	mu        sync.Mutex
 }
 
 // Step processes a single user input through the full model + tool execution cycle.

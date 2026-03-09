@@ -9,7 +9,7 @@ import (
 func TestVectorStore_AddAndLoad(t *testing.T) {
 	runID := "test-run-mem"
 	tmpDir := t.TempDir()
-	
+
 	// Override default path logic for testing
 	s := &VectorStore{
 		runID:   runID,

@@ -30,9 +30,9 @@ const (
 	GeminiRedirectURI = "http://127.0.0.1:8085/oauth2callback"
 	GeminiScopes      = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
 
-	MiniMaxCodeURL  = "https://api.minimax.io/oauth/code"
-	MiniMaxTokenURL = "https://api.minimax.io/oauth/token"
-	MiniMaxScopes   = "group_id profile model.completion"
+	MiniMaxCodeURL   = "https://api.minimax.io/oauth/code"
+	MiniMaxTokenURL  = "https://api.minimax.io/oauth/token"
+	MiniMaxScopes    = "group_id profile model.completion"
 	MiniMaxGrantType = "urn:ietf:params:oauth:grant-type:user_code"
 
 	// MiniMaxDefaultClientID is the public Client ID for the MiniMax Coding Plan.
@@ -499,10 +499,10 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 		_ = tokenResp.Body.Close()
 
 		var tok struct {
-			Status      string `json:"status"`
-			AccessToken string `json:"access_token"`
+			Status       string `json:"status"`
+			AccessToken  string `json:"access_token"`
 			RefreshToken string `json:"refresh_token"`
-			ExpiredIn   int64  `json:"expired_in"` // unix timestamp
+			ExpiredIn    int64  `json:"expired_in"` // unix timestamp
 		}
 		if err := json.Unmarshal(tokenRaw, &tok); err != nil {
 			continue

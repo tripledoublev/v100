@@ -185,12 +185,12 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	budgetAfter := l.Budget.Budget()
 	l.stepCount++
 	_, _ = l.emit(EventStepSummary, stepID, StepSummaryPayload{
-		StepNumber:   l.stepCount,
-		InputTokens:  budgetAfter.UsedTokens - budgetBefore.UsedTokens,
-		CostUSD:      budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
-		ToolCalls:    toolCallsUsed,
-		ModelCalls:   modelCalls,
-		DurationMS:   time.Since(stepStart).Milliseconds(),
+		StepNumber:  l.stepCount,
+		InputTokens: budgetAfter.UsedTokens - budgetBefore.UsedTokens,
+		CostUSD:     budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
+		ToolCalls:   toolCallsUsed,
+		ModelCalls:  modelCalls,
+		DurationMS:  time.Since(stepStart).Milliseconds(),
 	})
 
 	_ = l.Budget.AddStep()

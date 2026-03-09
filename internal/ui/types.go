@@ -56,31 +56,31 @@ type TUIModel struct {
 	transcriptBuf strings.Builder
 	traceBuf      strings.Builder
 
-	focus         focus
-	showTrace     bool
-	showStatus    bool
-	pendConfirm   *confirmState
-	statusMode    string
-	statusLine    string
-	statusTick    int
-	runSummary    string
-	leftPanePct   int
-	tracePanePct  int
-	verbose       bool
-	
+	focus        focus
+	showTrace    bool
+	showStatus   bool
+	pendConfirm  *confirmState
+	statusMode   string
+	statusLine   string
+	statusTick   int
+	runSummary   string
+	leftPanePct  int
+	tracePanePct int
+	verbose      bool
+
 	// mascot line offset for reactive updates
 	mascotStartLine int
-	radioURL      string
-	radioPlayer   string
-	radioVolume   int
-	radioPlaying  bool
-	radioWave     string
-	radioErr      string
-	radioStep     int
-	radioCmd      *exec.Cmd
-	radioArtist   string
-	radioTitle    string
-	radioLastPoll time.Time
+	radioURL        string
+	radioPlayer     string
+	radioVolume     int
+	radioPlaying    bool
+	radioWave       string
+	radioErr        string
+	radioStep       int
+	radioCmd        *exec.Cmd
+	radioArtist     string
+	radioTitle      string
+	radioLastPoll   time.Time
 
 	copyTargets    []copyTarget
 	plainBuf       strings.Builder // plain-text transcript for full-copy

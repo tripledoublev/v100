@@ -80,20 +80,20 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop = &core.Loop{
-		Run:           run,
-		Provider:      prov,
-		Tools:         reg,
-		Policy:        pol,
-		Trace:         trace,
-		Budget:        budget,
-		ConfirmFn:     confirmFn,
-		OutputFn:      tuiOutputFn,
-		GenParams:     genParams,
-		Solver:        solver,
-		Session:       session,
-		Mapper:        mapper,
-		NetworkTier:   loopNetworkTier(cfg),
-		Snapshots:     buildSnapshotManager(cfg, workspace),
+		Run:         run,
+		Provider:    prov,
+		Tools:       reg,
+		Policy:      pol,
+		Trace:       trace,
+		Budget:      budget,
+		ConfirmFn:   confirmFn,
+		OutputFn:    tuiOutputFn,
+		GenParams:   genParams,
+		Solver:      solver,
+		Session:     session,
+		Mapper:      mapper,
+		NetworkTier: loopNetworkTier(cfg),
+		Snapshots:   buildSnapshotManager(cfg, workspace),
 	}
 
 	// metadata auto-discovery
