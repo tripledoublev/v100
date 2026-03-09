@@ -267,7 +267,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
-	cmd.Flags().BoolVar(&verboseFlag, "verbose", false, "show full tool call details and verbose output")
+	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
@@ -347,7 +347,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			if errors.As(err, &budgetErr) {
 				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
 				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
-				_ = loop.EmitRunEnd(reason)
+				_ = loop.EmitRunEnd(reason, "")
 				return nil
 			}
 			fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
@@ -379,7 +379,27 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 	}
 
-	_ = loop.EmitRunEnd(reason)
+	// Generate summary if possible
+	finalSummary := ""
+	if len(loop.Messages) > 1 {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		sumProv, _ := buildProvider(cfg, "gemini")
+		if sumProv != nil {
+			sumReq := providers.CompleteRequest{
+				Model: "gemini-2.5-flash",
+				Messages: append(loop.Messages, providers.Message{
+					Role:    "user",
+					Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
+				}),
+			}
+			if resp, err := sumProv.Complete(ctx, sumReq); err == nil {
+				finalSummary = strings.TrimSpace(resp.AssistantText)
+			}
+		}
+	}
+
+	_ = loop.EmitRunEnd(reason, finalSummary)
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))

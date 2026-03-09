@@ -109,6 +109,10 @@ func (m *TUIModel) View() string {
 			statusPane := statusSt.Width(rightW).Height(statusH).Render(m.statusView(rightW, statusH))
 			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, statusPane)
 		}
+		if m.showMetrics {
+			metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps, m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens, m.usedCost, m.maxCost, rightW)
+			rightCol = lipgloss.JoinVertical(lipgloss.Left, rightCol, tuiPaneStyle.Width(rightW).Render(metricsView))
+		}
 
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", rightCol)
 		view := lipgloss.JoinVertical(lipgloss.Left, header, panes, inputBox)

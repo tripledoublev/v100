@@ -64,11 +64,23 @@ type TUIModel struct {
 	statusLine   string
 	statusTick   int
 	runSummary   string
-	leftPanePct  int
-	tracePanePct int
-	verbose      bool
+	leftPanePct   int
+	tracePanePct  int
+	verbose       bool
+	showMetrics   bool
+
+	// live metrics state
+	currentStep  int
+	maxSteps     int
+	usedTokens   int
+	maxTokens    int
+	inputTokens  int
+	outputTokens int
+	usedCost     float64
+	maxCost      float64
 
 	// mascot line offset for reactive updates
+
 	mascotStartLine int
 	radioURL        string
 	radioPlayer     string

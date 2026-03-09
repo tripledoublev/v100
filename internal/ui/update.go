@@ -92,6 +92,8 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showStatus && m.focus == focusStatus {
 				m.focus = focusTrace
 			}
+		case "ctrl+m":
+			m.showMetrics = !m.showMetrics
 		case "ctrl+a":
 			if err := copyToClipboard(m.plainBuf.String()); err != nil {
 				m.statusLine = "copy failed: " + err.Error()

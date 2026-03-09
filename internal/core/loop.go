@@ -471,7 +471,7 @@ func (l *Loop) EmitRunStart(payload RunStartPayload) error {
 }
 
 // EmitRunEnd records the run.end event.
-func (l *Loop) EmitRunEnd(reason string) error {
+func (l *Loop) EmitRunEnd(reason, summary string) error {
 	l.mu.Lock()
 	if l.ended {
 		l.mu.Unlock()
@@ -485,6 +485,7 @@ func (l *Loop) EmitRunEnd(reason string) error {
 		Reason:     reason,
 		UsedSteps:  b.UsedSteps,
 		UsedTokens: b.UsedTokens,
+		Summary:    summary,
 	})
 	return err
 }

@@ -292,10 +292,10 @@ func TestEmitRunEndIdempotency(t *testing.T) {
 	loop, trace := newTestLoop(t, prov, nil)
 	defer func() { _ = trace.Close() }()
 
-	if err := loop.EmitRunEnd("reason1"); err != nil {
+	if err := loop.EmitRunEnd("reason1", "summary1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := loop.EmitRunEnd("reason2"); err != nil {
+	if err := loop.EmitRunEnd("reason2", "summary2"); err != nil {
 		t.Fatal(err)
 	}
 

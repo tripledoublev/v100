@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+const (
+	maxOutputLines = 3
+	maxOutputChars = 120
+)
+
 func clampInt(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -96,4 +101,24 @@ func FormatDuration(ms int64) string {
 		return fmt.Sprintf("%dm", min)
 	}
 	return fmt.Sprintf("%dm%ds", min, rem)
+}
+
+// TruncateOutput truncates a string if it exceeds maxOutputLines or maxOutputChars
+// when not in verbose mode. It also replaces newlines with " ↵ " for single-line display.
+func TruncateOutput(s string, verbose bool) string {
+	if verbose {
+		return strings.ReplaceAll(s, "\n", " ↵ ")
+	}
+
+	lines := strings.Split(s, "\n")
+	if len(lines) > maxOutputLines {
+		s = strings.Join(lines[:maxOutputLines], "\n") + "\n..."
+	}
+
+	runes := []rune(s)
+	if len(runes) > maxOutputChars {
+		s = string(runes[:maxOutputChars]) + "..."
+	}
+
+	return strings.ReplaceAll(s, "\n", " ↵ ")
 }

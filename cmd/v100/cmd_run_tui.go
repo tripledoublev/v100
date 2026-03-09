@@ -57,7 +57,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
-				_ = loop.EmitRunEnd("budget_exceeded")
+				_ = loop.EmitRunEnd("budget_exceeded", "")
 				tui.Quit()
 			}
 		}
@@ -144,7 +144,28 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	if logger != nil {
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
-	_ = loop.EmitRunEnd(reason)
+
+	// Generate summary if possible
+	finalSummary := ""
+	if len(loop.Messages) > 1 {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		sumProv, _ := buildProvider(cfg, "gemini")
+		if sumProv != nil {
+			sumReq := providers.CompleteRequest{
+				Model: "gemini-2.5-flash",
+				Messages: append(loop.Messages, providers.Message{
+					Role:    "user",
+					Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
+				}),
+			}
+			if resp, err := sumProv.Complete(ctx, sumReq); err == nil {
+				finalSummary = strings.TrimSpace(resp.AssistantText)
+			}
+		}
+	}
+
+	_ = loop.EmitRunEnd(reason, finalSummary)
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		if logger != nil {

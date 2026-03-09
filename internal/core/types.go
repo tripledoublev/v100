@@ -205,6 +205,7 @@ type RunEndPayload struct {
 	Reason     string `json:"reason"` // "user_exit", "budget_steps", "budget_tokens", "budget_cost", "error"
 	UsedSteps  int    `json:"used_steps"`
 	UsedTokens int    `json:"used_tokens"`
+	Summary    string `json:"summary,omitempty"`
 }
 
 // AgentStartPayload is the Payload for EventAgentStart.

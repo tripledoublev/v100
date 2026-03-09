@@ -20,6 +20,12 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		// Initialize metrics metadata
+		m.maxSteps = 50 // default fallback
+		m.maxTokens = p.ModelMetadata.ContextSize
+		if m.maxTokens == 0 {
+			m.maxTokens = 100000 // fallback
+		}
 		if !sub {
 			m.transcriptBuf.WriteString(
 				stylePrimary.Render("v100") +
@@ -58,10 +64,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", p.Text)
 		}
 		for _, tc := range p.ToolCalls {
-			args := m.wrapPlainForTranscript(tc.ArgsJSON)
-			if !m.verbose && len(args) > 60 {
-				args = args[:57] + "..."
-			}
+			args := TruncateOutput(tc.ArgsJSON, m.verbose)
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(tc.Name), styleMuted.Render("("+args+")"))
 		}
 
@@ -80,15 +83,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if !p.OK {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
 		}
-		out := p.Output
-		limit := 200
-		if !m.verbose {
-			limit = 80
-		}
-		if len(out) > limit {
-			out = out[:limit-3] + "..."
-		}
-		out = strings.ReplaceAll(out, "\n", " ↵ ")
+		out := TruncateOutput(p.Output, m.verbose)
 		out = m.wrapPlainForTranscript(out)
 		_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s  %s  %s\n", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)), out)
 
@@ -97,7 +92,13 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d", p.Reason, p.UsedSteps, p.UsedTokens)))
+			if p.Summary != "" {
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n", styleInfo.Render("Summary: "+p.Summary))
+			}
 			_, _ = fmt.Fprintf(&m.plainBuf, "\n■ run ended: %s  steps=%d  tokens=%d\n", p.Reason, p.UsedSteps, p.UsedTokens)
+			if p.Summary != "" {
+				_, _ = fmt.Fprintf(&m.plainBuf, "Summary: %s\n", p.Summary)
+			}
 		}
 
 	case core.EventRunError:
@@ -162,6 +163,15 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"))
 			_, _ = fmt.Fprintf(&m.plainBuf, "  ⎿  Failed (%s)\n", summary)
 		}
+
+	case core.EventStepSummary:
+		var p core.StepSummaryPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.currentStep = p.StepNumber
+		m.inputTokens = p.InputTokens
+		m.outputTokens = p.OutputTokens
+		m.usedTokens = p.InputTokens + p.OutputTokens
+		m.usedCost = p.CostUSD
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.

@@ -64,10 +64,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			)
 		}
 		for _, tc := range p.ToolCalls {
-			args := tc.ArgsJSON
-			if !r.Verbose && len(args) > 60 {
-				args = args[:57] + "..."
-			}
+			args := TruncateOutput(tc.ArgsJSON, r.Verbose)
 			fmt.Printf("           %s %s%s\n",
 				styleTool.Render("⚙"),
 				styleTool.Render(tc.Name),
@@ -127,15 +124,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			icon = styleFail.Render("✗")
 			statusStyle = styleFail.Render(p.Name)
 		}
-		out := p.Output
-		limit := 200
-		if !r.Verbose {
-			limit = 80
-		}
-		if len(out) > limit {
-			out = out[:limit-3] + "..."
-		}
-		out = strings.ReplaceAll(out, "\n", " ↵ ")
+		out := TruncateOutput(p.Output, r.Verbose)
 		fmt.Printf("           %s %s  %s  %s\n",
 			icon,
 			statusStyle,
@@ -156,6 +145,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		fmt.Printf("\n%s\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+		if p.Summary != "" {
+			fmt.Printf("%s\n", styleInfo.Render("Summary: "+p.Summary))
+		}
 
 	case core.EventAgentStart:
 		var p core.AgentStartPayload

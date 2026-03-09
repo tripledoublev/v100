@@ -270,7 +270,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					if err := loop.Step(ctx, prompt.Message); err != nil {
 						reason = "error"
 					}
-					_ = loop.EmitRunEnd(reason)
+					_ = loop.EmitRunEnd(reason, "")
 
 					_, _ = finalizeSandboxRun(cfg, coreRun, reason, s_mapper)
 
@@ -538,7 +538,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						reason = "error"
 						fmt.Printf("  warning: run %s ended with error: %v\n", runID, err)
 					}
-					_ = loop.EmitRunEnd(reason)
+					_ = loop.EmitRunEnd(reason, "")
 
 					_, _ = finalizeSandboxRun(cfg, coreRun, reason, s_mapper)
 

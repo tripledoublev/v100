@@ -224,7 +224,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
 	}
-	_ = loop.EmitRunEnd(reason)
+	_ = loop.EmitRunEnd(reason, "")
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
 	} else if result != nil {
@@ -269,7 +269,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
-				_ = loop.EmitRunEnd("budget_exceeded")
+				_ = loop.EmitRunEnd("budget_exceeded", "")
 				tui.Quit()
 			}
 		}
@@ -335,7 +335,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	if logger != nil {
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
-	_ = loop.EmitRunEnd(reason)
+	_ = loop.EmitRunEnd(reason, "")
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		if logger != nil {
