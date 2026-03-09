@@ -2,14 +2,16 @@ package policy
 
 // Policy holds the runtime policy for an agent run.
 type Policy struct {
-	Name                string
-	SystemPrompt        string
-	MaxToolCallsPerStep int
-	ToolTimeoutMS       int
-	MemoryPath          string // path to MEMORY.md in workspace; injected into every buildMessages call
-	ContextLimit        int    // estimated token threshold for compression (0 = disabled)
-	Streaming           bool   // enable streaming for providers that support it
-	ReflectOnDangerous  bool   // if true, run an extra model call to assess confidence before dangerous tool execution
+	Name                  string
+	SystemPrompt          string
+	MaxToolCallsPerStep   int
+	ToolTimeoutMS         int
+	MemoryPath            string // path to MEMORY.md in workspace; injected into every buildMessages call
+	ContextLimit          int    // estimated token threshold for compression (0 = disabled)
+	MaxToolResultChars    int    // hard truncation limit for tool results (0 = disabled)
+	CompressProtectRecent int    // recent messages protected from compression (default 6)
+	Streaming             bool   // enable streaming for providers that support it
+	ReflectOnDangerous    bool   // if true, run an extra model call to assess confidence before dangerous tool execution
 }
 
 // DefaultSystemPrompt is the built-in "agent that builds the agent" prompt.

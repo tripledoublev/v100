@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,21 +27,22 @@ type OutputFn func(event Event)
 
 // Loop is the main agent execution engine.
 type Loop struct {
-	Run           *Run
-	Provider      providers.Provider
-	Tools         *tools.Registry
-	Policy        *policy.Policy
-	Trace         *TraceWriter
-	Budget        *BudgetTracker
-	Messages      []providers.Message
-	ConfirmFn     ConfirmFn
-	OutputFn      OutputFn
-	GenParams     providers.GenParams
-	Solver        Solver
-	Session       executor.Session
-	Mapper        *PathMapper
-	ModelMetadata providers.ModelMetadata
-	NetworkTier   string
+	Run              *Run
+	Provider         providers.Provider
+	CompressProvider providers.Provider // cheap model for summarization; nil = use l.Provider
+	Tools            *tools.Registry
+	Policy           *policy.Policy
+	Trace            *TraceWriter
+	Budget           *BudgetTracker
+	Messages         []providers.Message
+	ConfirmFn        ConfirmFn
+	OutputFn         OutputFn
+	GenParams        providers.GenParams
+	Solver           Solver
+	Session          executor.Session
+	Mapper           *PathMapper
+	ModelMetadata    providers.ModelMetadata
+	NetworkTier      string
 
 	Snapshots SnapshotManager
 	stepCount int // running step counter for step.summary events
@@ -267,6 +269,10 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if !result.OK {
 		content = "ERROR: " + result.Output
 	}
+	// Layer 0: inline truncation of oversized tool results
+	if l.Policy != nil && l.Policy.MaxToolResultChars > 0 {
+		content = TruncateToolResult(content, l.Policy.MaxToolResultChars)
+	}
 	l.Messages = append(l.Messages, providers.Message{
 		Role:       "tool",
 		Content:    content,
@@ -374,36 +380,152 @@ func (l *Loop) buildMessages() []providers.Message {
 	return msgs
 }
 
+// compressProvider returns the provider to use for compression calls.
+func (l *Loop) compressProvider() providers.Provider {
+	if l.CompressProvider != nil {
+		return l.CompressProvider
+	}
+	return l.Provider
+}
+
+// TruncateToolResult applies head+tail truncation to oversized tool results.
+// If maxChars <= 0 or len(content) <= maxChars, content is returned as-is.
+func TruncateToolResult(content string, maxChars int) string {
+	if maxChars <= 0 || len(content) <= maxChars {
+		return content
+	}
+	keep := maxChars * 2 / 5
+	head := content[:keep]
+	tail := content[len(content)-keep:]
+	trimmed := len(content) - 2*keep
+	return head + fmt.Sprintf("\n\n[... truncated %d chars ...]\n\n", trimmed) + tail
+}
+
+// estimateTokensSingle returns the estimated token count for a single message.
+func estimateTokensSingle(m providers.Message) int {
+	n := 4 // per-message framing (role markers, separators)
+	n += len(m.Content)*10/33 + 1
+	for _, tc := range m.ToolCalls {
+		n += 10 // tool call framing (id, name, type fields)
+		n += len(tc.Args)*10/33 + 1
+	}
+	return n
+}
+
 // estimateTokens returns an estimated token count for a message slice.
 // Uses ~3.3 chars/token (more accurate than len/4 for mixed code/text) plus
 // per-message framing overhead and tool call structure tokens.
 func estimateTokens(msgs []providers.Message) int {
 	n := 0
 	for _, m := range msgs {
-		n += 4 // per-message framing (role markers, separators)
-		n += len(m.Content)*10/33 + 1
-		for _, tc := range m.ToolCalls {
-			n += 10 // tool call framing (id, name, type fields)
-			n += len(tc.Args)*10/33 + 1
-		}
+		n += estimateTokensSingle(m)
 	}
 	return n
 }
 
-// maybeCompress compresses the oldest half of l.Messages when estimated tokens exceed
-// 3/4 of the configured context limit, using a dedicated summarization call.
+// maybeCompress implements a two-pass compression strategy:
+//   - Pass 1 (targeted): compress the N largest non-recent messages individually
+//   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
 func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
-	msgs := l.buildMessages()
-	tokensBefore := estimateTokens(msgs)
-	if tokensBefore < l.Policy.ContextLimit*3/4 {
+	tokensBefore := estimateTokens(l.buildMessages())
+	threshold := l.Policy.ContextLimit * 3 / 4
+	if tokensBefore < threshold {
 		return nil
 	}
 
+	msgsBefore := len(l.Messages)
+
+	// ── Pass 1: Targeted per-message compression ──────────────────────────
+	protectRecent := 6
+	if l.Policy != nil && l.Policy.CompressProtectRecent > 0 {
+		protectRecent = l.Policy.CompressProtectRecent
+	}
+
+	compressible := len(l.Messages) - protectRecent
+	if compressible < 1 {
+		compressible = 0
+	}
+
+	// Find large non-protected messages
+	type candidate struct {
+		idx    int
+		tokens int
+	}
+	var candidates []candidate
+	for i := 0; i < compressible; i++ {
+		t := estimateTokensSingle(l.Messages[i])
+		if t > 500 {
+			candidates = append(candidates, candidate{idx: i, tokens: t})
+		}
+	}
+
+	// Sort by token count descending
+	sort.Slice(candidates, func(a, b int) bool {
+		return candidates[a].tokens > candidates[b].tokens
+	})
+
+	var totalCompressCost float64
+	compressed := 0
+	cp := l.compressProvider()
+
+	for _, c := range candidates {
+		m := l.Messages[c.idx]
+		summaryReq := providers.CompleteRequest{
+			RunID: l.Run.ID,
+			Messages: []providers.Message{
+				{
+					Role:    "system",
+					Content: "Summarize the following message content in a dense, compact form. Preserve key facts, file paths, decisions, and results. Remove verbatim content and repetition. Be very concise.",
+				},
+				{
+					Role:    "user",
+					Content: m.Content,
+				},
+			},
+		}
+		resp, err := cp.Complete(ctx, summaryReq)
+		if err != nil {
+			continue // skip this message, try next
+		}
+
+		_ = l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		_ = l.Budget.AddCost(resp.Usage.CostUSD)
+		totalCompressCost += resp.Usage.CostUSD
+
+		// Replace content in-place, preserving metadata
+		l.Messages[c.idx].Content = "[compressed] " + resp.AssistantText
+		compressed++
+
+		// Check if we're below threshold now
+		if estimateTokens(l.buildMessages()) < threshold {
+			break
+		}
+	}
+
+	if compressed > 0 {
+		tokensAfter := estimateTokens(l.buildMessages())
+		_, _ = l.emit(EventCompress, stepID, CompressPayload{
+			MessagesBefore:     msgsBefore,
+			MessagesAfter:      len(l.Messages),
+			TokensBefore:       tokensBefore,
+			TokensAfter:        tokensAfter,
+			CostUSD:            totalCompressCost,
+			Strategy:           "targeted",
+			MessagesCompressed: compressed,
+		})
+
+		if tokensAfter < threshold {
+			return nil
+		}
+		// Update tokensBefore for pass 2
+		tokensBefore = tokensAfter
+	}
+
+	// ── Pass 2: Bulk fallback (oldest-half summarization) ─────────────────
 	cutoff := len(l.Messages) / 2
 	if cutoff < 4 {
 		return nil // too short to compress meaningfully
 	}
-	msgsBefore := len(l.Messages)
 	toSummarize := l.Messages[:cutoff]
 
 	summaryReq := providers.CompleteRequest{
@@ -416,12 +538,11 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			toSummarize...,
 		),
 	}
-	resp, err := l.Provider.Complete(ctx, summaryReq)
+	resp, err := cp.Complete(ctx, summaryReq)
 	if err != nil {
 		return err
 	}
 
-	// Account for compression tokens against the budget.
 	_ = l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens)
 	_ = l.Budget.AddCost(resp.Usage.CostUSD)
 
@@ -438,6 +559,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		TokensBefore:   tokensBefore,
 		TokensAfter:    tokensAfter,
 		CostUSD:        resp.Usage.CostUSD,
+		Strategy:       "bulk",
 	})
 	return nil
 }

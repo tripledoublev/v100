@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -180,20 +179,21 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop := &core.Loop{
-		Run:           run,
-		Provider:      prov,
-		Tools:         reg,
-		Policy:        pol,
-		Trace:         trace,
-		Budget:        budget,
-		Messages:      msgs,
-		ConfirmFn:     buildConfirmFn(cfg.Defaults.ConfirmTools),
-		OutputFn:      outputFn,
-		Session:       session,
-		Mapper:        mapper,
-		ModelMetadata: metadata,
-		NetworkTier:   loopNetworkTier(cfg),
-		Snapshots:     buildSnapshotManager(cfg, workspace),
+		Run:              run,
+		Provider:         prov,
+		CompressProvider: buildCompressProvider(cfg),
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		Messages:         msgs,
+		ConfirmFn:        buildConfirmFn(cfg.Defaults.ConfirmTools),
+		OutputFn:         outputFn,
+		Session:          session,
+		Mapper:           mapper,
+		ModelMetadata:    metadata,
+		NetworkTier:      loopNetworkTier(cfg),
+		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 	loop.OutputFn = outputFn
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
@@ -291,32 +291,35 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop = &core.Loop{
-		Run:           run,
-		Provider:      prov,
-		Tools:         reg,
-		Policy:        pol,
-		Trace:         trace,
-		Budget:        budget,
-		Messages:      msgs,
-		ConfirmFn:     confirmFn,
-		OutputFn:      tuiOutputFn,
-		Session:       session,
-		Mapper:        mapper,
-		ModelMetadata: metadata,
-		NetworkTier:   loopNetworkTier(cfg),
-		Snapshots:     buildSnapshotManager(cfg, workspace),
+		Run:              run,
+		Provider:         prov,
+		CompressProvider: buildCompressProvider(cfg),
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		Messages:         msgs,
+		ConfirmFn:        confirmFn,
+		OutputFn:         tuiOutputFn,
+		Session:          session,
+		Mapper:           mapper,
+		ModelMetadata:    metadata,
+		NetworkTier:      loopNetworkTier(cfg),
+		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
-	// Start Bubble Tea first: Program.Send blocks before Run initializes.
+	// Start Bubble Tea first: Program.Send blocks until Run() starts the event loop.
 	runErrCh := make(chan error, 1)
 	go func() {
 		runErrCh <- tui.Run()
 	}()
 
+	// Wait for TUI event loop to be ready before sending any events.
+	tui.WaitReady()
+
 	// Feed historical events into TUI
 	go func() {
-		time.Sleep(100 * time.Millisecond) // Give TUI a moment to start
 		for _, ev := range events {
 			tui.SendEvent(ev)
 		}

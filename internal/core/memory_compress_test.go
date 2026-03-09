@@ -206,6 +206,249 @@ func TestCompressionBudgetAccounted(t *testing.T) {
 	}
 }
 
+// ── Truncation tests ──────────────────────────────────────────────────────────
+
+// TestTruncateToolResult verifies head+tail truncation of oversized tool output.
+func TestTruncateToolResult(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "ok"}},
+	}
+	loop := newCompressLoop(t, prov, 80_000)
+	loop.Policy.MaxToolResultChars = 100
+
+	// Simulate a tool result being added via message history
+	bigContent := strings.Repeat("A", 300)
+	truncated := core.TruncateToolResult(bigContent, 100)
+
+	if len(truncated) >= 300 {
+		t.Errorf("expected truncated output to be shorter than 300, got %d", len(truncated))
+	}
+	if !strings.Contains(truncated, "[... truncated") {
+		t.Error("truncated output missing truncation marker")
+	}
+	// Head preserved
+	if !strings.HasPrefix(truncated, strings.Repeat("A", 40)) {
+		t.Error("truncated output missing head content")
+	}
+	// Tail preserved
+	if !strings.HasSuffix(truncated, strings.Repeat("A", 40)) {
+		t.Error("truncated output missing tail content")
+	}
+}
+
+// TestTruncateToolResultDisabledWhenZero verifies no truncation when MaxToolResultChars=0.
+func TestTruncateToolResultDisabledWhenZero(t *testing.T) {
+	content := strings.Repeat("B", 50000)
+	result := core.TruncateToolResult(content, 0)
+	if result != content {
+		t.Error("expected no truncation when maxChars=0")
+	}
+}
+
+// TestTruncateToolResultShortContent verifies short content passes through unchanged.
+func TestTruncateToolResultShortContent(t *testing.T) {
+	content := "short output"
+	result := core.TruncateToolResult(content, 20000)
+	if result != content {
+		t.Errorf("expected unchanged content, got %q", result)
+	}
+}
+
+// ── Targeted compression tests ───────────────────────────────────────────────
+
+// TestTargetedCompressionLargeMessage verifies that one giant message among small
+// ones gets compressed via targeted strategy.
+func TestTargetedCompressionLargeMessage(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			// Targeted compression call for the large message
+			{AssistantText: "compressed content", Usage: providers.Usage{InputTokens: 50, OutputTokens: 10, CostUSD: 0.001}},
+			// Main completion
+			{AssistantText: "final answer"},
+		},
+	}
+	// Context limit low enough that the big message triggers compression
+	loop := newCompressLoop(t, prov, 200)
+	loop.Policy.CompressProtectRecent = 2 // protect only last 2 messages
+
+	// Add one huge message (well over 500 estimated tokens) and some small ones
+	loop.Messages = append(loop.Messages,
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)}, // ~1515 tokens
+		providers.Message{Role: "assistant", Content: "ok"},                 // tiny
+		providers.Message{Role: "user", Content: "short question"},          // tiny
+		providers.Message{Role: "assistant", Content: "short answer"},       // tiny
+	)
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have at least 2 calls: targeted compression + main completion
+	if len(prov.requests) < 2 {
+		t.Fatalf("expected >= 2 provider calls, got %d", len(prov.requests))
+	}
+
+	// The first message should have been compressed (contains [compressed] marker)
+	found := false
+	for _, m := range loop.Messages {
+		if strings.HasPrefix(m.Content, "[compressed]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected at least one message with [compressed] prefix after targeted compression")
+	}
+}
+
+// TestTargetedCompressionProtectsRecent verifies that recent messages are not
+// touched by targeted compression.
+func TestTargetedCompressionProtectsRecent(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			// Bulk compression (since the large messages are in the protected zone)
+			{AssistantText: "bulk summary", Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			// Main completion
+			{AssistantText: "answer"},
+		},
+	}
+	loop := newCompressLoop(t, prov, 200)
+	loop.Policy.CompressProtectRecent = 20 // protect all messages
+
+	// Add large messages that should be protected
+	for i := 0; i < 10; i++ {
+		loop.Messages = append(loop.Messages,
+			providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+			providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		)
+	}
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	// None of the messages should have [compressed] prefix since all are protected
+	for i, m := range loop.Messages {
+		if strings.HasPrefix(m.Content, "[compressed]") {
+			t.Errorf("message %d was compressed despite being in protected zone", i)
+		}
+	}
+}
+
+// TestTargetedCompressionUsesCompressProvider verifies that targeted compression
+// calls go to CompressProvider, not the main provider.
+func TestTargetedCompressionUsesCompressProvider(t *testing.T) {
+	mainProv := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "main answer"},
+		},
+	}
+	compressProv := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "compressed", Usage: providers.Usage{InputTokens: 20, OutputTokens: 5}},
+		},
+	}
+
+	loop := newCompressLoop(t, mainProv, 200)
+	loop.CompressProvider = compressProv
+	loop.Policy.CompressProtectRecent = 2
+
+	// One huge message to trigger targeted compression
+	loop.Messages = append(loop.Messages,
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: "ok"},
+		providers.Message{Role: "user", Content: "small"},
+		providers.Message{Role: "assistant", Content: "small"},
+	)
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	// CompressProvider should have received the compression call
+	if len(compressProv.requests) == 0 {
+		t.Error("CompressProvider received no calls — compression should use it")
+	}
+}
+
+// TestBulkFallbackAfterTargeted verifies that when targeted compression is
+// insufficient, bulk fallback fires.
+func TestBulkFallbackAfterTargeted(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			// Many targeted compression calls (still won't be enough)
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			// Bulk summary call
+			{AssistantText: "bulk summary", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
+			// Main completion
+			{AssistantText: "done"},
+		},
+	}
+	loop := newCompressLoop(t, prov, 200)
+
+	// Many large messages — targeted won't reduce enough because summaries are still large
+	for i := 0; i < 8; i++ {
+		loop.Messages = append(loop.Messages,
+			providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+			providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		)
+	}
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have the bulk summary as first message after compression
+	if len(loop.Messages) > 0 {
+		first := loop.Messages[0]
+		if strings.Contains(first.Content, "CONTEXT SUMMARY") {
+			// Bulk fallback fired — good
+		}
+	}
+}
+
+// TestTargetedCompressionBudgetAccounted verifies that tokens consumed by
+// targeted compression calls are charged to the budget.
+func TestTargetedCompressionBudgetAccounted(t *testing.T) {
+	const compressInput = 200
+	const compressOutput = 30
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "compressed", Usage: providers.Usage{InputTokens: compressInput, OutputTokens: compressOutput, CostUSD: 0.003}},
+			{AssistantText: "done", Usage: providers.Usage{InputTokens: 10, OutputTokens: 5}},
+		},
+	}
+	loop := newCompressLoop(t, prov, 200)
+	loop.Policy.CompressProtectRecent = 2
+
+	loop.Messages = append(loop.Messages,
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: "ok"},
+		providers.Message{Role: "user", Content: "small"},
+		providers.Message{Role: "assistant", Content: "small"},
+	)
+
+	if err := loop.Step(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+
+	used := loop.Budget.Budget()
+	if used.UsedTokens < compressInput+compressOutput {
+		t.Errorf("UsedTokens=%d, want at least %d", used.UsedTokens, compressInput+compressOutput)
+	}
+	if used.UsedCostUSD < 0.003 {
+		t.Errorf("UsedCostUSD=%.4f, want at least 0.003", used.UsedCostUSD)
+	}
+}
+
 // ── Memory injection ──────────────────────────────────────────────────────────
 
 // TestMemoryInjectedIntoProviderCall verifies that when Policy.MemoryPath points

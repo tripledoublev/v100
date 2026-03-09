@@ -64,10 +64,10 @@ type TUIModel struct {
 	statusLine   string
 	statusTick   int
 	runSummary   string
-	leftPanePct   int
-	tracePanePct  int
-	verbose       bool
-	showMetrics   bool
+	leftPanePct  int
+	tracePanePct int
+	verbose      bool
+	showMetrics  bool
 
 	// live metrics state
 	currentStep  int
@@ -82,6 +82,7 @@ type TUIModel struct {
 	// mascot line offset for reactive updates
 
 	mascotStartLine int
+	mascotEndLine   int
 	radioURL        string
 	radioPlayer     string
 	radioVolume     int
@@ -105,6 +106,7 @@ type TUIModel struct {
 
 	// callbacks
 	SubmitFn func(string)
+	onReady  func() // called once from Init() to signal event loop is active
 }
 
 // ── TUI styles ────────────────────────────────────────────────────────────────

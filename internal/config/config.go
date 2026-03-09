@@ -72,23 +72,26 @@ type AgentConfig struct {
 
 // DefaultsConfig holds run-level defaults.
 type DefaultsConfig struct {
-	Provider            string   `toml:"provider"`
-	SmartProvider       string   `toml:"smart_provider"` // for router solver
-	CheapProvider       string   `toml:"cheap_provider"` // for router solver
-	Solver              string   `toml:"solver"`         // react | plan_execute | router
-	MaxReplans          int      `toml:"max_replans"`
-	ConfirmTools        string   `toml:"confirm_tools"` // always | dangerous | never
-	BudgetSteps         int      `toml:"budget_steps"`
-	BudgetTokens        int      `toml:"budget_tokens"`
-	BudgetCostUSD       float64  `toml:"budget_cost_usd"`
-	ToolTimeoutMS       int      `toml:"tool_timeout_ms"`
-	MaxToolCallsPerStep int      `toml:"max_tool_calls_per_step"`
-	ContextLimit        int      `toml:"context_limit"`
-	Temperature         *float64 `toml:"temperature"`
-	TopP                *float64 `toml:"top_p"`
-	TopK                *int     `toml:"top_k"`
-	MaxTokens           int      `toml:"max_tokens"`
-	Seed                *int     `toml:"seed"`
+	Provider              string   `toml:"provider"`
+	SmartProvider         string   `toml:"smart_provider"` // for router solver
+	CheapProvider         string   `toml:"cheap_provider"` // for router solver
+	Solver                string   `toml:"solver"`         // react | plan_execute | router
+	MaxReplans            int      `toml:"max_replans"`
+	ConfirmTools          string   `toml:"confirm_tools"` // always | dangerous | never
+	BudgetSteps           int      `toml:"budget_steps"`
+	BudgetTokens          int      `toml:"budget_tokens"`
+	BudgetCostUSD         float64  `toml:"budget_cost_usd"`
+	ToolTimeoutMS         int      `toml:"tool_timeout_ms"`
+	MaxToolCallsPerStep   int      `toml:"max_tool_calls_per_step"`
+	ContextLimit          int      `toml:"context_limit"`
+	Temperature           *float64 `toml:"temperature"`
+	TopP                  *float64 `toml:"top_p"`
+	TopK                  *int     `toml:"top_k"`
+	MaxTokens             int      `toml:"max_tokens"`
+	Seed                  *int     `toml:"seed"`
+	MaxToolResultChars    int      `toml:"max_tool_result_chars"`
+	CompressProtectRecent int      `toml:"compress_protect_recent"`
+	CompressProvider      string   `toml:"compress_provider"`
 }
 
 // DefaultConfig returns a built-in baseline configuration.
@@ -166,15 +169,17 @@ func DefaultConfig() *Config {
 			},
 		},
 		Defaults: DefaultsConfig{
-			Provider:            "minimax",
-			SmartProvider:       "minimax",
-			CheapProvider:       "ollama",
-			ConfirmTools:        "dangerous",
-			BudgetSteps:         50,
-			BudgetTokens:        100000,
-			ToolTimeoutMS:       30000,
-			MaxToolCallsPerStep: 50,
-			ContextLimit:        80000,
+			Provider:              "minimax",
+			SmartProvider:         "minimax",
+			CheapProvider:         "ollama",
+			ConfirmTools:          "dangerous",
+			BudgetSteps:           50,
+			BudgetTokens:          100000,
+			ToolTimeoutMS:         30000,
+			MaxToolCallsPerStep:   50,
+			ContextLimit:          80000,
+			MaxToolResultChars:    20000,
+			CompressProtectRecent: 6,
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
@@ -244,6 +249,9 @@ budget_cost_usd = 0.0
 tool_timeout_ms = 30000
 max_tool_calls_per_step = 50
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
+max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
+compress_protect_recent = 6   # recent messages protected from targeted compression
+# compress_provider = ""      # provider for compression calls (empty = use cheap_provider)
 
 [sandbox]
 enabled = false

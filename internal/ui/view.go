@@ -256,7 +256,10 @@ func (m *TUIModel) seedWelcomeContent() {
 	m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+now) + "\n\n")
 
 	// ASCII mascot with reactive expression based on status mode
-	m.transcriptBuf.WriteString(stylePrimary.Render(Mascot(m.statusMode)) + "\n")
+	m.mascotStartLine = strings.Count(m.transcriptBuf.String(), "\n")
+	mascotStr := stylePrimary.Render(Mascot(m.statusMode))
+	m.transcriptBuf.WriteString(mascotStr + "\n")
+	m.mascotEndLine = strings.Count(m.transcriptBuf.String(), "\n") - 1
 
 	m.transcriptBuf.WriteString(styleBold.Render("Quick Starts") + "\n")
 	m.transcriptBuf.WriteString(styleMuted.Render("1.") + " map this repo and explain architecture\n")
@@ -279,23 +282,35 @@ func (m *TUIModel) seedWelcomeContent() {
 // refreshMascot updates the ASCII mascot expression based on current statusMode.
 // It replaces the mascot lines in the transcript buffer to show reactive expressions.
 func (m *TUIModel) refreshMascot() {
+	if m.mascotStartLine < 0 || m.mascotEndLine <= m.mascotStartLine {
+		return
+	}
+
 	// Get current transcript as lines
 	lines := strings.Split(m.transcriptBuf.String(), "\n")
-
-	// Find the mascot line (starts with spaces then /_/_)
-	mascotIdx := -1
-	for i, line := range lines {
-		if strings.Contains(line, "/_/_") || strings.Contains(line, "o o") || strings.Contains(line, "HELLO") {
-			mascotIdx = i
-			break
-		}
+	if len(lines) <= m.mascotEndLine {
+		return
 	}
 
 	// Generate new mascot with current status mode
-	newMascot := stylePrimary.Render(Mascot(m.statusMode))
+	newMascotLines := strings.Split(stylePrimary.Render(Mascot(m.statusMode)), "\n")
 
-	if mascotIdx >= 0 && mascotIdx < len(lines) {
-		lines[mascotIdx] = newMascot
+	// Ensure we have the same number of lines to avoid shifting the transcript
+	mSpan := m.mascotEndLine - m.mascotStartLine + 1
+	if len(newMascotLines) > mSpan {
+		newMascotLines = newMascotLines[:mSpan]
+	}
+
+	changed := false
+	for i, ml := range newMascotLines {
+		idx := m.mascotStartLine + i
+		if idx < len(lines) && lines[idx] != ml {
+			lines[idx] = ml
+			changed = true
+		}
+	}
+
+	if changed {
 		m.transcriptBuf.Reset()
 		m.transcriptBuf.WriteString(strings.Join(lines, "\n"))
 		m.transcript.SetContent(m.transcriptBuf.String())

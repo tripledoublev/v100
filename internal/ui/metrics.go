@@ -3,16 +3,18 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
 // MetricBarConfig holds configuration for ASCII metric bars.
 type MetricBarConfig struct {
-	Width         int    // total width of the bar in characters
-	ShowPercentage bool  // show percentage label
-	ShowValues    bool  // show numeric values
-	EmptyChar     rune  // character for empty portion
-	FullChar      rune  // character for filled portion
-	TruncatedChar rune  // character for truncated portion (when value exceeds max)
+	Width          int  // total width of the bar in characters
+	ShowPercentage bool // show percentage label
+	ShowValues     bool // show numeric values
+	EmptyChar      rune // character for empty portion
+	FullChar       rune // character for filled portion
+	TruncatedChar  rune // character for truncated portion (when value exceeds max)
 }
 
 // DefaultMetricBarConfig returns a sensible default configuration.
@@ -39,7 +41,7 @@ func TokenBudgetBar(used, max, inputUsed, outputUsed int, cfg MetricBarConfig) s
 	percent := float64(used) / float64(max)
 
 	bar := renderBar(percent, cfg)
-	
+
 	var line string
 	if inputUsed > 0 || outputUsed > 0 {
 		// Show split: input | output
@@ -49,10 +51,10 @@ func TokenBudgetBar(used, max, inputUsed, outputUsed int, cfg MetricBarConfig) s
 		}
 		inputWidth := int(float64(cfg.Width) * inputPercent)
 		outputWidth := cfg.Width - inputWidth
-		
+
 		inBar := renderBarSegment(inputWidth, cfg, true)
 		outBar := renderBarSegment(outputWidth, cfg, false)
-		
+
 		line = fmt.Sprintf("tokens [%s│%s] %d/%d",
 			inBar, outBar, used, max)
 	} else {
@@ -78,7 +80,7 @@ func StepProgressBar(current, max int, cfg MetricBarConfig) string {
 	percent := float64(current) / float64(max)
 
 	bar := renderBar(percent, cfg)
-	
+
 	line := fmt.Sprintf("steps [%s] %d/%d", bar, current, max)
 
 	if cfg.ShowPercentage {
@@ -107,7 +109,7 @@ func CostBar(used, max float64, cfg MetricBarConfig) string {
 	percent := used / max
 
 	bar := renderBar(percent, cfg)
-	
+
 	line := fmt.Sprintf("cost  [%s] $%.4f/$%.4f", bar, used, max)
 
 	if cfg.ShowPercentage {
@@ -121,22 +123,22 @@ func CostBar(used, max float64, cfg MetricBarConfig) string {
 // MultiMetricBar renders multiple metrics in a compact stacked layout.
 // Useful for displaying a summary dashboard.
 type MetricItem struct {
-	Label  string
-	Used   int
-	Max    int
-	Color  func(string) string // optional color function
+	Label string
+	Used  int
+	Max   int
+	Color func(string) string // optional color function
 }
 
 func MultiMetricBar(items []MetricItem, width int) string {
 	width = constrainWidth(width, 20, 50)
-	
+
 	var lines []string
 	for _, item := range items {
 		if item.Max <= 0 {
 			lines = append(lines, styleMuted.Render(fmt.Sprintf("%s: unlimited", item.Label)))
 			continue
 		}
-		
+
 		used := min(item.Used, item.Max)
 		percent := float64(used) / float64(item.Max)
 		bar := renderBar(percent, MetricBarConfig{
@@ -146,7 +148,7 @@ func MultiMetricBar(items []MetricItem, width int) string {
 			EmptyChar:      '░',
 			FullChar:       '▓',
 		})
-		
+
 		content := fmt.Sprintf("%s [%s] %d/%d", item.Label, bar, used, item.Max)
 		if item.Color != nil {
 			lines = append(lines, item.Color(content))
@@ -154,7 +156,7 @@ func MultiMetricBar(items []MetricItem, width int) string {
 			lines = append(lines, content)
 		}
 	}
-	
+
 	return strings.Join(lines, "\n")
 }
 
@@ -244,15 +246,15 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inputToke
 
 	// Step progress
 	stepLine := StepProgressBar(currentStep, maxSteps, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+stepLine+strings.Repeat(" ", max(0, width-len(stripStyles(stepLine)))))
+	lines = append(lines, stylePrimary.Render("│ ")+stepLine+strings.Repeat(" ", max(0, width-lipgloss.Width(stepLine))))
 
 	// Token budget (split view if we have input/output)
 	tokenLine := TokenBudgetBar(usedTokens, maxTokens, inputTokens, outputTokens, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+tokenLine+strings.Repeat(" ", max(0, width-len(stripStyles(tokenLine)))))
+	lines = append(lines, stylePrimary.Render("│ ")+tokenLine+strings.Repeat(" ", max(0, width-lipgloss.Width(tokenLine))))
 
 	// Cost
 	costLine := CostBar(usedCost, maxCost, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+costLine+strings.Repeat(" ", max(0, width-len(stripStyles(costLine)))))
+	lines = append(lines, stylePrimary.Render("│ ")+costLine+strings.Repeat(" ", max(0, width-lipgloss.Width(costLine))))
 
 	// Footer
 	lines = append(lines, styleBold.Render("└─────────────────────────────────────────────────┘"))
@@ -260,8 +262,4 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inputToke
 	return strings.Join(lines, "\n")
 }
 
-// stripStyles returns the string without ANSI escape codes for length calculation.
-func stripStyles(s string) string {
-	// Simple strip - removes common style prefixes
-	return strings.ReplaceAll(s, "\x1b[", "")
-}
+// stripStyles is no longer needed since we use lipgloss.Width.

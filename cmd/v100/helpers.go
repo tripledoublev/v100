@@ -654,14 +654,44 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 		name = "default"
 	}
 	pc, ok := cfg.Policies[name]
+	var p *policy.Policy
 	if !ok {
-		return policy.Default()
+		p = policy.Default()
+	} else {
+		var err error
+		p, err = policy.Load(name, pc)
+		if err != nil {
+			p = policy.Default()
+		}
 	}
-	p, err := policy.Load(name, pc)
-	if err != nil {
-		return policy.Default()
+	// Apply compression policy defaults from config
+	if cfg.Defaults.MaxToolResultChars > 0 {
+		p.MaxToolResultChars = cfg.Defaults.MaxToolResultChars
+	}
+	if cfg.Defaults.CompressProtectRecent > 0 {
+		p.CompressProtectRecent = cfg.Defaults.CompressProtectRecent
 	}
 	return p
+}
+
+func buildCompressProvider(cfg *config.Config) providers.Provider {
+	cpName := cfg.Defaults.CompressProvider
+	if cpName == "" {
+		// Default to gemini for compression — fast and cheap.
+		// Fall back to CheapProvider only if it's a remote provider.
+		cpName = "gemini"
+		if cheap := cfg.Defaults.CheapProvider; cheap != "" && cheap != "ollama" {
+			cpName = cheap
+		}
+	}
+	if cpName == cfg.Defaults.Provider {
+		return nil // same as main provider, no need to build separately
+	}
+	cp, err := buildProvider(cfg, cpName)
+	if err != nil {
+		return nil
+	}
+	return cp
 }
 
 func buildGenParams(cfg *config.Config, temperature, topP float64, topK, maxTokens, seed int, cmd *cobra.Command) providers.GenParams {

@@ -9,6 +9,14 @@ import (
 )
 
 func (m *TUIModel) Init() tea.Cmd {
+	if m.onReady != nil {
+		m.onReady()
+		m.onReady = nil
+	}
+	// Initial clear screen and status
+	m.statusMode = "idle"
+	m.statusLine = "initializing..."
+	
 	return tea.Batch(
 		textinput.Blink,
 		tea.WindowSize(),

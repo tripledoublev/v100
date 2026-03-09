@@ -80,26 +80,52 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop = &core.Loop{
-		Run:         run,
-		Provider:    prov,
-		Tools:       reg,
-		Policy:      pol,
-		Trace:       trace,
-		Budget:      budget,
-		ConfirmFn:   confirmFn,
-		OutputFn:    tuiOutputFn,
-		GenParams:   genParams,
-		Solver:      solver,
-		Session:     session,
-		Mapper:      mapper,
-		NetworkTier: loopNetworkTier(cfg),
-		Snapshots:   buildSnapshotManager(cfg, workspace),
+		Run:              run,
+		Provider:         prov,
+		CompressProvider: buildCompressProvider(cfg),
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		ConfirmFn:        confirmFn,
+		OutputFn:         tuiOutputFn,
+		GenParams:        genParams,
+		Solver:           solver,
+		Session:          session,
+		Mapper:           mapper,
+		NetworkTier:      loopNetworkTier(cfg),
+		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 
 	// metadata auto-discovery
 	metadata, _ := prov.Metadata(ctx, model)
 	loop.ModelMetadata = metadata
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
+
+	// Start Bubble Tea first: Program.Send blocks until Run() starts the event loop.
+	runErrCh := make(chan error, 1)
+	if logger != nil {
+		logger.Printf("starting tui.Run goroutine")
+	}
+	go func() {
+		if logger != nil {
+			logger.Printf("inside tui.Run goroutine")
+		}
+		err := tui.Run()
+		if logger != nil {
+			logger.Printf("tui.Run returned err=%v", err)
+		}
+		runErrCh <- err
+	}()
+
+	// Wait for TUI event loop to be ready before sending any events.
+	if logger != nil {
+		logger.Printf("waiting for tui to be ready")
+	}
+	tui.WaitReady()
+	if logger != nil {
+		logger.Printf("tui is ready")
+	}
 
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:        pol.Name,
@@ -111,15 +137,10 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		return err
 	}
 
-	// Start Bubble Tea first: Program.Send blocks before Run initializes.
-	runErrCh := make(chan error, 1)
-	go func() {
-		runErrCh <- tui.Run()
-	}()
-
 	if initialPrompt != "" {
-		// Give TUI a tiny moment to start before first step
-		time.Sleep(100 * time.Millisecond)
+		if logger != nil {
+			logger.Printf("processing initial prompt: %q", initialPrompt)
+		}
 		if err := loop.Step(ctx, initialPrompt); err != nil {
 			if logger != nil {
 				logger.Printf("initial step error: %v", err)
@@ -132,8 +153,15 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			}
 			tui.Quit()
 		}
+	} else {
+		if logger != nil {
+			logger.Printf("no initial prompt, waiting for user input")
+		}
 	}
 
+	if logger != nil {
+		logger.Printf("waiting for tui to finish")
+	}
 	if err := <-runErrCh; err != nil {
 		if logger != nil {
 			logger.Printf("tui run error: %v", err)

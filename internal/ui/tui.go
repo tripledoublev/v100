@@ -10,6 +10,7 @@ import (
 type TUI struct {
 	program *tea.Program
 	model   *TUIModel
+	ready   chan struct{} // closed when Init() fires, signaling Send() is safe
 }
 
 // NewTUI creates a new TUI instance.
@@ -17,15 +18,22 @@ func NewTUI(submitFn func(string), useAltScreen bool, plainTTY bool) *TUI {
 	if plainTTY {
 		EnablePlainTTY()
 	}
+	ready := make(chan struct{})
 	m := NewTUIModel()
 	m.SubmitFn = submitFn
+	m.onReady = func() { close(ready) }
 	var p *tea.Program
 	if useAltScreen {
 		p = tea.NewProgram(m, tea.WithAltScreen())
 	} else {
 		p = tea.NewProgram(m)
 	}
-	return &TUI{program: p, model: m}
+	return &TUI{program: p, model: m, ready: ready}
+}
+
+// WaitReady blocks until the TUI event loop is initialized and Send() is safe.
+func (t *TUI) WaitReady() {
+	<-t.ready
 }
 
 // SendEvent forwards a core event into the TUI message loop.

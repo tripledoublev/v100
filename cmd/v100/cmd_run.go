@@ -295,20 +295,21 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
 
 	loop := &core.Loop{
-		Run:         run,
-		Provider:    prov,
-		Tools:       reg,
-		Policy:      pol,
-		Trace:       trace,
-		Budget:      budget,
-		ConfirmFn:   confirmFn,
-		OutputFn:    outputFn,
-		GenParams:   genParams,
-		Solver:      solver,
-		Session:     session,
-		Mapper:      mapper,
-		NetworkTier: loopNetworkTier(cfg),
-		Snapshots:   buildSnapshotManager(cfg, workspace),
+		Run:              run,
+		Provider:         prov,
+		CompressProvider: buildCompressProvider(cfg),
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		ConfirmFn:        confirmFn,
+		OutputFn:         outputFn,
+		GenParams:        genParams,
+		Solver:           solver,
+		Session:          session,
+		Mapper:           mapper,
+		NetworkTier:      loopNetworkTier(cfg),
+		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 
 	// Override workspace for tool execution

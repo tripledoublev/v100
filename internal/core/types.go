@@ -116,11 +116,13 @@ type ModelRespPayload struct {
 
 // CompressPayload is the Payload for EventCompress.
 type CompressPayload struct {
-	MessagesBefore int     `json:"messages_before"`
-	MessagesAfter  int     `json:"messages_after"`
-	TokensBefore   int     `json:"tokens_before"`
-	TokensAfter    int     `json:"tokens_after"`
-	CostUSD        float64 `json:"cost_usd"`
+	MessagesBefore     int     `json:"messages_before"`
+	MessagesAfter      int     `json:"messages_after"`
+	TokensBefore       int     `json:"tokens_before"`
+	TokensAfter        int     `json:"tokens_after"`
+	CostUSD            float64 `json:"cost_usd"`
+	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
+	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
 }
 
 // StepSummaryPayload is the Payload for EventStepSummary.
