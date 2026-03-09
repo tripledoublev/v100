@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0 — 2026-03-09
+
+**Phase 100: Recursive Self-Evolution**
+
+This release introduces the first milestone of the self-evolution engine, allowing agents to distill their own trajectories and author new tools at runtime.
+
+### Self-Evolution Engine
+
+- **Distill command** — `v100 distill <run_id>` converts JSONL traces into ShareGPT-formatted datasets for model fine-tuning and DPO.
+- **Dynamic Tool Registry** — support for `RegisterAndEnable` at runtime, enabling agents to expand harness capabilities without re-compilation.
+- **Automatic Build Feedback** — modified `internal/core/loop.go` to trigger `go build ./...` after every workspace mutation, injecting compiler errors as a `SYSTEM ALERT` to enforce a reality-check loop.
+
+### Dynamic Tools
+
+- **`sql_search`** — Execute SQL queries against local SQLite databases with path sanitization.
+- **`graphviz`** — Render DOT graph definitions into images (PNG/SVG) for architectural visualization.
+
+### Improvements
+
+- **Dependency Tracking** — Added `github.com/mattn/go-sqlite3` for local structured data operations.
+- **Documentation** — New DF-11 quest in `dogfood/` for verifying self-evolution trajectories.
+
 ## v0.0.2 — 2026-03-08
 
 Initial release of v100, an experimental agent harness for studying long-horizon LLM behavior.
