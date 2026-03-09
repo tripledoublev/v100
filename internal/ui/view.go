@@ -251,6 +251,9 @@ func (m *TUIModel) seedWelcomeContent() {
 
 	m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+now) + "\n\n")
 
+	// ASCII mascot with reactive expression based on status mode
+	m.transcriptBuf.WriteString(stylePrimary.Render(Mascot(m.statusMode)) + "\n")
+
 	m.transcriptBuf.WriteString(styleBold.Render("Quick Starts") + "\n")
 	m.transcriptBuf.WriteString(styleMuted.Render("1.") + " map this repo and explain architecture\n")
 	m.transcriptBuf.WriteString(styleMuted.Render("2.") + " find likely bugs and propose fixes\n")
@@ -267,4 +270,30 @@ func (m *TUIModel) seedWelcomeContent() {
 
 	m.transcript.SetContent(m.transcriptBuf.String())
 	m.traceView.SetContent(m.traceBuf.String())
+}
+
+// refreshMascot updates the ASCII mascot expression based on current statusMode.
+// It replaces the mascot lines in the transcript buffer to show reactive expressions.
+func (m *TUIModel) refreshMascot() {
+	// Get current transcript as lines
+	lines := strings.Split(m.transcriptBuf.String(), "\n")
+
+	// Find the mascot line (starts with spaces then /_/_)
+	mascotIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "/_/_") || strings.Contains(line, "o o") || strings.Contains(line, "HELLO") {
+			mascotIdx = i
+			break
+		}
+	}
+
+	// Generate new mascot with current status mode
+	newMascot := stylePrimary.Render(Mascot(m.statusMode))
+
+	if mascotIdx >= 0 && mascotIdx < len(lines) {
+		lines[mascotIdx] = newMascot
+		m.transcriptBuf.Reset()
+		m.transcriptBuf.WriteString(strings.Join(lines, "\n"))
+		m.transcript.SetContent(m.transcriptBuf.String())
+	}
 }

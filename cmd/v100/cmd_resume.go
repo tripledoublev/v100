@@ -27,6 +27,8 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
+		autoFlag         bool
+		confirmToolsFlag string
 		workspaceFlag    string
 		budgetStepsFlag  int
 		budgetTokensFlag int
@@ -92,6 +94,13 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				maxCost = cfg.Defaults.BudgetCostUSD
 			}
 
+			if confirmToolsFlag != "" {
+				cfg.Defaults.ConfirmTools = confirmToolsFlag
+			}
+			if autoFlag {
+				cfg.Defaults.ConfirmTools = "never"
+			}
+
 			budget := core.NewBudgetTracker(&core.Budget{
 				MaxSteps:   maxSteps,
 				MaxTokens:  maxTokens,
@@ -143,6 +152,8 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
+	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
 	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")

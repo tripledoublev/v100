@@ -13,6 +13,7 @@ import (
 func (m *TUIModel) appendEvent(ev core.Event) {
 	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
 	m.updateStatusFromEvent(ev)
+	m.refreshMascot()
 	sub := len(m.activeAgents) > 0
 
 	switch ev.Type {

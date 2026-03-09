@@ -66,6 +66,9 @@ type TUIModel struct {
 	runSummary    string
 	leftPanePct   int
 	tracePanePct  int
+	
+	// mascot line offset for reactive updates
+	mascotStartLine int
 	radioURL      string
 	radioPlayer   string
 	radioVolume   int
