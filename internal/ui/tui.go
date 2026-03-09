@@ -45,6 +45,12 @@ func (t *TUI) RequestConfirm(toolName, args string) bool {
 	return <-result
 }
 
+func (t *TUI) SetVerbose(v bool) {
+	if t.model != nil {
+		t.model.SetVerbose(v)
+	}
+}
+
 // Run starts the TUI event loop (blocks until quit).
 func (t *TUI) Run() error {
 	_, err := t.program.Run()

@@ -66,6 +66,7 @@ type TUIModel struct {
 	runSummary    string
 	leftPanePct   int
 	tracePanePct  int
+	verbose       bool
 	
 	// mascot line offset for reactive updates
 	mascotStartLine int
@@ -164,6 +165,10 @@ type downloadDoneMsg struct {
 	artist string
 	title  string
 	err    string
+}
+
+func (m *TUIModel) SetVerbose(v bool) {
+	m.verbose = v
 }
 
 func (cs *confirmState) isActive() bool {

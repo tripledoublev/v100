@@ -19,6 +19,7 @@ type CLIRenderer struct {
 	inSubAgent  int                  // nesting depth of sub-agents
 	spinnerStop chan struct{}
 	spinnerDone chan struct{}
+	Verbose     bool
 	mu          sync.Mutex
 }
 
@@ -63,10 +64,14 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			)
 		}
 		for _, tc := range p.ToolCalls {
+			args := tc.ArgsJSON
+			if !r.Verbose && len(args) > 60 {
+				args = args[:57] + "..."
+			}
 			fmt.Printf("           %s %s%s\n",
 				styleTool.Render("⚙"),
 				styleTool.Render(tc.Name),
-				styleMuted.Render("("+tc.ArgsJSON+")"),
+				styleMuted.Render("("+args+")"),
 			)
 		}
 
@@ -123,8 +128,12 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			statusStyle = styleFail.Render(p.Name)
 		}
 		out := p.Output
-		if len(out) > 200 {
-			out = out[:200] + "…"
+		limit := 200
+		if !r.Verbose {
+			limit = 80
+		}
+		if len(out) > limit {
+			out = out[:limit-3] + "..."
 		}
 		out = strings.ReplaceAll(out, "\n", " ↵ ")
 		fmt.Printf("           %s %s  %s  %s\n",

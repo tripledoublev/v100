@@ -59,6 +59,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		}
 		for _, tc := range p.ToolCalls {
 			args := m.wrapPlainForTranscript(tc.ArgsJSON)
+			if !m.verbose && len(args) > 60 {
+				args = args[:57] + "..."
+			}
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(tc.Name), styleMuted.Render("("+args+")"))
 		}
 
@@ -78,8 +81,12 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
 		}
 		out := p.Output
-		if len(out) > 200 {
-			out = out[:200] + "…"
+		limit := 200
+		if !m.verbose {
+			limit = 80
+		}
+		if len(out) > limit {
+			out = out[:limit-3] + "..."
 		}
 		out = strings.ReplaceAll(out, "\n", " ↵ ")
 		out = m.wrapPlainForTranscript(out)
