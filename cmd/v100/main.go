@@ -41,6 +41,7 @@ func rootCmd() *cobra.Command {
 		logoutCmd(),
 		devCmd(),
 		scoreCmd(),
+		distillCmd(),
 		statsCmd(),
 		metricsCmd(),
 		compareCmd(),

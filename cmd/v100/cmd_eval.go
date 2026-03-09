@@ -54,6 +54,29 @@ func scoreCmd() *cobra.Command {
 	}
 }
 
+func distillCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "distill <run_id>",
+		Short: "Distill a run trace into ShareGPT format",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			outputPath, err := eval.DistillRun(runDir)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Distilled trace saved to: %s\n", ui.Info(outputPath))
+			return nil
+		},
+	}
+}
+
 func statsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stats <run_id>",
