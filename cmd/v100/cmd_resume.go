@@ -28,6 +28,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
 		autoFlag         bool
+		sandboxFlag      bool
 		confirmToolsFlag string
 		workspaceFlag    string
 		budgetStepsFlag  int
@@ -62,8 +63,17 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			// Reconstruct message history from trace
 			msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
 
-			// Load meta to get original source workspace
+			// Load meta to get original environment grounding
 			meta, _ := core.ReadMeta(runDir)
+
+			// 1. Inherit sandbox config from meta if present
+			if meta.Sandbox.Enabled || meta.Sandbox.Backend != "" {
+				cfg.Sandbox = meta.Sandbox
+			}
+			// 2. Allow CLI flags to override
+			if cmd.Flags().Changed("sandbox") {
+				cfg.Sandbox.Enabled = sandboxFlag
+			}
 
 			if providerName == "" {
 				providerName = cfg.Defaults.Provider
@@ -153,6 +163,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable sandbox for resumed run (inherited from meta.json by default)")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")

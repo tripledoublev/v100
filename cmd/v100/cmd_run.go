@@ -172,6 +172,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 				Provider:        prov.Name(),
 				Model:           model,
 				SourceWorkspace: sourceWorkspace,
+				Sandbox:         cfg.Sandbox,
 				CreatedAt:       time.Now().UTC(),
 			}
 			_ = core.WriteMeta(runDir, meta)

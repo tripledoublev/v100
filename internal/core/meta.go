@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
@@ -20,6 +21,7 @@ type RunMeta struct {
 	ModelMetadata     providers.ModelMetadata `json:"model_metadata,omitempty"`
 	SourceWorkspace   string                  `json:"source_workspace,omitempty"`
 	SourceFingerprint string                  `json:"source_fingerprint,omitempty"`
+	Sandbox           config.SandboxConfig    `json:"sandbox,omitempty"`
 	CreatedAt         time.Time               `json:"created_at"`
 	Score             string                  `json:"score,omitempty"` // pass|fail|partial
 	ScoreNotes        string                  `json:"score_notes,omitempty"`
