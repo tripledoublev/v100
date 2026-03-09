@@ -197,6 +197,23 @@ v100 run --provider "$V100_PROVIDER" --sandbox \
 
 Pass if the sandbox artifact contains a focused test change and the run reports a passing targeted test command.
 
+### DF-11 Self-Optimization Loop
+
+Purpose: verify the recursive self-evolution flow (distillation and dynamic tools).
+
+```bash
+v100 run --provider "$V100_PROVIDER" --sandbox \
+  --confirm-tools never \
+  --budget-steps 10 --max-tool-calls-per-step 10 \
+  --name "DF-11 self-optimization" \
+  --tag dogfood=phase100 --tag quest=df11 \
+  "1. Inspect internal/tools/dynamic/ and identify available tools. 
+   2. Use the graphviz tool to visualize internal package dependencies.
+   3. Once finished, use 'v100 distill' (via sh) on your own run ID to generate a ShareGPT trace of this task."
+```
+
+Pass if the agent successfully uses a dynamic tool it found in the registry and produces a distilled JSONL artifact.
+
 ## Starter Scoring Rubric
 
 Use this consistently:
