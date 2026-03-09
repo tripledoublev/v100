@@ -23,6 +23,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Tool execution** — 23 built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
+- **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
 - **Five providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, or local Ollama
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea 3-pane TUI (`--tui`)
@@ -250,6 +251,7 @@ After a sandboxed run, changes can be merged back to the host workspace:
 | `v100 login [--provider <name>]` | Authenticate via browser OAuth or API key |
 | `v100 logout [--provider <name>]` | Remove stored auth token |
 | `v100 score <run_id> <pass\|fail\|partial> [notes...]` | Score a completed run |
+| `v100 distill <run_id>` | Distill a run trace into ShareGPT format |
 | `v100 stats <run_id>` | Compute stats from trace events |
 | `v100 metrics <run_id>` | Compute trace-derived efficiency/behavior metrics |
 | `v100 compare <run_id> <run_id> [...]` | Compare multiple runs side-by-side |
@@ -327,6 +329,8 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 | `sem_blame` | safe | Entity-level blame for a file |
 | `patch_apply` | **dangerous** | Apply unified diff |
 | `project_search` | safe | Ripgrep search |
+| `sql_search` | **dangerous** | Execute SQL against local SQLite |
+| `graphviz` | safe | Render DOT files to images |
 | `curl_fetch` | safe | Fetch URL content |
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
 | `dispatch` | **dangerous** | Dispatch a task to a named agent role |
