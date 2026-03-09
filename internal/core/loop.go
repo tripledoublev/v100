@@ -280,6 +280,43 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		Name:       tc.Name,
 	})
 
+	// Feedback Loop: Auto-verify build if tool mutated workspace
+	if result.OK && tool.Effects().MutatesWorkspace {
+		if err := l.verifyBuild(ctx, stepID); err != nil {
+			// verifyBuild handles its own event emission and message injection
+			// we don't return error here so the loop continues with the alert context
+		}
+	}
+
+	return nil
+}
+
+// verifyBuild runs a background build check and injects an alert if it fails.
+func (l *Loop) verifyBuild(ctx context.Context, stepID string) error {
+	// Only run if we have a shell tool available or can run commands
+	sh, ok := l.Tools.Get("sh")
+	if !ok {
+		return nil
+	}
+
+	// Run go build ./...
+	args, _ := json.Marshal(map[string]string{"cmd": "go build ./..."})
+	res, err := sh.Exec(ctx, tools.ToolCallContext{
+		RunID:        l.Run.ID,
+		StepID:       stepID,
+		WorkspaceDir: l.Run.Dir,
+		Mapper:       l.Mapper,
+	}, args)
+
+	if err == nil && !res.OK {
+		alert := "SYSTEM ALERT: Your last change caused a compilation error:\n\n" + res.Output +
+			"\n\nPlease fix these errors before proceeding."
+		l.Messages = append(l.Messages, providers.Message{
+			Role:    "system",
+			Content: alert,
+		})
+		// We could emit a specific event here if we had one, for now just log/inject
+	}
 	return nil
 }
 
