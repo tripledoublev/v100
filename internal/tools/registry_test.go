@@ -30,6 +30,54 @@ func TestRegistryEnabled(t *testing.T) {
 	}
 }
 
+func TestRegistryDynamicRegistration(t *testing.T) {
+	reg := tools.NewRegistry([]string{"fs_read"})
+	reg.Register(tools.FSRead())
+
+	if reg.IsEnabled("fs_write") {
+		t.Fatal("fs_write should start disabled")
+	}
+	if _, ok := reg.Lookup("fs_write"); ok {
+		t.Fatal("fs_write should not be registered yet")
+	}
+
+	reg.RegisterAndEnable(tools.FSWrite())
+
+	if !reg.IsEnabled("fs_write") {
+		t.Fatal("fs_write should be enabled after RegisterAndEnable")
+	}
+	if _, ok := reg.Get("fs_write"); !ok {
+		t.Fatal("fs_write should be accessible after dynamic registration")
+	}
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestRegistryEnableDisableUnregister(t *testing.T) {
+	reg := tools.NewRegistry(nil)
+	reg.Register(tools.FSRead())
+
+	if _, ok := reg.Get("fs_read"); ok {
+		t.Fatal("fs_read should not be accessible before enable")
+	}
+
+	reg.Enable("fs_read")
+	if _, ok := reg.Get("fs_read"); !ok {
+		t.Fatal("fs_read should be accessible after enable")
+	}
+
+	reg.Disable("fs_read")
+	if _, ok := reg.Get("fs_read"); ok {
+		t.Fatal("fs_read should not be accessible after disable")
+	}
+
+	reg.Unregister("fs_read")
+	if _, ok := reg.Lookup("fs_read"); ok {
+		t.Fatal("fs_read should not be registered after unregister")
+	}
+}
+
 func TestRegistryDangerLevel(t *testing.T) {
 	reg := tools.NewRegistry([]string{"fs_read", "fs_write", "sh"})
 	reg.Register(tools.FSRead())
@@ -97,6 +145,20 @@ func TestRegistrySpecs(t *testing.T) {
 		if s.InputSchema == nil {
 			t.Errorf("spec %s should have input schema", s.Name)
 		}
+	}
+}
+
+func TestRegistryRegisteredTools(t *testing.T) {
+	reg := tools.NewRegistry([]string{"fs_read"})
+	reg.Register(tools.FSRead())
+	reg.Register(tools.FSWrite())
+
+	registered := reg.RegisteredTools()
+	if len(registered) != 2 {
+		t.Fatalf("expected 2 registered tools, got %d", len(registered))
+	}
+	if registered[0].Name() != "fs_read" || registered[1].Name() != "fs_write" {
+		t.Fatalf("registered tools order = [%s %s], want [fs_read fs_write]", registered[0].Name(), registered[1].Name())
 	}
 }
 

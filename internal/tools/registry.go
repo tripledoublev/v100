@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/tripledoublev/v100/internal/providers"
@@ -26,11 +27,47 @@ func NewRegistry(enabledNames []string) *Registry {
 	}
 }
 
-// Register adds a tool to the registry.
+// Register adds or replaces a tool in the registry.
 func (r *Registry) Register(t Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[t.Name()] = t
+}
+
+// Enable marks a tool name as allowed for access once it is registered.
+func (r *Registry) Enable(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enabled[name] = true
+}
+
+// Disable removes a tool name from the allowlist.
+func (r *Registry) Disable(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.enabled, name)
+}
+
+// RegisterAndEnable adds or replaces a tool in the registry and marks it enabled.
+func (r *Registry) RegisterAndEnable(t Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tools[t.Name()] = t
+	r.enabled[t.Name()] = true
+}
+
+// Unregister removes a tool instance from the registry.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
+// IsEnabled reports whether the named tool is currently allowlisted.
+func (r *Registry) IsEnabled(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.enabled[name]
 }
 
 // Get returns an enabled tool by name.
@@ -42,6 +79,14 @@ func (r *Registry) Get(name string) (Tool, bool) {
 		return nil, false
 	}
 	return t, true
+}
+
+// Lookup returns a registered tool by name, regardless of enabled state.
+func (r *Registry) Lookup(name string) (Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tools[name]
+	return t, ok
 }
 
 // IsDangerous returns true if the named tool is classified as Dangerous.
@@ -70,8 +115,9 @@ func (r *Registry) Effects(name string) ToolEffects {
 func (r *Registry) Specs() []providers.ToolSpec {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	specs := make([]providers.ToolSpec, 0, len(r.enabled))
-	for name := range r.enabled {
+	names := r.enabledNamesLocked()
+	specs := make([]providers.ToolSpec, 0, len(names))
+	for _, name := range names {
 		t, ok := r.tools[name]
 		if !ok {
 			continue
@@ -91,7 +137,7 @@ func (r *Registry) List() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.enabled))
-	for name := range r.enabled {
+	for _, name := range r.enabledNamesLocked() {
 		if _, ok := r.tools[name]; ok {
 			names = append(names, name)
 		}
@@ -103,11 +149,28 @@ func (r *Registry) List() []string {
 func (r *Registry) EnabledTools() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]Tool, 0, len(r.enabled))
-	for name := range r.enabled {
+	names := r.enabledNamesLocked()
+	out := make([]Tool, 0, len(names))
+	for _, name := range names {
 		if t, ok := r.tools[name]; ok {
 			out = append(out, t)
 		}
+	}
+	return out
+}
+
+// RegisteredTools returns all currently registered Tool objects, regardless of enabled state.
+func (r *Registry) RegisteredTools() []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]Tool, 0, len(names))
+	for _, name := range names {
+		out = append(out, r.tools[name])
 	}
 	return out
 }
@@ -116,10 +179,19 @@ func (r *Registry) EnabledTools() []Tool {
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for name := range r.enabled {
+	for _, name := range r.enabledNamesLocked() {
 		if _, ok := r.tools[name]; !ok {
 			return fmt.Errorf("tool %q is enabled but not registered", name)
 		}
 	}
 	return nil
+}
+
+func (r *Registry) enabledNamesLocked() []string {
+	names := make([]string, 0, len(r.enabled))
+	for name := range r.enabled {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
