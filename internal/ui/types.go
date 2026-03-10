@@ -79,17 +79,17 @@ type TUIModel struct {
 	usedCost     float64
 	maxCost      float64
 
-	radioURL     string
-	radioPlayer     string
-	radioVolume     int
-	radioPlaying    bool
-	radioWave       string
-	radioErr        string
-	radioStep       int
-	radioCmd        *exec.Cmd
-	radioArtist     string
-	radioTitle      string
-	radioLastPoll   time.Time
+	radioURL      string
+	radioPlayer   string
+	radioVolume   int
+	radioPlaying  bool
+	radioWave     string
+	radioErr      string
+	radioStep     int
+	radioCmd      *exec.Cmd
+	radioArtist   string
+	radioTitle    string
+	radioLastPoll time.Time
 
 	copyTargets    []copyTarget
 	plainBuf       strings.Builder // plain-text transcript for full-copy
