@@ -264,3 +264,13 @@ func TestBuildToolRegistryDefaultConfigValidates(t *testing.T) {
 		t.Fatalf("default tool registry should validate, got %v", err)
 	}
 }
+
+func TestBuildToolRegistryPartialConfigValidatesFails(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// Add a tool name that will never be registered
+	cfg.Tools.Enabled = append(cfg.Tools.Enabled, "nonexistent_tool")
+	reg := buildToolRegistry(cfg)
+	if err := reg.Validate(); err == nil {
+		t.Fatal("expected Validate to fail for unregistered enabled tool, got nil")
+	}
+}
