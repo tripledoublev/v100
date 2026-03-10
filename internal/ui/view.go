@@ -86,13 +86,13 @@ func (m *TUIModel) View() string {
 
 		if m.showStatus {
 			// Budget for 3 panes: trace, status, metrics
-			rightBudget := remaining - metricsH - 4 // -4 for other 2 pane borders
-			if rightBudget < 8 {
-				rightBudget = 8 // minimum usable height
+			rightBudget := remaining - metricsH
+			if rightBudget < 4 {
+				rightBudget = 4
 			}
 			traceH = rightBudget * m.tracePanePct / 100
-			if traceH < 4 {
-				traceH = 4
+			if traceH < 2 {
+				traceH = 2
 			}
 			statusH = rightBudget - traceH
 			if statusH < 2 {
@@ -101,9 +101,9 @@ func (m *TUIModel) View() string {
 			}
 		} else {
 			// Budget for 2 panes: trace, metrics
-			traceH = remaining - metricsH - 2
-			if traceH < 4 {
-				traceH = 4
+			traceH = remaining - metricsH
+			if traceH < 2 {
+				traceH = 2
 			}
 		}
 
@@ -113,13 +113,17 @@ func (m *TUIModel) View() string {
 		m.traceView.Height = traceH - 2
 
 		left := leftSt.Width(leftW).Height(paneInnerH).Render(m.transcript.View())
+		
+		// 1. Trace Pane
 		tracePane := rightSt.Width(rightW).Height(traceH).Render(
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
 		)
 		
+		// 2. Visual Inspector (Fixed height)
 		metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps, m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens, m.usedCost, m.maxCost, rightW)
 		metricsPane := tuiPaneStyle.Width(rightW).Height(metricsH).Render(metricsView)
 
+		// 3. Status Pane (if shown)
 		rightCol := lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
 		if m.showStatus {
 			statusSt := tuiPaneStyle
