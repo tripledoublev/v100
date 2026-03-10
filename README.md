@@ -98,6 +98,16 @@ GOCACHE="$PWD/.gocache" go vet ./...
 ./scripts/lint.sh
 ```
 
+## Local Sandbox Image
+
+For Docker sandbox runs, build the repo-local image that includes the binaries the harness expects:
+
+```bash
+./scripts/build-sandbox-image.sh
+```
+
+That image installs Go, `git`, `patch`, `ripgrep`, and `curl`, which avoids the missing-`patch` failure seen with a plain `golang` base image.
+
 ## Providers
 
 ### ChatGPT subscription (default)
