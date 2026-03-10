@@ -194,7 +194,7 @@ func scanWorkspace(root string) (map[string]workspaceEntry, error) {
 		if rel == "." {
 			return nil
 		}
-		if shouldSkipWorkspacePath(info) {
+		if shouldSkipWorkspacePath(rel, info) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -223,8 +223,15 @@ func scanWorkspace(root string) (map[string]workspaceEntry, error) {
 	return entries, nil
 }
 
-func shouldSkipWorkspacePath(info os.FileInfo) bool {
-	return info.IsDir() && info.Name() == "runs"
+func shouldSkipWorkspacePath(rel string, info os.FileInfo) bool {
+	rel = filepath.ToSlash(rel)
+	if rel == "runs" || strings.HasPrefix(rel, "runs/") {
+		return true
+	}
+	if rel == ".cache" || strings.HasPrefix(rel, ".cache/") {
+		return true
+	}
+	return false
 }
 
 func fileDigest(path string) (string, error) {

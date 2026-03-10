@@ -170,6 +170,29 @@ func TestFinalizeSandboxWorkspaceOnSuccessDetectsSourceConflicts(t *testing.T) {
 	assertFileContent(t, filepath.Join(source, "change.txt"), "source-edited\n")
 }
 
+func TestFinalizeSandboxWorkspaceSkipsCacheDirectories(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+
+	writeFile(t, filepath.Join(source, "keep.txt"), "same\n")
+	writeFile(t, filepath.Join(sandbox, "keep.txt"), "same\n")
+	writeFile(t, filepath.Join(sandbox, ".cache", "go-build", "artifact"), "noise\n")
+	writeFile(t, filepath.Join(sandbox, ".cache", "go-mod", "pkg", "modfile"), "noise\n")
+
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:             "manual",
+		Success:          true,
+		SourceWorkspace:  source,
+		SandboxWorkspace: sandbox,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Diff.Empty() {
+		t.Fatalf("expected cache-only changes to be ignored, got diff %+v", result.Diff)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

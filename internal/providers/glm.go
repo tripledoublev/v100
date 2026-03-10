@@ -105,7 +105,7 @@ func (p *GLMProvider) Metadata(ctx context.Context, model string) (ModelMetadata
 func estimateCostGLM(model string, input, output int) float64 {
 	// Approximate pricing in USD based on CNY rates (1 USD ~ 7.2 CNY)
 	// GLM-4-Plus is roughly 50 CNY per 1M tokens ($7.00)
-	var pricePer1M float64 = 7.00
+	pricePer1M := 7.00
 
 	switch {
 	case strings.HasPrefix(model, "glm-4-plus"):
