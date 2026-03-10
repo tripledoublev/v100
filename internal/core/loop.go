@@ -282,10 +282,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 
 	// Feedback Loop: Auto-verify build if tool mutated workspace
 	if result.OK && tool.Effects().MutatesWorkspace {
-		if err := l.verifyBuild(ctx, stepID); err != nil {
-			// verifyBuild handles its own event emission and message injection
-			// we don't return error here so the loop continues with the alert context
-		}
+		_ = l.verifyBuild(ctx, stepID)
 	}
 
 	return nil
@@ -507,12 +504,22 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 
 	for _, c := range candidates {
 		m := l.Messages[c.idx]
+		
+		var summarySystemPrompt string
+		if m.Role == "tool" {
+			// Specific prompt for tool outputs
+			summarySystemPrompt = "Summarize the following tool output in a dense, compact form. Focus on the tool's action, any errors, and the main results or changes. Preserve key facts, file paths, and structured data elements. Remove verbatim content and repetition. Be very concise."
+		} else {
+			// General prompt for other message types
+			summarySystemPrompt = "Summarize the following message content in a dense, compact form. Preserve key facts, file paths, decisions, and results. Remove verbatim content and repetition. Be very concise."
+		}
+
 		summaryReq := providers.CompleteRequest{
 			RunID: l.Run.ID,
 			Messages: []providers.Message{
 				{
 					Role:    "system",
-					Content: "Summarize the following message content in a dense, compact form. Preserve key facts, file paths, decisions, and results. Remove verbatim content and repetition. Be very concise.",
+					Content: summarySystemPrompt,
 				},
 				{
 					Role:    "user",
