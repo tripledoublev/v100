@@ -211,6 +211,42 @@ func TestFSReadExec(t *testing.T) {
 	}
 }
 
+func TestFSReadExecLineRange(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	call := tools.ToolCallContext{
+		WorkspaceDir: dir,
+		Mapper:       &tools.MockMapper{Dir: dir},
+	}
+
+	writeTool := tools.FSWrite()
+	writeArgs, _ := json.Marshal(map[string]string{
+		"path":    "test.txt",
+		"content": "alpha\nbeta\ngamma\ndelta\n",
+	})
+	if _, err := writeTool.Exec(ctx, call, writeArgs); err != nil {
+		t.Fatal(err)
+	}
+
+	readTool := tools.FSRead()
+	readArgs, _ := json.Marshal(map[string]any{
+		"path":       "test.txt",
+		"start_line": 2,
+		"end_line":   3,
+	})
+	res, err := readTool.Exec(ctx, call, readArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("read failed: %s", res.Output)
+	}
+	want := "2:beta\n3:gamma\n"
+	if res.Output != want {
+		t.Fatalf("expected %q, got %q", want, res.Output)
+	}
+}
+
 func TestFSListExec(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
