@@ -16,7 +16,7 @@ func (m *TUIModel) Init() tea.Cmd {
 	// Initial clear screen and status
 	m.statusMode = "idle"
 	m.statusLine = "initializing..."
-	
+
 	return tea.Batch(
 		textinput.Blink,
 		tea.WindowSize(),

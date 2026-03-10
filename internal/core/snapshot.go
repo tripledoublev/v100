@@ -169,12 +169,29 @@ func copyTree(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
+		if shouldSkipSnapshotPath(rel, info) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
 		}
 		return copySnapshotFile(path, target, info.Mode())
 	})
+}
+
+func shouldSkipSnapshotPath(rel string, info os.FileInfo) bool {
+	rel = filepath.ToSlash(rel)
+	if rel == "runs" || strings.HasPrefix(rel, "runs/") {
+		return true
+	}
+	if rel == ".cache" || strings.HasPrefix(rel, ".cache/") {
+		return true
+	}
+	return false
 }
 
 func copySnapshotFile(src, dst string, mode os.FileMode) error {

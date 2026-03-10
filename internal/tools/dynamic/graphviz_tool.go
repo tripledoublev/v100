@@ -17,8 +17,8 @@ type graphvizTool struct{}
 
 func Graphviz() tools.Tool { return &graphvizTool{} }
 
-func (t *graphvizTool) Name() string        { return "graphviz" }
-func (t *graphvizTool) Description() string { return "Renders DOT graph descriptions to PNG images." }
+func (t *graphvizTool) Name() string                   { return "graphviz" }
+func (t *graphvizTool) Description() string            { return "Renders DOT graph descriptions to PNG images." }
 func (t *graphvizTool) DangerLevel() tools.DangerLevel { return tools.Safe }
 func (t *graphvizTool) Effects() tools.ToolEffects {
 	return tools.ToolEffects{MutatesWorkspace: true}

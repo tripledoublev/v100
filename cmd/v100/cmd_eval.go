@@ -159,7 +159,10 @@ func compareCmd() *cobra.Command {
 }
 
 func benchCmd(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	var evalType string
+	var rubricOverride string
+
+	cmd := &cobra.Command{
 		Use:   "bench <bench.toml>",
 		Short: "Run batch evaluation from a bench config file",
 		Args:  cobra.ExactArgs(1),
@@ -298,6 +301,44 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					_, _ = finalizeSandboxRun(cfg, coreRun, reason, s_mapper)
 
 					_ = trace.Close()
+
+					// ── Automated Evaluation ─────────────────────────────────
+					activeEvalType := evalType
+					if activeEvalType == "" && prompt.Expected != "" {
+						activeEvalType = "exact_match" // fallback for backward compat
+					}
+
+					if activeEvalType != "" {
+						fmt.Printf("  %s Evaluating run with %s...\n", ui.Info("eval"), activeEvalType)
+						scorer, err := eval.LookupScorer(activeEvalType, prov, variant.Model)
+						if err != nil {
+							fmt.Printf("  %s %v\n", ui.Fail("error"), err)
+							continue
+						}
+
+						// Load events for scoring
+						events, err := core.ReadAll(tracePath)
+						if err != nil {
+							fmt.Printf("  %s %v\n", ui.Fail("error"), err)
+							continue
+						}
+
+						rubric := prompt.Expected
+						if rubricOverride != "" {
+							rubric = rubricOverride
+						}
+
+						res, err := scorer.Score(ctx, events, rubric)
+						if err != nil {
+							fmt.Printf("  %s %v\n", ui.Fail("error"), err)
+						} else {
+							meta, _ := core.ReadMeta(runDir)
+							meta.Score = res.Score
+							meta.ScoreNotes = res.Notes
+							_ = core.WriteMeta(runDir, meta)
+							fmt.Printf("  %s Verdict: %s\n", ui.OK("done"), strings.ToUpper(res.Score))
+						}
+					}
 				}
 			}
 
@@ -305,6 +346,11 @@ func benchCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&evalType, "eval", "", "automated scorer type (exact_match, contains, regex, reflective)")
+	cmd.Flags().StringVar(&rubricOverride, "rubric", "", "override expected string with this rubric for reflective eval")
+
+	return cmd
 }
 
 func queryCmd() *cobra.Command {
@@ -423,6 +469,8 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 			if prompt == "" {
 				return fmt.Errorf("--prompt is required")
 			}
+			evalType, _ := cmd.Flags().GetString("eval")
+			rubric, _ := cmd.Flags().GetString("rubric")
 
 			cfg, err := loadConfig(*cfgPath)
 			if err != nil {
@@ -438,6 +486,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 
 			total := len(exp.Config.Variants) * exp.Config.Repeats
 			completed := 0
+			ctx := context.Background()
 
 			for _, variant := range exp.Config.Variants {
 				provName := variant.Provider
@@ -544,7 +593,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						Snapshots:   buildSnapshotManager(cfg, s_workspace),
 					}
 
-					metadata, _ := prov.Metadata(context.Background(), model)
+					metadata, _ := prov.Metadata(ctx, model)
 					loop.ModelMetadata = metadata
 
 					_ = loop.EmitRunStart(core.RunStartPayload{
@@ -555,7 +604,7 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 						ModelMetadata: metadata,
 					})
 
-					err = loop.Step(context.Background(), prompt)
+					err = loop.Step(ctx, prompt)
 					reason := "completed"
 					if err != nil {
 						reason = "error"
@@ -566,6 +615,27 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					_, _ = finalizeSandboxRun(cfg, coreRun, reason, s_mapper)
 
 					_ = trace.Close()
+
+					// ── Automated Evaluation ─────────────────────────────────
+					if evalType != "" {
+						fmt.Printf("  Evaluating run with %s...\n", evalType)
+						scorer, err := eval.LookupScorer(evalType, prov, model)
+						if err != nil {
+							fmt.Printf("  error: %v\n", err)
+						} else {
+							events, _ := core.ReadAll(tracePath)
+							res, err := scorer.Score(ctx, events, rubric)
+							if err != nil {
+								fmt.Printf("  error: %v\n", err)
+							} else {
+								meta, _ := core.ReadMeta(runDir)
+								meta.Score = res.Score
+								meta.ScoreNotes = res.Notes
+								_ = core.WriteMeta(runDir, meta)
+								fmt.Printf("  verdict: %s\n", strings.ToUpper(res.Score))
+							}
+						}
+					}
 
 					exp.RunIDs = append(exp.RunIDs, runID)
 					_ = exp.Save("runs")
@@ -580,6 +650,8 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 		},
 	}
 	run.Flags().String("prompt", "", "prompt to send to each variant trial")
+	run.Flags().String("eval", "", "automated scorer type (exact_match, contains, regex, reflective)")
+	run.Flags().String("rubric", "", "rubric or expected outcome for evaluation")
 
 	results := &cobra.Command{
 		Use:   "results <experiment_id>",
@@ -674,6 +746,92 @@ func analyzeCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func evalCmd(cfgPath *string) *cobra.Command {
+	var rubric string
+	var provider string
+	var model string
+
+	cmd := &cobra.Command{
+		Use:   "eval <run_id>",
+		Short: "Evaluate a run trace against a natural language rubric",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+
+			if provider == "" {
+				provider = cfg.Defaults.Provider
+			}
+			prov, err := buildProvider(cfg, provider)
+			if err != nil {
+				return err
+			}
+
+			if model == "" {
+				model = cfg.Providers[provider].DefaultModel
+			}
+
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+
+			scorer, err := eval.LookupScorer("reflective", prov, model)
+			if err != nil {
+				return err
+			}
+
+			if rubric == "" {
+				// Try to get rubric from meta.json name or just use a default
+				meta, _ := core.ReadMeta(runDir)
+				rubric = "Did the agent complete the task successfully and efficiently?"
+				if meta.Name != "" {
+					rubric = fmt.Sprintf("Did the agent successfully complete the task: %s", meta.Name)
+				}
+			}
+
+			fmt.Printf("Evaluating %s with rubric: %q\n", ui.Info(runID), rubric)
+			fmt.Printf("Using model: %s/%s\n", provider, model)
+
+			res, err := scorer.Score(context.Background(), events, rubric)
+			if err != nil {
+				return err
+			}
+
+			verdictStr := strings.ToUpper(res.Score)
+			var color func(string) string
+			switch res.Score {
+			case "pass":
+				color = ui.OK
+			case "partial":
+				color = ui.Warn
+			default:
+				color = ui.Fail
+			}
+
+			fmt.Printf("\nVerdict: %s\n", color(verdictStr))
+			fmt.Printf("Score:   %.2f\n", res.Value)
+			fmt.Printf("\nReasoning:\n%s\n", res.Notes)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&rubric, "rubric", "", "Natural language rubric for evaluation")
+	cmd.Flags().StringVar(&provider, "provider", "", "Provider override")
+	cmd.Flags().StringVar(&model, "model", "", "Model override")
+
+	return cmd
 }
 
 func diffCmd() *cobra.Command {

@@ -24,6 +24,11 @@ func DistillTrace(tracePath string) ([]ShareGPTMessage, error) {
 		return nil, fmt.Errorf("failed to read trace: %w", err)
 	}
 
+	return DistillEvents(events), nil
+}
+
+// DistillEvents converts a slice of core events into ShareGPT-formatted messages.
+func DistillEvents(events []core.Event) []ShareGPTMessage {
 	var conversation []ShareGPTMessage
 
 	// Track the current assistant message being built
@@ -93,7 +98,7 @@ func DistillTrace(tracePath string) ([]ShareGPTMessage, error) {
 		}
 	}
 
-	return conversation, nil
+	return conversation
 }
 
 // WriteShareGPT writes the conversation to a JSON file in ShareGPT format.

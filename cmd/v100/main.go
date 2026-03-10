@@ -48,6 +48,7 @@ func rootCmd() *cobra.Command {
 		benchCmd(&cfgPath),
 		experimentCmd(&cfgPath),
 		analyzeCmd(),
+		evalCmd(&cfgPath),
 		diffCmd(),
 		verifyCmd(),
 		queryCmd(),

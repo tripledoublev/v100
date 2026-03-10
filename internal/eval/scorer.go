@@ -26,7 +26,7 @@ type Scorer interface {
 }
 
 // LookupScorer returns a scorer by name. Names:
-// "exact_match", "contains", "regex", "script:<command>", "model_graded"
+// "exact_match", "contains", "regex", "script:<command>", "model_graded", "reflective"
 func LookupScorer(name string, prov providers.Provider, model string) (Scorer, error) {
 	switch {
 	case name == "exact_match":
@@ -42,9 +42,94 @@ func LookupScorer(name string, prov providers.Provider, model string) (Scorer, e
 			return nil, fmt.Errorf("model_graded scorer requires a provider")
 		}
 		return &ModelGraded{Provider: prov, Model: model}, nil
+	case name == "reflective":
+		if prov == nil {
+			return nil, fmt.Errorf("reflective scorer requires a provider")
+		}
+		return &ReflectiveScorer{Provider: prov, Model: model}, nil
 	default:
 		return nil, fmt.Errorf("unknown scorer: %q", name)
 	}
+}
+
+// ... (existing code)
+
+// ReflectiveScorer uses an LLM to evaluate the full execution trace against a rubric.
+type ReflectiveScorer struct {
+	Provider providers.Provider
+	Model    string
+}
+
+const reflectiveScorerPrompt = `You are a Senior Agent Researcher. Your task is to evaluate an autonomous agent's performance based on its full execution trace.
+
+### Evaluation Rubric:
+{{rubric}}
+
+### Execution Trace:
+{{trace}}
+
+### Instructions:
+1. Analyze the agent's reasoning, tool usage, and final outcome.
+2. Check if the agent followed the procedure and achieved the goal correctly.
+3. Identify any inefficiencies, hallucinations, or safety violations.
+4. Provide a final verdict: PASS, FAIL, or PARTIAL.
+5. Provide a brief explanation of your reasoning.
+
+Reply in the following format:
+VERDICT: <PASS/FAIL/PARTIAL>
+REASONING: <your explanation>`
+
+func (s *ReflectiveScorer) Name() string { return "reflective" }
+
+func (s *ReflectiveScorer) Score(ctx context.Context, trace []core.Event, rubric string) (ScoreResult, error) {
+	msgs := DistillEvents(trace)
+	var sb strings.Builder
+	for _, m := range msgs {
+		fmt.Fprintf(&sb, "--- %s ---\n%s\n\n", m.From, m.Value)
+	}
+
+	prompt := strings.ReplaceAll(reflectiveScorerPrompt, "{{rubric}}", rubric)
+	prompt = strings.ReplaceAll(prompt, "{{trace}}", sb.String())
+
+	resp, err := s.Provider.Complete(ctx, providers.CompleteRequest{
+		Messages: []providers.Message{
+			{Role: "user", Content: prompt},
+		},
+		Model: s.Model,
+		GenParams: providers.GenParams{
+			Temperature: ptrFloat64(0.0),
+		},
+	})
+	if err != nil {
+		return ScoreResult{}, fmt.Errorf("reflective scorer: %w", err)
+	}
+
+	text := strings.TrimSpace(resp.AssistantText)
+	verdict := "fail"
+	if strings.Contains(strings.ToUpper(text), "VERDICT: PASS") {
+		verdict = "pass"
+	} else if strings.Contains(strings.ToUpper(text), "VERDICT: PARTIAL") {
+		verdict = "partial"
+	}
+
+	reasoning := text
+	if idx := strings.Index(strings.ToUpper(text), "REASONING:"); idx != -1 {
+		reasoning = strings.TrimSpace(text[idx+len("REASONING:"):])
+	}
+
+	value := 0.0
+	switch verdict {
+	case "pass":
+		value = 1.0
+	case "partial":
+		value = 0.5
+	}
+
+	return ScoreResult{
+		Score: verdict,
+		Value: value,
+		Notes: reasoning,
+	}, nil
 }
 
 // lastAssistantText extracts the final assistant text from a trace.
