@@ -299,10 +299,12 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		usagePercent := (budgetAfter.UsedTokens * 100) / budgetAfter.MaxTokens
 		if usagePercent >= 80 && usagePercent < 100 {
 			_, _ = l.emit(EventUserMsg, stepID, UserMsgPayload{
+				Source:  "system",
 				Content: fmt.Sprintf("⚠ System alert: token budget 80%% consumed (%d/%d tokens). Remaining budget is limited.", budgetAfter.UsedTokens, budgetAfter.MaxTokens),
 			})
 		} else if usagePercent >= 50 && usagePercent < 80 {
 			_, _ = l.emit(EventUserMsg, stepID, UserMsgPayload{
+				Source:  "system",
 				Content: fmt.Sprintf("⚠ System alert: token budget 50%% consumed (%d/%d tokens). Plan remaining steps carefully.", budgetAfter.UsedTokens, budgetAfter.MaxTokens),
 			})
 		}

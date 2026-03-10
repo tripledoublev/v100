@@ -53,9 +53,13 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		label := styleUser.Render("you")
+		if p.Source == "system" {
+			label = styleWarn.Render("v100")
+		}
 		fmt.Printf("\n%s  %s  %s\n",
 			ts,
-			styleUser.Render("you"),
+			label,
 			p.Content,
 		)
 
@@ -336,12 +340,18 @@ func PrintReplayEvent(ev core.Event) {
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		borderClr := clrUser
+		label := styleUser.Render("you")
+		if p.Source == "system" {
+			borderClr = clrWarning
+			label = styleWarn.Render("v100")
+		}
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(clrUser).
+			BorderForeground(borderClr).
 			Padding(0, 1).
 			Render(
-				styleUser.Render("you") + styleMuted.Render("  "+ts) + "\n" +
+				label + styleMuted.Render("  "+ts) + "\n" +
 					p.Content,
 			)
 		fmt.Printf("\n%s\n", box)

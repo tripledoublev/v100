@@ -127,6 +127,7 @@ type RunStartPayload struct {
 // UserMsgPayload is the Payload for EventUserMsg.
 type UserMsgPayload struct {
 	Content string `json:"content"`
+	Source  string `json:"source,omitempty"` // "system" for harness-injected messages; empty = user input
 }
 
 // ModelCallPayload is the Payload for EventModelCall.

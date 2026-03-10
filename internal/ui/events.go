@@ -39,11 +39,17 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
 			wrapped := m.wrapPlainForTranscript(p.Content)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render("you"), wrapped)
+			label := styleUser.Render("you")
+			plainLabel := "you"
+			if p.Source == "system" {
+				label = styleWarn.Render("v100")
+				plainLabel = "v100"
+			}
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, label, wrapped)
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
 			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Content})
-			_, _ = fmt.Fprintf(&m.plainBuf, "\nyou: %s\n", p.Content)
+			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", plainLabel, p.Content)
 		}
 
 	case core.EventModelResp:
@@ -193,6 +199,11 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 	case core.EventRunStart:
 		return sep + "  " + indent + styleInfo.Render("▶▶") + "  " + styleMuted.Render("run")
 	case core.EventUserMsg:
+		var p core.UserMsgPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.Source == "system" {
+			return sep + "  " + indent + styleWarn.Render(">>") + "  " + styleWarn.Render("v100")
+		}
 		return sep + "  " + indent + styleUser.Render(">>") + "  " + styleUser.Render("you")
 	case core.EventModelResp:
 		var p core.ModelRespPayload
