@@ -1,0 +1,30 @@
+name = "search-heavy-v1"
+
+[[prompts]]
+message = "Search the codebase for all occurrences of 'time.Sleep'. List the files and line numbers. Then, explain why each sleep is necessary or suggest an alternative."
+expected = "Did the agent find all occurrences of time.Sleep and provide reasonable explanations or alternatives for each?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Find all implementations of the 'Provider' interface. For each implementation, identify if it supports streaming and how it handles errors."
+expected = "Did the agent correctly identify all Provider implementations and accurately describe their streaming support and error handling?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Locate every tool that has a 'Dangerous' danger level. Summarize what each of these tools does and why it is considered dangerous."
+expected = "Did the agent list all Dangerous tools and correctly explain their functionality and risks?"
+scorer = "reflective"
+
+[[variants]]
+name = "gemini-react"
+provider = "gemini"
+model = "gemini-2.0-flash"
+solver = "react"
+budget_steps = 8
+
+[[variants]]
+name = "minimax-react"
+provider = "minimax"
+model = "MiniMax-M2.5"
+solver = "react"
+budget_steps = 8

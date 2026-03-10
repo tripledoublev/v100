@@ -1,0 +1,30 @@
+name = "agentic-engineering-v1"
+
+[[prompts]]
+message = "Refactor the 'Scorer' interface in internal/eval/scorer.go to include a 'Reset() error' method. Ensure all implementing types (ExactMatch, Contains, RegexMatch, Script, ModelGraded, ReflectiveScorer) are updated to satisfy the new interface with a no-op implementation where appropriate. Verify that the code still compiles."
+expected = "Did the agent correctly add the Reset() method to the Scorer interface and all its implementations? Does the code compile without errors?"
+scorer = "reflective"
+
+[[prompts]]
+message = "In the sandbox, create a new Go project in a directory named 'dep-test'. Add a dependency on 'github.com/gin-gonic/gin' at version v1.9.0. Then, try to upgrade it to v1.10.0 using 'go get'. Finally, run 'go mod tidy' and verify the version in go.mod."
+expected = "Did the agent successfully create the project, manage the gin dependency, and verify the final version in go.mod as v1.10.0?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Generate a new test file 'internal/core/budget_extended_test.go' that provides 100% branch coverage for the 'BudgetTracker.AddCost' and 'BudgetTracker.AddTokens' methods. Run the tests to verify they pass."
+expected = "Did the agent create a valid test file that targets the BudgetTracker cost and token methods? Did the tests pass?"
+scorer = "reflective"
+
+[[variants]]
+name = "gemini-react"
+provider = "gemini"
+model = "gemini-2.0-flash"
+solver = "react"
+budget_steps = 10
+
+[[variants]]
+name = "minimax-react"
+provider = "minimax"
+model = "MiniMax-M2.5"
+solver = "react"
+budget_steps = 10

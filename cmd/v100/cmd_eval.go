@@ -304,6 +304,9 @@ func benchCmd(cfgPath *string) *cobra.Command {
 
 					// ── Automated Evaluation ─────────────────────────────────
 					activeEvalType := evalType
+					if activeEvalType == "" {
+						activeEvalType = prompt.Scorer
+					}
 					if activeEvalType == "" && prompt.Expected != "" {
 						activeEvalType = "exact_match" // fallback for backward compat
 					}

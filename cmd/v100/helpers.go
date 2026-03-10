@@ -92,6 +92,12 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 		raw, err = providers.NewAnthropicProvider(authEnv, pc.DefaultModel)
 	case "minimax":
 		raw, err = providers.NewMiniMaxProvider("", pc.DefaultModel)
+	case "glm":
+		authEnv := pc.Auth.Env
+		if authEnv == "" {
+			authEnv = "ZHIPU_API_KEY"
+		}
+		raw, err = providers.NewGLMProvider(authEnv, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
