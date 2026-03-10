@@ -22,6 +22,7 @@ type RunMetrics struct {
 	ToolVsReasoningTimeRatio     float64
 	LatencyP50MS                 int64
 	LatencyP95MS                 int64
+	AutonomousHorizonSteps       int
 	EfficiencyScore              float64
 	DispatchCalls                int
 	DispatchFailures             int
@@ -63,10 +64,20 @@ func ComputeMetrics(events []Event) RunMetrics {
 		toolDurationSum     int64
 		reasonDurationSum   int64
 		successfulToolSteps = map[string]bool{}
+		horizonReached      bool
+		currentStep         int
 	)
 
 	for _, ev := range events {
 		switch ev.Type {
+		case EventStepSummary:
+			currentStep++
+			var p StepSummaryPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p.DurationMS > 0 {
+				stepDurationSum += p.DurationMS
+				stepDurationCount++
+			}
 		case EventAgentDispatch:
 			var p AgentDispatchPayload
 			_ = json.Unmarshal(ev.Payload, &p)
@@ -93,18 +104,14 @@ func ComputeMetrics(events []Event) RunMetrics {
 				if ev.StepID != "" {
 					successfulToolSteps[ev.StepID] = true
 				}
+			} else if !horizonReached {
+				m.AutonomousHorizonSteps = currentStep
+				horizonReached = true
 			}
 		case EventCompress:
 			var p CompressPayload
 			_ = json.Unmarshal(ev.Payload, &p)
 			compressBeforeSum += p.TokensBefore
-		case EventStepSummary:
-			var p StepSummaryPayload
-			_ = json.Unmarshal(ev.Payload, &p)
-			if p.DurationMS > 0 {
-				stepDurationSum += p.DurationMS
-				stepDurationCount++
-			}
 		case EventModelResp:
 			var p ModelRespPayload
 			_ = json.Unmarshal(ev.Payload, &p)
@@ -123,8 +130,28 @@ func ComputeMetrics(events []Event) RunMetrics {
 					role = "anonymous"
 				}
 				m.DispatchFailuresByRole[role]++
+				if !horizonReached {
+					m.AutonomousHorizonSteps = currentStep
+					horizonReached = true
+				}
+			}
+		case EventRunError:
+			if !horizonReached {
+				m.AutonomousHorizonSteps = currentStep
+				horizonReached = true
+			}
+		case EventRunEnd:
+			var p RunEndPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p.Reason == "user_exit" && !horizonReached {
+				m.AutonomousHorizonSteps = currentStep
+				horizonReached = true
 			}
 		}
+	}
+
+	if !horizonReached {
+		m.AutonomousHorizonSteps = currentStep
 	}
 
 	if toolResultCount > 0 {
@@ -340,6 +367,7 @@ func FormatMetrics(m RunMetrics, c RunClassification) string {
 	_, _ = fmt.Fprintf(&b, "  time_per_step_ms:           %.1f\n", m.TimePerStepMS)
 	_, _ = fmt.Fprintf(&b, "  latency_p50_ms:             %d\n", m.LatencyP50MS)
 	_, _ = fmt.Fprintf(&b, "  latency_p95_ms:             %d\n", m.LatencyP95MS)
+	_, _ = fmt.Fprintf(&b, "  autonomous_horizon_steps:   %d\n", m.AutonomousHorizonSteps)
 	_, _ = fmt.Fprintf(&b, "  tool_vs_reasoning_time_ratio: %.2f\n", m.ToolVsReasoningTimeRatio)
 	if m.DispatchCalls > 0 {
 		b.WriteString("\nDispatch metrics:\n")
@@ -393,6 +421,7 @@ func FormatMetricCompare(metrics []RunMetrics) string {
 	row("EfficiencyScore", vals(func(m RunMetrics) string { return fmt.Sprintf("%.1f", m.EfficiencyScore) }))
 	row("ToolSuccessRate", vals(func(m RunMetrics) string { return fmt.Sprintf("%.2f", m.ToolCallSuccessRate) }))
 	row("ToolRetryRate", vals(func(m RunMetrics) string { return fmt.Sprintf("%.2f", m.ToolRetryRate) }))
+	row("HorizonSteps", vals(func(m RunMetrics) string { return fmt.Sprintf("%d", m.AutonomousHorizonSteps) }))
 	row("CompFreq", vals(func(m RunMetrics) string { return fmt.Sprintf("%.2f", m.CompressionFrequency) }))
 	row("TimePerStep", vals(func(m RunMetrics) string { return fmt.Sprintf("%.1fms", m.TimePerStepMS) }))
 	row("Tok/SuccessStep", vals(func(m RunMetrics) string { return fmt.Sprintf("%.0f", m.TokensPerSuccessfulToolStep) }))
