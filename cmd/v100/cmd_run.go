@@ -403,25 +403,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 	}
 
-	// Generate summary if possible
-	finalSummary := ""
-	if len(loop.Messages) > 1 {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		sumProv, _ := buildProvider(cfg, "gemini")
-		if sumProv != nil {
-			sumReq := providers.CompleteRequest{
-				Model: "gemini-2.5-flash",
-				Messages: append(loop.Messages, providers.Message{
-					Role:    "user",
-					Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
-				}),
-			}
-			if resp, err := sumProv.Complete(ctx, sumReq); err == nil {
-				finalSummary = strings.TrimSpace(resp.AssistantText)
-			}
-		}
-	}
+	// Generate summary if possible using the run's own provider
+	finalSummary := generateRunSummary(context.Background(), prov, model, loop.Messages)
 
 	_ = loop.EmitRunEnd(reason, finalSummary)
 
@@ -433,4 +416,46 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 	fmt.Println(ui.Dim("budget: " + budget.Summary()))
 	return nil
+}
+
+// generateRunSummary generates a one-sentence summary of a completed run.
+// Fix #9: Uses the run's own provider (not a hardcoded Gemini) and
+// injects a system message so the model knows it's summarizing a completed run.
+func generateRunSummary(ctx context.Context, prov providers.Provider, model string, messages []providers.Message) string {
+	if len(messages) <= 1 {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Pass only last 20 messages to avoid hitting token limits
+	msgs := messages
+	const maxSummaryMsgs = 20
+	if len(msgs) > maxSummaryMsgs {
+		msgs = msgs[len(msgs)-maxSummaryMsgs:]
+	}
+
+	// Prepend a system-level context message so the model knows its role
+	contextMsg := providers.Message{
+		Role:    "user",
+		Content: "The following is a completed agent run transcript. Your task is to summarize it.",
+	}
+	ackMsg := providers.Message{
+		Role:    "assistant",
+		Content: "Understood. I will summarize the completed run based on the transcript.",
+	}
+	summaryMsgs := append([]providers.Message{contextMsg, ackMsg}, msgs...)
+	summaryMsgs = append(summaryMsgs, providers.Message{
+		Role:    "user",
+		Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
+	})
+
+	req := providers.CompleteRequest{
+		Model:    model,
+		Messages: summaryMsgs,
+	}
+	if resp, err := prov.Complete(ctx, req); err == nil {
+		return strings.TrimSpace(resp.AssistantText)
+	}
+	return ""
 }

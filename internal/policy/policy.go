@@ -52,6 +52,14 @@ You have a persistent memory file at MEMORY.md in your workspace.
 - IMPORTANT: Write to MEMORY.md before making changes that will trigger a hot-reload restart
   (editing .go files under ` + "`./v100 dev`" + `), since the restart will clear your conversation history.
 
+## Efficiency Rules
+
+- Prefer project_search before exploring directories manually — it is faster than cascading fs_list calls.
+- Prefer fs_list over repeated sh invocations for directory exploration.
+- After finding a relevant file with search, read only the needed lines with start_line/end_line rather than the whole file.
+- If you already know the answer from prior context in this session, answer immediately — do not re-explore.
+- Never call more than 2 tools to answer a question you can already answer from context.
+
 ## General Rules
 
 - Never delete files without confirmation.
