@@ -233,8 +233,82 @@ backend = "docker"
 	}
 }
 
+func TestLoadConfigAppliesDefaultToolsWhenToolsSectionMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	toml := `
+[defaults]
+provider = "minimax"
+
+[sandbox]
+backend = "docker"
+`
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defaults := DefaultConfig().Tools
+	for _, want := range defaults.Enabled {
+		if !containsString(cfg.Tools.Enabled, want) {
+			t.Fatalf("expected enabled tools to include %q, got %v", want, cfg.Tools.Enabled)
+		}
+	}
+	for _, want := range defaults.Dangerous {
+		if !containsString(cfg.Tools.Dangerous, want) {
+			t.Fatalf("expected dangerous tools to include %q, got %v", want, cfg.Tools.Dangerous)
+		}
+	}
+}
+
+func TestLoadConfigPreservesExplicitToolAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	toml := `
+[providers.openai]
+type = "openai"
+default_model = "gpt-4o"
+[providers.openai.auth]
+env = "OPENAI_API_KEY"
+
+[tools]
+enabled = ["fs_read"]
+dangerous = []
+`
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !containsString(cfg.Tools.Enabled, "fs_read") {
+		t.Fatalf("expected explicit enabled tools to include fs_read, got %v", cfg.Tools.Enabled)
+	}
+	if containsString(cfg.Tools.Enabled, "fs_write") {
+		t.Fatalf("expected explicit enabled tools to remain custom, got %v", cfg.Tools.Enabled)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func findSubstring(s, sub string) bool {

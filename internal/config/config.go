@@ -280,6 +280,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	applyProviderDefaults(&cfg, DefaultConfig())
+	applyToolDefaults(&cfg.Tools, DefaultConfig().Tools)
 	// Backward-compatible tool migrations for older config files.
 	ensureString(&cfg.Tools.Enabled, "sh")
 	ensureString(&cfg.Tools.Dangerous, "sh")
@@ -323,6 +324,15 @@ func applyProviderDefaults(cfg *Config, defaults *Config) {
 		if _, ok := cfg.Providers[name]; !ok {
 			cfg.Providers[name] = pc
 		}
+	}
+}
+
+func applyToolDefaults(dst *ToolsConfig, defaults ToolsConfig) {
+	if len(dst.Enabled) == 0 {
+		dst.Enabled = append([]string(nil), defaults.Enabled...)
+	}
+	if len(dst.Dangerous) == 0 {
+		dst.Dangerous = append([]string(nil), defaults.Dangerous...)
 	}
 }
 

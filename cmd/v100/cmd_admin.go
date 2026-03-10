@@ -480,12 +480,12 @@ func exportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 
 			gw := gzip.NewWriter(f)
-			defer gw.Close()
+			defer func() { _ = gw.Close() }()
 			tw := tar.NewWriter(gw)
-			defer tw.Close()
+			defer func() { _ = tw.Close() }()
 
 			// 1. Add trace.jsonl
 			tracePath := filepath.Join(runDir, "trace.jsonl")
@@ -533,7 +533,7 @@ func addFileToTar(tw *tar.Writer, srcPath, tarPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = io.Copy(tw, f)
 	return err
