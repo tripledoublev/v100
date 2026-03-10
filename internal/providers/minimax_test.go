@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -117,7 +118,7 @@ func TestMiniMaxMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	meta, err := p.Metadata(nil, "")
+	meta, err := p.Metadata(context.TODO(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

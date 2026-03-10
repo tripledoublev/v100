@@ -72,7 +72,7 @@ func (m *TUIModel) adjustRadioVolume(delta int) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		cmd := fmt.Sprintf(`{"command": ["set_property", "volume", %d]}`, vol)
 		_, _ = conn.Write([]byte(cmd + "\n"))
 	}(m.radioVolume)

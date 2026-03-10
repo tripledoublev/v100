@@ -235,14 +235,14 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					// Resolve solver
 					solver, err := buildSolver(cfg, variant.Solver)
 					if err != nil {
-						trace.Close()
+						_ = trace.Close()
 						return err
 					}
 
 					// Build provider from variant config
 					prov, err := buildProvider(cfg, variant.Provider)
 					if err != nil {
-						trace.Close()
+						_ = trace.Close()
 						return err
 					}
 

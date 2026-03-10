@@ -78,13 +78,13 @@ func (t *SQLSearchTool) Exec(ctx context.Context, call tools.ToolCallContext, ar
 	if err != nil {
 		return tools.ToolResult{OK: false, Output: err.Error(), DurationMS: time.Since(start).Milliseconds()}, nil
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	rows, err := db.QueryContext(ctx, a.Query)
 	if err != nil {
 		return tools.ToolResult{OK: false, Output: err.Error(), DurationMS: time.Since(start).Milliseconds()}, nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	columns, _ := rows.Columns()
 	var results []map[string]interface{}
