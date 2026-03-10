@@ -85,23 +85,19 @@ func (m *TUIModel) View() string {
 		var traceH int
 
 		if m.showStatus {
-			// Budget for 3 panes: trace, status, metrics
-			rightBudget := remaining - metricsH
-			if rightBudget < 4 {
-				rightBudget = 4
+			// All 3 right panes must sum to paneInnerH to match left column height.
+			statusH = 12
+			traceH = paneInnerH - metricsH - statusH
+			if traceH < 4 {
+				traceH = 4
+				statusH = paneInnerH - metricsH - traceH
 			}
-			traceH = rightBudget * m.tracePanePct / 100
-			if traceH < 2 {
-				traceH = 2
-			}
-			statusH = rightBudget - traceH
-			if statusH < 2 {
-				statusH = 2
-				traceH = rightBudget - statusH
+			if statusH < 4 {
+				statusH = 4
 			}
 		} else {
-			// Budget for 2 panes: trace, metrics
-			traceH = remaining - metricsH
+			// 2 right panes must sum to paneInnerH.
+			traceH = paneInnerH - metricsH
 			if traceH < 2 {
 				traceH = 2
 			}
