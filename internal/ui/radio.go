@@ -27,7 +27,7 @@ type RadioStation struct {
 
 // availableStations defines the radio stations users can choose from
 var availableStations = []RadioStation{
-	{Name: "Radiojar", URL: "https://n04.radiojar.com/78cxy6wkxtzuv"},
+	{Name: "Radio Al Hara", URL: "https://n04.radiojar.com/78cxy6wkxtzuv"},
 	{Name: "NTS Radio 1", URL: "https://stream-relay-geo.ntslive.net/stream"},
 	{Name: "NTS Radio 2", URL: "https://stream-relay-geo.ntslive.net/stream2"},
 }
