@@ -47,49 +47,6 @@ func (m *TUIModel) jumpToStation(idx int) {
 	}
 }
 
-func (m *TUIModel) cycleStation(direction int) {
-	// Find current station index
-	currentIdx := -1
-	for i, s := range availableStations {
-		if s.URL == m.radioURL {
-			currentIdx = i
-			break
-		}
-	}
-
-	// If current URL not in list, try to find by checking if it starts with known URL
-	if currentIdx == -1 {
-		for i, s := range availableStations {
-			if strings.HasPrefix(m.radioURL, strings.TrimSuffix(s.URL, "/")) {
-				currentIdx = i
-				break
-			}
-		}
-	}
-
-	// Cycle to next/previous station
-	newIdx := currentIdx + direction
-	if newIdx < 0 {
-		newIdx = len(availableStations) - 1
-	} else if newIdx >= len(availableStations) {
-		newIdx = 0
-	}
-
-	// Stop current radio if playing and switch station
-	wasPlaying := m.radioPlaying
-	if wasPlaying {
-		m.stopRadio()
-	}
-
-	m.radioURL = availableStations[newIdx].URL
-
-	if wasPlaying {
-		m.startRadio()
-	}
-
-	m.statusLine = "radio: switched to " + availableStations[newIdx].Name
-	m.statusMode = "radio"
-}
 
 // getCurrentStationName returns the name of the current station
 func (m *TUIModel) getCurrentStationName() string {

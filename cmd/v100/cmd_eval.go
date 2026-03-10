@@ -105,6 +105,27 @@ func statsCmd() *cobra.Command {
 	}
 }
 
+func digestCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "digest <run_id>",
+		Short: "Show a compact failure digest for a completed run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runDir, err := findRunDir(args[0])
+			if err != nil {
+				return err
+			}
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+			digest := core.ComputeDigest(events)
+			fmt.Print(core.FormatDigest(digest))
+			return nil
+		},
+	}
+}
+
 func metricsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "metrics <run_id>",

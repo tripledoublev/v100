@@ -45,6 +45,7 @@ func rootCmd() *cobra.Command {
 		distillCmd(),
 		statsCmd(),
 		metricsCmd(),
+		digestCmd(),
 		compareCmd(),
 		benchCmd(&cfgPath),
 		experimentCmd(&cfgPath),

@@ -243,6 +243,153 @@ func FormatModelPricing(m providers.ModelMetadata) string {
 	return fmt.Sprintf("$%.2f/$%.2f", m.CostPer1MIn, m.CostPer1MOut)
 }
 
+// ── Failure Digest ────────────────────────────────────────────────────────────
+
+// RunDigest is a compact failure-focused summary of a completed run.
+type RunDigest struct {
+	RunID         string
+	EndReason     string
+	ToolFailures  []DigestToolFailure // last up to 5 failed tool calls
+	RunErrors     []string            // run.error messages
+	RetryCluster  []DigestRetryEntry  // tools called 3+ times (retry hotspot)
+	HighTokenStep DigestStep          // step with most input tokens
+	TotalSteps    int
+	TotalTokens   int
+}
+
+// DigestToolFailure captures a single failed tool call.
+type DigestToolFailure struct {
+	Name   string
+	Output string // truncated error message
+}
+
+// DigestRetryEntry is a tool that was called repeatedly within the run.
+type DigestRetryEntry struct {
+	Name  string
+	Count int
+}
+
+// DigestStep identifies a step by number and token cost.
+type DigestStep struct {
+	StepNum    int
+	TokensIn   int
+	TokensOut  int
+}
+
+// ComputeDigest builds a RunDigest from trace events.
+func ComputeDigest(events []Event) RunDigest {
+	d := RunDigest{}
+	toolCounts := map[string]int{}
+
+	for _, ev := range events {
+		switch ev.Type {
+		case EventRunStart:
+			var p RunStartPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			d.RunID = ev.RunID
+
+		case EventRunEnd:
+			var p RunEndPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			d.EndReason = p.Reason
+
+		case EventRunError:
+			var p RunErrorPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p.Error != "" {
+				d.RunErrors = append(d.RunErrors, p.Error)
+			}
+
+		case EventStepSummary:
+			var p StepSummaryPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			d.TotalSteps++
+			d.TotalTokens += p.InputTokens + p.OutputTokens
+			if p.InputTokens > d.HighTokenStep.TokensIn {
+				d.HighTokenStep = DigestStep{
+					StepNum:   d.TotalSteps,
+					TokensIn:  p.InputTokens,
+					TokensOut: p.OutputTokens,
+				}
+			}
+
+		case EventToolCall:
+			var p ToolCallPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			toolCounts[p.Name]++
+
+		case EventToolResult:
+			var p ToolResultPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if !p.OK {
+				out := p.Output
+				if len(out) > 120 {
+					out = out[:120] + "…"
+				}
+				d.ToolFailures = append(d.ToolFailures, DigestToolFailure{Name: p.Name, Output: out})
+			}
+		}
+	}
+
+	// Retry clusters: tools called 3+ times
+	for name, count := range toolCounts {
+		if count >= 3 {
+			d.RetryCluster = append(d.RetryCluster, DigestRetryEntry{Name: name, Count: count})
+		}
+	}
+	sort.Slice(d.RetryCluster, func(i, j int) bool {
+		return d.RetryCluster[i].Count > d.RetryCluster[j].Count
+	})
+
+	// Keep only the last 5 tool failures
+	if len(d.ToolFailures) > 5 {
+		d.ToolFailures = d.ToolFailures[len(d.ToolFailures)-5:]
+	}
+
+	// Cap run errors at 5
+	if len(d.RunErrors) > 5 {
+		d.RunErrors = d.RunErrors[len(d.RunErrors)-5:]
+	}
+
+	return d
+}
+
+// FormatDigest returns a compact human-readable failure digest.
+func FormatDigest(d RunDigest) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Run:        %s\n", d.RunID)
+	fmt.Fprintf(&b, "End reason: %s\n", d.EndReason)
+	fmt.Fprintf(&b, "Steps:      %d   Tokens: %d\n", d.TotalSteps, d.TotalTokens)
+
+	if len(d.RunErrors) > 0 {
+		b.WriteString("\nRun errors (last 5):\n")
+		for _, e := range d.RunErrors {
+			fmt.Fprintf(&b, "  • %s\n", e)
+		}
+	}
+
+	if len(d.ToolFailures) > 0 {
+		b.WriteString("\nTool failures (last 5):\n")
+		for _, f := range d.ToolFailures {
+			fmt.Fprintf(&b, "  • %-20s %s\n", f.Name, f.Output)
+		}
+	}
+
+	if len(d.RetryCluster) > 0 {
+		b.WriteString("\nRetry hotspots (≥3 calls):\n")
+		for _, r := range d.RetryCluster {
+			fmt.Fprintf(&b, "  • %-20s ×%d\n", r.Name, r.Count)
+		}
+	}
+
+	if d.HighTokenStep.StepNum > 0 {
+		fmt.Fprintf(&b, "\nHigh-token step: step %d  in=%d out=%d\n",
+			d.HighTokenStep.StepNum, d.HighTokenStep.TokensIn, d.HighTokenStep.TokensOut)
+	}
+
+	return b.String()
+}
+
 func trimFloatSuffix(v string) string {
 	v = strings.Replace(v, ".0M", "M", 1)
 	v = strings.Replace(v, ".0k", "k", 1)

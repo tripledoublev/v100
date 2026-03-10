@@ -117,7 +117,6 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustRadioVolume(5)
 		case "[":
 			m.adjustRadioVolume(-5)
-
 		case "tab":
 			m.cycleFocus()
 		case "shift+tab":
