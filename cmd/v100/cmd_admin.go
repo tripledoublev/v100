@@ -1,9 +1,12 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -453,6 +456,87 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func exportCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "export <run_id>",
+		Short: "Export a run (trace, meta, and sandbox state) to a tar.gz archive",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			exportDir := "exports"
+			if err := os.MkdirAll(exportDir, 0o755); err != nil {
+				return err
+			}
+
+			exportPath := filepath.Join(exportDir, fmt.Sprintf("v100-run-%s.tar.gz", runID))
+			f, err := os.Create(exportPath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			gw := gzip.NewWriter(f)
+			defer gw.Close()
+			tw := tar.NewWriter(gw)
+			defer tw.Close()
+
+			// 1. Add trace.jsonl
+			tracePath := filepath.Join(runDir, "trace.jsonl")
+			if err := addFileToTar(tw, tracePath, "trace.jsonl"); err != nil {
+				return fmt.Errorf("add trace: %w", err)
+			}
+
+			// 2. Add meta.json
+			metaPath := filepath.Join(runDir, "meta.json")
+			if err := addFileToTar(tw, metaPath, "meta.json"); err != nil {
+				return fmt.Errorf("add meta: %w", err)
+			}
+
+			// 3. Add workspace snapshot if it exists
+			snapPath := filepath.Join(runDir, "sandbox.snapshot")
+			if _, err := os.Stat(snapPath); err == nil {
+				if err := addFileToTar(tw, snapPath, "sandbox.snapshot"); err != nil {
+					return fmt.Errorf("add snapshot: %w", err)
+				}
+			}
+
+			fmt.Printf("Run %s exported to: %s\n", ui.Info(runID), ui.OK(exportPath))
+			return nil
+		},
+	}
+}
+
+func addFileToTar(tw *tar.Writer, srcPath, tarPath string) error {
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return err
+	}
+
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	header.Name = tarPath
+
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+
+	f, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(tw, f)
+	return err
 }
 
 func sandboxBackendNeedsDocker(cfg *config.Config) bool {

@@ -40,6 +40,7 @@ func rootCmd() *cobra.Command {
 		loginCmd(),
 		logoutCmd(),
 		devCmd(),
+		exportCmd(),
 		scoreCmd(),
 		distillCmd(),
 		statsCmd(),
