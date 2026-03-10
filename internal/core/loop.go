@@ -161,7 +161,9 @@ func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause err
 	l.Messages = append(l.Messages, providers.Message{Role: "assistant", Content: text})
 }
 
-func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.ToolCall) error {
+// execToolCall executes a single tool call and returns (denied, error).
+// denied is true when a dangerous tool was denied by the confirm function.
+func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.ToolCall) (bool, error) {
 	// Emit tool.call event
 	_, err := l.emit(EventToolCall, stepID, ToolCallPayload{
 		CallID: tc.ID,
@@ -169,14 +171,14 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		Args:   string(tc.Args),
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Look up tool
 	tool, ok := l.Tools.Get(tc.Name)
 	if !ok {
 		result := tools.ToolResult{OK: false, Output: fmt.Sprintf("tool %q not found or not enabled", tc.Name)}
-		return l.emitToolResult(stepID, tc, result)
+		return false, l.emitToolResult(stepID, tc, result)
 	}
 
 	if toolRequiresNetworkGate(tool, l.Session) && !l.networkAllowed() {
@@ -185,7 +187,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 			Output: fmt.Sprintf("network access is disabled by sandbox policy (network_tier=%q)", l.effectiveNetworkTier()),
 		}
 		if err := l.emitToolResult(stepID, tc, result); err != nil {
-			return err
+			return false, err
 		}
 		l.Messages = append(l.Messages, providers.Message{
 			Role:       "tool",
@@ -193,7 +195,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 			ToolCallID: tc.ID,
 			Name:       tc.Name,
 		})
-		return nil
+		return false, nil
 	}
 
 	// Confirm dangerous tools
@@ -214,7 +216,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 					msg := "low confidence rejection (conf=" + fmt.Sprintf("%.2f", confidence) + "): " + uncertainty
 					result := tools.ToolResult{OK: false, Output: msg}
 					if err := l.emitToolResult(stepID, tc, result); err != nil {
-						return err
+						return false, err
 					}
 					l.Messages = append(l.Messages, providers.Message{
 						Role:       "tool",
@@ -222,7 +224,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
 					})
-					return nil
+					return false, nil
 				}
 			}
 		}
@@ -230,7 +232,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		if l.ConfirmFn != nil && !l.ConfirmFn(tc.Name, string(tc.Args)) {
 			result := tools.ToolResult{OK: false, Output: "user denied tool execution"}
 			if err := l.emitToolResult(stepID, tc, result); err != nil {
-				return err
+				return false, err
 			}
 			// Add denial as tool message
 			l.Messages = append(l.Messages, providers.Message{
@@ -239,7 +241,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
 			})
-			return nil
+			return true, nil
 		}
 	}
 
@@ -257,7 +259,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 			Reason:   "before_mutating_tool",
 		})
 		if err != nil {
-			return fmt.Errorf("capture snapshot before tool %q: %w", tc.Name, err)
+			return false, fmt.Errorf("capture snapshot before tool %q: %w", tc.Name, err)
 		}
 		if _, err := l.emit(EventSandboxSnapshot, stepID, SandboxSnapshotPayload{
 			SnapshotID: snap.ID,
@@ -266,7 +268,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 			Method:     snap.Method,
 			Reason:     "before_mutating_tool",
 		}); err != nil {
-			return err
+			return false, err
 		}
 	}
 	var deltaMu sync.Mutex
@@ -305,7 +307,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	}
 
 	if err := l.emitToolResult(stepID, tc, result); err != nil {
-		return err
+		return false, err
 	}
 
 	// Add tool result to message history
@@ -335,7 +337,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		_ = l.verifyBuild(ctx, stepID)
 	}
 
-	return nil
+	return false, nil
 }
 
 func toolRequiresNetworkGate(tool tools.Tool, session executor.Session) bool {

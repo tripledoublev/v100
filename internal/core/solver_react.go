@@ -54,6 +54,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	stepTokensUsed := 0
 	stepOutputTokens := 0
 	watchdogInjected := false
+	denialCounts := map[string]int{} // key: "toolName:args" → denial count
 
 	for {
 		msgs := l.buildMessages()
@@ -221,6 +222,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			break
 		}
 
+		denialLoopBreak := false
 		for _, tc := range toolCalls {
 			if isInspectionTool(tc.Name) {
 				inspectionToolCalls++
@@ -233,10 +235,32 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				})
 				break
 			}
-			if err := l.execToolCall(ctx, stepID, tc); err != nil {
+			denied, err := l.execToolCall(ctx, stepID, tc)
+			if err != nil {
 				return SolveResult{}, err
 			}
 			toolCallsUsed++
+			if denied {
+				key := tc.Name + ":" + string(tc.Args)
+				denialCounts[key]++
+				if denialCounts[key] >= 2 {
+					msg := fmt.Sprintf("System: tool %q was denied %d times with the same arguments. Do not retry this action. Please summarize what you were trying to accomplish and stop.", tc.Name, denialCounts[key])
+					_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+						Action:  "inject_message",
+						Message: msg,
+						Reason:  "repeated_denial",
+					})
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "user",
+						Content: msg,
+					})
+					denialLoopBreak = true
+					break
+				}
+			}
+		}
+		if denialLoopBreak {
+			break
 		}
 		if toolCallsUsed >= maxToolCalls {
 			break

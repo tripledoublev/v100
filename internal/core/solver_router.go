@@ -192,7 +192,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 			if toolCallsUsed >= maxToolCalls {
 				break
 			}
-			if err := l.execToolCall(ctx, stepID, tc); err != nil {
+			if _, err := l.execToolCall(ctx, stepID, tc); err != nil {
 				return SolveResult{}, err
 			}
 			toolCallsUsed++
