@@ -44,6 +44,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
 		verboseFlag      bool
+		exitFlag         bool
 		nameFlag         string
 		tagFlags         []string
 		solverFlag       string
@@ -264,7 +265,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if tuiFlag {
 				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, strings.Join(args, " "), session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, genParams, solver, strings.Join(args, " "), session, mapper)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, genParams, solver, strings.Join(args, " "), session, mapper)
 		},
 	}
 
@@ -289,6 +290,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
+	cmd.Flags().BoolVar(&exitFlag, "exit", false, "exit after the initial prompt completes without entering interactive mode")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
@@ -306,7 +308,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	renderer := ui.NewCLIRenderer()
 	renderer.Verbose = verbose
@@ -388,6 +390,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			}
 			fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
 		}
+		if exitAfterPrompt {
+			reason = "prompt_exit"
+			goto done
+		}
 	}
 
 	for {
@@ -415,6 +421,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 	}
 
+done:
 	// Generate summary if possible using the run's own provider
 	finalSummary := generateRunSummary(context.Background(), prov, model, loop.Messages)
 
