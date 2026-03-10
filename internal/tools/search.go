@@ -104,7 +104,22 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	_ = cmd.Run() // rg exits 1 on no matches; that's OK
+	runErr := cmd.Run()
+	// rg exit codes: 0 = matches found, 1 = no matches (not an error), 2+ = execution error.
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Legitimate no-match — fall through to "(no matches)" below.
+		} else {
+			// Real failure: bad pattern, missing binary, permission error, etc.
+			msg := "rg execution failed"
+			if se := strings.TrimSpace(stderr.String()); se != "" {
+				msg += ": " + se
+			} else {
+				msg += ": " + runErr.Error()
+			}
+			return failResult(start, msg), nil
+		}
+	}
 
 	out := stdout.String()
 	if len(out) == 0 {
