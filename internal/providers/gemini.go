@@ -573,6 +573,175 @@ func geminiParseSSE(r io.Reader) (CompleteResponse, error) {
 	}, nil
 }
 
+// StreamComplete implements Streamer for real-time token delivery.
+func (p *GeminiProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
+	model := req.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	access, err := p.accessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if p.token.ProjectID == "" {
+		projectID, tierID, err := p.loadCodeAssist(ctx, access)
+		if err == nil && projectID != "" {
+			p.token.ProjectID = projectID
+			p.token.TierID = tierID
+		} else {
+			projectID, err = p.onboard(ctx, access)
+			if err != nil {
+				p.mu.Unlock()
+				return nil, err
+			}
+			p.token.ProjectID = projectID
+		}
+		if saveErr := auth.SaveGemini(p.tokenPath, &p.token); saveErr != nil {
+			fmt.Printf("gemini: warning: could not save project ID: %v\n", saveErr)
+		}
+	}
+	projectID := p.token.ProjectID
+	p.mu.Unlock()
+
+	sysInstruction, contents := geminiConvertMessages(req.Messages)
+
+	var tools []geminiToolDef
+	if len(req.Tools) > 0 {
+		var funcDecls []geminiFunctionDecl
+		for _, ts := range req.Tools {
+			funcDecls = append(funcDecls, geminiFunctionDecl{
+				Name:        ts.Name,
+				Description: ts.Description,
+				Parameters:  ts.InputSchema,
+			})
+		}
+		tools = []geminiToolDef{{FunctionDeclarations: funcDecls}}
+	}
+
+	promptID := fmt.Sprintf("%x", time.Now().UnixNano())
+
+	var genCfg *geminiGenerationConfig
+	gp := req.GenParams
+	if gp.Temperature != nil || gp.TopP != nil || gp.TopK != nil || gp.MaxTokens > 0 || len(gp.StopSequences) > 0 || gp.Seed != nil {
+		genCfg = &geminiGenerationConfig{
+			Temperature:     gp.Temperature,
+			TopP:            gp.TopP,
+			TopK:            gp.TopK,
+			MaxOutputTokens: gp.MaxTokens,
+			StopSequences:   gp.StopSequences,
+			Seed:            gp.Seed,
+		}
+	}
+
+	envelope := geminiEnvelope{
+		Model:              model,
+		Project:            projectID,
+		UserPromptID:       promptID,
+		EnabledCreditTypes: []string{"GOOGLE_ONE_AI"},
+		Request: geminiRequest{
+			Contents:          contents,
+			SystemInstruction: sysInstruction,
+			Tools:             tools,
+			GenerationConfig:  genCfg,
+		},
+	}
+
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		geminiBaseURL+"/v1internal:streamGenerateContent?alt=sse",
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+access)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: request: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(httpResp.Body)
+		_ = httpResp.Body.Close()
+		baseErr := fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+		if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+			retryAfter := retryAfterFromHeader(httpResp.Header.Get("Retry-After"))
+			if retryAfter == 0 && httpResp.StatusCode == http.StatusTooManyRequests {
+				retryAfter = geminiParseRetryWait(raw)
+			}
+			return nil, &RetryableError{Err: baseErr, StatusCode: httpResp.StatusCode, RetryAfter: retryAfter}
+		}
+		return nil, baseErr
+	}
+
+	ch := make(chan StreamEvent, 100)
+	go geminiStreamSSE(httpResp, ch)
+	return ch, nil
+}
+
+func geminiStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
+	defer close(ch)
+	defer func() { _ = httpResp.Body.Close() }()
+
+	scanner := bufio.NewScanner(httpResp.Body)
+	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+
+	toolCallIdx := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		var chunk geminiSSEChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		resp := chunk.Response
+
+		if len(resp.Candidates) > 0 {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					ch <- StreamEvent{Type: StreamToken, Text: part.Text}
+				}
+				if part.FunctionCall != nil {
+					args := part.FunctionCall.Args
+					if args == nil {
+						args = json.RawMessage("{}")
+					}
+					callID := fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, toolCallIdx)
+					toolCallIdx++
+					ch <- StreamEvent{Type: StreamToolCallStart, ToolCallID: callID, ToolCallName: part.FunctionCall.Name}
+					ch <- StreamEvent{Type: StreamToolCallDelta, ToolCallID: callID, ToolCallArgs: string(args)}
+				}
+			}
+		}
+
+		if resp.UsageMetadata.PromptTokenCount > 0 || resp.UsageMetadata.CandidatesTokenCount > 0 {
+			ch <- StreamEvent{Type: StreamDone, Usage: Usage{
+				InputTokens:  resp.UsageMetadata.PromptTokenCount,
+				OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
+				CostUSD:      0,
+			}}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("gemini: stream: %w", err)}
+	}
+}
+
 func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
 	// Subscription-backed Gemini embeddings endpoint is not currently known/supported in this harness.
 	return EmbedResponse{}, fmt.Errorf("gemini: embeddings not yet supported for subscription provider")

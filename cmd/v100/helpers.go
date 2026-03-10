@@ -163,6 +163,17 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 	}
 }
 
+func solverDisplayName(s core.Solver) string {
+	switch s.(type) {
+	case *core.PlanExecuteSolver:
+		return "plan_execute"
+	case *core.RouterSolver:
+		return "router"
+	default:
+		return "react"
+	}
+}
+
 func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg := tools.NewRegistry(cfg.Tools.Enabled)
 	reg.Register(tools.FSRead())

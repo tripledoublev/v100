@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -117,9 +118,12 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 
 	resp, err := p.client.CreateChatCompletion(ctx, oReq)
 	if err != nil {
-		// Detect rate limit or transient errors
-		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "500") {
-			return CompleteResponse{}, &RetryableError{Err: err, StatusCode: 429}
+		var apiErr *openai.APIError
+		if errors.As(err, &apiErr) {
+			sc := apiErr.HTTPStatusCode
+			if sc == 429 || (sc >= 500 && sc < 600) {
+				return CompleteResponse{}, &RetryableError{Err: err, StatusCode: sc}
+			}
 		}
 		return CompleteResponse{}, fmt.Errorf("openai: %w", err)
 	}

@@ -52,6 +52,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	inspectionOnly := true
 	inspectionToolCalls := 0
 	stepTokensUsed := 0
+	stepOutputTokens := 0
 	watchdogInjected := false
 
 	for {
@@ -157,6 +158,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			terminalErr = err
 		}
 		stepTokensUsed += usage.InputTokens + usage.OutputTokens
+		stepOutputTokens += usage.OutputTokens
 		if err := l.Budget.AddCost(usage.CostUSD); err != nil && terminalErr == nil {
 			terminalErr = err
 		}
@@ -261,7 +263,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	_, _ = l.emit(EventStepSummary, stepID, StepSummaryPayload{
 		StepNumber:   l.stepCount,
 		InputTokens:  budgetAfter.UsedTokens - budgetBefore.UsedTokens,
-		OutputTokens: 0, // tracked in aggregate via UsedTokens
+		OutputTokens: stepOutputTokens,
 		CostUSD:      budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
 		ToolCalls:    toolCallsUsed,
 		ModelCalls:   modelCalls,

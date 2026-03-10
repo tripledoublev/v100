@@ -376,6 +376,175 @@ func codexParseStream(r io.Reader) (CompleteResponse, error) {
 	}, nil
 }
 
+// StreamComplete implements Streamer for real-time token delivery.
+func (p *CodexProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
+	model := req.Model
+	if model == "" {
+		model = p.defaultModel
+	}
+
+	access, accountID, err := p.accessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions, input := codexConvertMessages(req.Messages)
+
+	var tools []codexToolDef
+	for _, ts := range req.Tools {
+		tools = append(tools, codexToolDef{
+			Type:        "function",
+			Name:        ts.Name,
+			Description: ts.Description,
+			Parameters:  ts.InputSchema,
+		})
+	}
+
+	cReq := codexRequest{
+		Model:        model,
+		Instructions: instructions,
+		Input:        input,
+		Tools:        tools,
+		Stream:       true,
+		Store:        false,
+	}
+	if req.GenParams.Temperature != nil {
+		cReq.Temperature = req.GenParams.Temperature
+	}
+	if req.GenParams.TopP != nil {
+		cReq.TopP = req.GenParams.TopP
+	}
+	if req.GenParams.MaxTokens > 0 {
+		cReq.MaxTokens = req.GenParams.MaxTokens
+	}
+
+	body, err := json.Marshal(cReq)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, codexEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+access)
+	httpReq.Header.Set("Openai-Account-Id", accountID)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("codex: request: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(httpResp.Body)
+		_ = httpResp.Body.Close()
+		baseErr := fmt.Errorf("codex: HTTP %d: %s", httpResp.StatusCode, raw)
+		if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
+			return nil, &RetryableError{
+				Err:        baseErr,
+				StatusCode: httpResp.StatusCode,
+				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
+			}
+		}
+		return nil, baseErr
+	}
+
+	ch := make(chan StreamEvent, 100)
+	go codexStreamSSE(httpResp, ch)
+	return ch, nil
+}
+
+func codexStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
+	defer close(ch)
+	defer func() { _ = httpResp.Body.Close() }()
+
+	type pendingCall struct {
+		id   string
+		name string
+		args strings.Builder
+	}
+	pending := map[int]*pendingCall{}
+
+	scanner := bufio.NewScanner(httpResp.Body)
+	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+
+	var eventType string
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		switch eventType {
+		case "response.output_text.delta":
+			var d struct {
+				Delta string `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &d) == nil {
+				ch <- StreamEvent{Type: StreamToken, Text: d.Delta}
+			}
+
+		case "response.output_item.added":
+			var ev struct {
+				OutputIndex int `json:"output_index"`
+				Item        struct {
+					Type   string `json:"type"`
+					CallID string `json:"call_id"`
+					Name   string `json:"name"`
+				} `json:"item"`
+			}
+			if json.Unmarshal([]byte(data), &ev) == nil && ev.Item.Type == "function_call" {
+				pending[ev.OutputIndex] = &pendingCall{id: ev.Item.CallID, name: ev.Item.Name}
+				ch <- StreamEvent{Type: StreamToolCallStart, ToolCallID: ev.Item.CallID, ToolCallName: ev.Item.Name}
+			}
+
+		case "response.function_call_arguments.delta":
+			var d struct {
+				OutputIndex int    `json:"output_index"`
+				Delta       string `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &d) == nil {
+				if pc, ok := pending[d.OutputIndex]; ok {
+					pc.args.WriteString(d.Delta)
+					ch <- StreamEvent{Type: StreamToolCallDelta, ToolCallID: pc.id, ToolCallArgs: d.Delta}
+				}
+			}
+
+		case "response.completed":
+			var ev struct {
+				Response struct {
+					Usage struct {
+						InputTokens  int `json:"input_tokens"`
+						OutputTokens int `json:"output_tokens"`
+					} `json:"usage"`
+				} `json:"response"`
+			}
+			if json.Unmarshal([]byte(data), &ev) == nil {
+				ch <- StreamEvent{Type: StreamDone, Usage: Usage{
+					InputTokens:  ev.Response.Usage.InputTokens,
+					OutputTokens: ev.Response.Usage.OutputTokens,
+					CostUSD:      0,
+				}}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("codex: stream: %w", err)}
+	}
+}
+
 func (p *CodexProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
 	// Subscription-backed ChatGPT embeddings endpoint is not currently known/supported in this harness.
 	return EmbedResponse{}, fmt.Errorf("codex: embeddings not yet supported for subscription provider")

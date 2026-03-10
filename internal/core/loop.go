@@ -607,6 +607,9 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		}
 		resp, err := cp.Complete(ctx, summaryReq)
 		if err != nil {
+			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
+				Error: fmt.Sprintf("compress: failed to compress message %d (skipping): %v", c.idx, err),
+			})
 			continue // skip this message, try next
 		}
 

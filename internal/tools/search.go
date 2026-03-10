@@ -30,7 +30,7 @@ func (t *projectSearchTool) InputSchema() json.RawMessage {
 		"properties": {
 			"pattern":     {"type": "string", "description": "Regex pattern to search for."},
 			"path":        {"type": "string", "description": "Directory or file to search in. Defaults to workspace root."},
-			"glob":        {"type": "string", "description": "Glob pattern to filter files (e.g. '*.go')."},
+			"glob":        {"type": "string", "description": "Glob pattern to filter files, passed to ripgrep --glob (matches at any depth, not just top-level). E.g. '*.go' matches all Go files anywhere in the tree; use 'cmd/*.go' to restrict to a specific directory."},
 			"case_sensitive": {"type": "boolean", "description": "If false (default), search is case-insensitive.", "default": false},
 			"context_lines": {"type": "integer", "description": "Optional number of surrounding lines to include around each match.", "default": 0},
 			"max_results": {"type": "integer", "description": "Maximum number of output lines to return.", "default": 50},

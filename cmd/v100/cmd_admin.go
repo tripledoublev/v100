@@ -338,11 +338,28 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					_, credsErr := auth.LoadGeminiCredentials()
 					printOAuthConfigStatus(name, credsErr)
 					tokenPath := auth.DefaultGeminiTokenPath()
+					hasToken := false
 					if _, err := os.Stat(tokenPath); err == nil {
+						hasToken = true
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider gemini'", name, tokenPath)))
 						ok = false
+					}
+					if hasToken {
+						pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+						t0 := time.Now()
+						pingReq, _ := http.NewRequestWithContext(pingCtx, http.MethodGet, "https://cloudcode-pa.googleapis.com/", nil)
+						pingResp, pingErr := http.DefaultClient.Do(pingReq)
+						pingCancel()
+						if pingErr != nil {
+							fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr)))
+							ok = false
+						} else {
+							_ = pingResp.Body.Close()
+							latency := time.Since(t0).Milliseconds()
+							fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable (%dms)", name, latency)))
+						}
 					}
 				case "ollama":
 					baseURL := strings.TrimSpace(pc.BaseURL)
@@ -379,18 +396,43 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						authEnv = "ANTHROPIC_API_KEY"
 					}
 					// Check stored key first, then env var
+					var anthropicKey string
 					tokenPath := auth.DefaultClaudeTokenPath()
 					if ct, err := auth.LoadClaude(tokenPath); err == nil && ct.Valid() {
 						hint := ct.APIKey
+						anthropicKey = ct.APIKey
 						if len(hint) > 12 {
 							hint = hint[:8] + "..." + hint[len(hint)-4:]
 						}
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: stored key at %s (%s)", name, tokenPath, hint)))
 					} else if key := os.Getenv(authEnv); key != "" {
+						anthropicKey = key
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
 					} else {
 						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv)))
 						ok = false
+					}
+					if anthropicKey != "" {
+						pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+						t0 := time.Now()
+						pingReq, _ := http.NewRequestWithContext(pingCtx, http.MethodGet, "https://api.anthropic.com/v1/models", nil)
+						pingReq.Header.Set("x-api-key", anthropicKey)
+						pingReq.Header.Set("anthropic-version", "2023-06-01")
+						pingResp, pingErr := http.DefaultClient.Do(pingReq)
+						pingCancel()
+						if pingErr != nil {
+							fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr)))
+							ok = false
+						} else {
+							_ = pingResp.Body.Close()
+							latency := time.Since(t0).Milliseconds()
+							if pingResp.StatusCode == 200 || pingResp.StatusCode == 401 {
+								fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable (%dms)", name, latency)))
+							} else {
+								fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL HTTP %d (%dms)", name, pingResp.StatusCode, latency)))
+								ok = false
+							}
+						}
 					}
 				case "minimax":
 					_, credsErr := auth.LoadMiniMaxCredentials()

@@ -361,6 +361,18 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
 	fmt.Println(ui.Info(ui.Dim("tools: ") + enabledToolSummary(reg)))
+	{
+		solverName := solverDisplayName(solver)
+		policyName := pol.Name
+		if policyName == "" {
+			policyName = "default"
+		}
+		compressInfo := ui.Dim("solver: ") + solverName + "  " + ui.Dim("policy: ") + policyName
+		if cp := cfg.Defaults.CompressProvider; cp != "" {
+			compressInfo += "  " + ui.Dim("compress: ") + cp
+		}
+		fmt.Println(ui.Info(compressInfo))
+	}
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
 	reason := "user_exit"
