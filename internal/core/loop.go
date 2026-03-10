@@ -61,11 +61,11 @@ func (l *Loop) runHooks(stepID string) HookResult {
 	}
 
 	state := LoopState{
-		RunID:        l.Run.ID,
-		StepCount:    l.stepCount,
-		MessageCount: len(l.Messages),
-		LastToolOK:   l.lastToolOK,
-		LastToolOutput: l.lastToolOutput,
+		RunID:           l.Run.ID,
+		StepCount:       l.stepCount,
+		MessageCount:    len(l.Messages),
+		LastToolOK:      l.lastToolOK,
+		LastToolOutput:  l.lastToolOutput,
 		BudgetRemaining: l.Budget.Budget(),
 		// CompressionCount could be tracked if needed, using stats for now
 	}
