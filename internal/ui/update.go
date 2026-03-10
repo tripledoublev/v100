@@ -108,20 +108,8 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showStatus && m.focus == focusStatus {
 				m.focus = focusTrace
 			}
-		case "ctrl+g":
-			m.showMetrics = !m.showMetrics
 		case "ctrl+m":
-			switch m.mascotPersonality {
-			case "classic":
-				m.mascotPersonality = "glitch-ghost"
-			case "glitch-ghost":
-				m.mascotPersonality = "monolith"
-			case "monolith":
-				m.mascotPersonality = "classic"
-			default:
-				m.mascotPersonality = "classic"
-			}
-			m.refreshMascot()
+			m.showMetrics = !m.showMetrics
 		case "ctrl+a":
 			if err := copyToClipboard(m.plainBuf.String()); err != nil {
 				m.statusLine = "copy failed: " + err.Error()
