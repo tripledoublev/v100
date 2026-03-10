@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/core"
@@ -39,6 +40,32 @@ func (m *mockProvider) Embed(_ context.Context, _ providers.EmbedRequest) (provi
 
 func (m *mockProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
 	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
+
+type watchdogCapturingProvider struct {
+	responses []providers.CompleteResponse
+	requests  []providers.CompleteRequest
+	calls     int
+}
+
+func (p *watchdogCapturingProvider) Name() string { return "capturing" }
+func (p *watchdogCapturingProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{ToolCalls: true}
+}
+func (p *watchdogCapturingProvider) Complete(_ context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	p.requests = append(p.requests, req)
+	if p.calls >= len(p.responses) {
+		return providers.CompleteResponse{AssistantText: "done"}, nil
+	}
+	resp := p.responses[p.calls]
+	p.calls++
+	return resp, nil
+}
+func (p *watchdogCapturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{}, nil
+}
+func (p *watchdogCapturingProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "capturing", ContextSize: 4096}, nil
 }
 
 func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (*core.Loop, *core.TraceWriter) {
@@ -257,6 +284,48 @@ func TestLoopTokenBudgetExceededStillCountsStep(t *testing.T) {
 	}
 	if !foundSummary {
 		t.Fatal("expected step summary event before budget error")
+	}
+}
+
+func TestLoopInspectionWatchdogInjectsSynthesisMessage(t *testing.T) {
+	prov := &watchdogCapturingProvider{
+		responses: []providers.CompleteResponse{
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-2", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-3", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-4", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-5", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-6", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-7", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-8", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{AssistantText: "Synthesis after watchdog."},
+		},
+	}
+	loop, trace := newTestLoop(t, prov, []string{"fs_list"})
+	defer func() { _ = trace.Close() }()
+
+	if err := loop.Step(context.Background(), "inspect"); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) < 4 {
+		t.Fatalf("expected at least 4 provider calls, got %d", len(prov.requests))
+	}
+	lastReq := prov.requests[len(prov.requests)-1]
+	found := false
+	for _, msg := range lastReq.Messages {
+		if msg.Role == "user" && strings.Contains(msg.Content, "System watchdog:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected watchdog message in final request, got %+v", lastReq.Messages)
 	}
 }
 

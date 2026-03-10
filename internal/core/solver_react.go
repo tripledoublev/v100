@@ -15,6 +15,11 @@ type ReactSolver struct{}
 
 func (s *ReactSolver) Name() string { return "react" }
 
+const (
+	inspectionWatchdogToolThreshold  = 8
+	inspectionWatchdogModelThreshold = 3
+)
+
 func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
 	stepID := newID()
 	stepStart := time.Now()
@@ -41,6 +46,8 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	toolCallsUsed := 0
 	var finalText string
 	var terminalErr error
+	inspectionOnly := true
+	watchdogInjected := false
 
 	for {
 		msgs := l.buildMessages()
@@ -207,6 +214,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 
 		for _, tc := range toolCalls {
+			if !isInspectionTool(tc.Name) {
+				inspectionOnly = false
+			}
 			if toolCallsUsed >= maxToolCalls {
 				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
 					Error: fmt.Sprintf("max tool calls per step reached (%d)", maxToolCalls),
@@ -220,6 +230,22 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 		if toolCallsUsed >= maxToolCalls {
 			break
+		}
+		if !watchdogInjected &&
+			inspectionOnly &&
+			toolCallsUsed >= inspectionWatchdogToolThreshold &&
+			modelCalls >= inspectionWatchdogModelThreshold {
+			msg := "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Stop exploring, synthesize what you already know, and answer without calling more tools unless a missing fact is absolutely required."
+			_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+				Action:  "inject_message",
+				Message: msg,
+				Reason:  "inspection_watchdog",
+			})
+			l.Messages = append(l.Messages, providers.Message{
+				Role:    "user",
+				Content: msg,
+			})
+			watchdogInjected = true
 		}
 	}
 
@@ -251,4 +277,13 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		return result, terminalErr
 	}
 	return result, nil
+}
+
+func isInspectionTool(name string) bool {
+	switch name {
+	case "fs_read", "fs_list", "project_search", "fs_outline", "git_status", "git_diff", "inspect_tool", "blackboard_read", "blackboard_search":
+		return true
+	default:
+		return false
+	}
 }
