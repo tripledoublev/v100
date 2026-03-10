@@ -26,6 +26,7 @@ type RunStats struct {
 	ToolUsage      map[string]int
 	ToolFailures   int
 	Compressions   int
+	WatchdogFires  int
 	EndReason      string
 	Score          string
 }
@@ -83,6 +84,13 @@ func ComputeStats(events []Event) RunStats {
 
 		case EventCompress:
 			s.Compressions++
+
+		case EventHookIntervention:
+			var p HookInterventionPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p.Reason == "inspection_watchdog" || p.Reason == "read_heavy_watchdog" {
+				s.WatchdogFires++
+			}
 
 		case EventRunEnd:
 			var p RunEndPayload

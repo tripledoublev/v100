@@ -222,6 +222,17 @@ func ClassifyRun(events []Event) RunClassification {
 		}
 	}
 
+	if s.WatchdogFires > 0 {
+		return RunClassification{
+			Label: "inspection_heavy",
+			Evidence: []string{
+				fmt.Sprintf("watchdog fired %d time(s)", s.WatchdogFires),
+				fmt.Sprintf("tool_calls=%d", s.ToolCalls),
+				fmt.Sprintf("tokens=%d", s.TokensIn+s.TokensOut),
+			},
+		}
+	}
+
 	if hasToolLoop(callSeq) {
 		return RunClassification{
 			Label: "tool_loop",
