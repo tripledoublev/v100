@@ -197,6 +197,7 @@ func (s *DockerSession) defaultExecEnv() []string {
 		"GOCACHE=/workspace/.cache/go-build",
 		"GOMODCACHE=/workspace/.cache/go-mod",
 		"GOPATH=/workspace/.cache/go",
+		"GOTELEMETRY=off",
 	}
 }
 

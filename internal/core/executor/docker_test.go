@@ -79,6 +79,7 @@ func TestDockerSessionExecArgs(t *testing.T) {
 		"-e GOCACHE=/workspace/.cache/go-build",
 		"-e GOMODCACHE=/workspace/.cache/go-mod",
 		"-e GOPATH=/workspace/.cache/go",
+		"-e GOTELEMETRY=off",
 		"-e A=B",
 		"v100-run-1 git status",
 	} {

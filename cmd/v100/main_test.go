@@ -8,6 +8,7 @@ import (
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/tools"
 )
 
 func TestIsCompliantAgentHandoff(t *testing.T) {
@@ -239,5 +240,27 @@ func TestFindRunDirFindsNestedRun(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEnabledToolSummary(t *testing.T) {
+	reg := tools.NewRegistry([]string{"fs_read", "fs_write", "sh"})
+	reg.Register(tools.FSRead())
+	reg.Register(tools.FSWrite())
+	reg.Register(tools.Sh())
+
+	got := enabledToolSummary(reg)
+	for _, want := range []string{"3 enabled", "2 dangerous", "fs_read", "fs_write", "sh"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("enabledToolSummary missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestBuildToolRegistryDefaultConfigValidates(t *testing.T) {
+	cfg := config.DefaultConfig()
+	reg := buildToolRegistry(cfg)
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("default tool registry should validate, got %v", err)
 	}
 }

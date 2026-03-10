@@ -175,12 +175,40 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
+	reg.Register(tools.NewAgent(nil))
+	reg.Register(tools.NewDispatch(nil, nil))
+	reg.Register(tools.NewOrchestrate(nil, nil))
 	reg.Register(tools.SemDiff())
 	reg.Register(tools.SemImpact())
 	reg.Register(tools.SemBlame())
 	reg.Register(tools.FSOutline())
 	reg.Register(tools.InspectTool())
 	return reg
+}
+
+func enabledToolSummary(reg *tools.Registry) string {
+	if reg == nil {
+		return "0 enabled"
+	}
+	names := reg.List()
+	dangerous := 0
+	for _, name := range names {
+		if reg.IsDangerous(name) {
+			dangerous++
+		}
+	}
+	if len(names) == 0 {
+		return "0 enabled"
+	}
+	preview := names
+	if len(preview) > 8 {
+		preview = preview[:8]
+	}
+	summary := fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(preview, ", "))
+	if len(names) > len(preview) {
+		summary += fmt.Sprintf(", +%d more", len(names)-len(preview))
+	}
+	return summary
 }
 
 func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase string) (executor.Session, *core.PathMapper, string, error) {

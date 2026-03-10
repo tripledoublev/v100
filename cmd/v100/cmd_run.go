@@ -215,6 +215,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 
 			// Build tool registry
 			reg := buildToolRegistry(cfg)
+			if err := reg.Validate(); err != nil {
+				return fmt.Errorf("tool registry: %w", err)
+			}
 
 			// Load policy
 			pol := loadPolicy(cfg, policyFlag)
@@ -351,6 +354,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	fmt.Println(ui.Info(ui.Dim("trace: ") + run.TraceFile))
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
+	fmt.Println(ui.Info(ui.Dim("tools: ") + enabledToolSummary(reg)))
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
 	reason := "user_exit"

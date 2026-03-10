@@ -277,6 +277,13 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				fmt.Println(ui.Fail("Config parse error: " + err.Error()))
 				return nil
 			}
+			reg := buildToolRegistry(cfg)
+			if err := reg.Validate(); err != nil {
+				fmt.Println(ui.Fail("Tool registry invalid: " + err.Error()))
+				ok = false
+			} else {
+				fmt.Println(ui.OK("Effective tools: " + enabledToolSummary(reg)))
+			}
 			if sandboxBackendNeedsDocker(cfg) {
 				if p, err := findInPath("docker"); err == nil && p != "" {
 					fmt.Println(ui.OK("docker: " + p))
