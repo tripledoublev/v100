@@ -255,11 +255,6 @@ func (m *TUIModel) seedWelcomeContent() {
 
 	m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+now) + "\n\n")
 
-	m.transcriptBuf.WriteString(styleBold.Render("Quick Starts") + "\n")
-	m.transcriptBuf.WriteString(styleMuted.Render("1.") + " map this repo and explain architecture\n")
-	m.transcriptBuf.WriteString(styleMuted.Render("2.") + " find likely bugs and propose fixes\n")
-	m.transcriptBuf.WriteString(styleMuted.Render("3.") + " add a feature and patch files\n\n")
-
 	m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
 	m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
 
