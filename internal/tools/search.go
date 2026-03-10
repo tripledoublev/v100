@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,7 +18,7 @@ func ProjectSearch() Tool { return &projectSearchTool{} }
 
 func (t *projectSearchTool) Name() string { return "project_search" }
 func (t *projectSearchTool) Description() string {
-	return "Search project files with line-numbered matches. Use this before fs_read, then read only the relevant line range."
+	return "Search project files with line-numbered matches. Prefer this before fs_read. Use context_lines to inspect local match context without reading the whole file."
 }
 func (t *projectSearchTool) DangerLevel() DangerLevel { return Safe }
 func (t *projectSearchTool) Effects() ToolEffects     { return ToolEffects{} }
@@ -31,7 +32,9 @@ func (t *projectSearchTool) InputSchema() json.RawMessage {
 			"path":        {"type": "string", "description": "Directory or file to search in. Defaults to workspace root."},
 			"glob":        {"type": "string", "description": "Glob pattern to filter files (e.g. '*.go')."},
 			"case_sensitive": {"type": "boolean", "description": "If false (default), search is case-insensitive.", "default": false},
-			"max_results": {"type": "integer", "description": "Maximum number of lines to return.", "default": 50}
+			"context_lines": {"type": "integer", "description": "Optional number of surrounding lines to include around each match.", "default": 0},
+			"max_results": {"type": "integer", "description": "Maximum number of output lines to return.", "default": 50},
+			"max_chars": {"type": "integer", "description": "Optional hard cap on returned characters.", "default": 12000}
 		}
 	}`)
 }
@@ -47,14 +50,20 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 		Path          string `json:"path"`
 		Glob          string `json:"glob"`
 		CaseSensitive bool   `json:"case_sensitive"`
+		ContextLines  int    `json:"context_lines"`
 		MaxResults    int    `json:"max_results"`
+		MaxChars      int    `json:"max_chars"`
 	}
 	a.MaxResults = 50
+	a.MaxChars = 12000
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
 
 	rgArgs := []string{"--line-number", "--with-filename"}
+	if a.ContextLines > 0 {
+		rgArgs = append(rgArgs, "--context", strconv.Itoa(a.ContextLines))
+	}
 	// Avoid runaway self-referential searches over trace/cache/git internals.
 	for _, ex := range defaultSearchExcludes(call.WorkspaceDir) {
 		rgArgs = append(rgArgs, "--glob", "!"+ex)
@@ -106,6 +115,9 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 			out = strings.Join(lines[:a.MaxResults], "\n") +
 				"\n... truncated to max_results"
 		}
+	}
+	if a.MaxChars > 0 && len(out) > a.MaxChars {
+		out = out[:a.MaxChars] + "\n... truncated to max_chars"
 	}
 	return ToolResult{
 		OK:         true,

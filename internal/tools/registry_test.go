@@ -3,6 +3,8 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/tools"
@@ -245,6 +247,65 @@ func TestFSReadExecLineRange(t *testing.T) {
 	if res.Output != want {
 		t.Fatalf("expected %q, got %q", want, res.Output)
 	}
+}
+
+func TestProjectSearchExecWithContextLines(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+
+	dir := t.TempDir()
+	ctx := context.Background()
+	call := tools.ToolCallContext{
+		WorkspaceDir: dir,
+		Mapper:       &tools.MockMapper{Dir: dir},
+	}
+
+	writeTool := tools.FSWrite()
+	writeArgs, _ := json.Marshal(map[string]string{
+		"path": "sample.txt",
+		"content": "zero\nalpha target\nbeta\ngamma\n" +
+			"delta target\nepsilon\n",
+	})
+	if _, err := writeTool.Exec(ctx, call, writeArgs); err != nil {
+		t.Fatal(err)
+	}
+
+	searchTool := tools.ProjectSearch()
+	searchArgs, _ := json.Marshal(map[string]any{
+		"pattern":       "target",
+		"path":          ".",
+		"context_lines": 1,
+		"max_results":   20,
+	})
+	res, err := searchTool.Exec(ctx, call, searchArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("search failed: %s", res.Output)
+	}
+	for _, want := range []string{
+		"sample.txt-1-zero",
+		"sample.txt:2:alpha target",
+		"sample.txt-3-beta",
+		"sample.txt-4-gamma",
+		"sample.txt:5:delta target",
+		"sample.txt-6-epsilon",
+	} {
+		if !containsLine(res.Output, want) {
+			t.Fatalf("expected output to contain %q, got %q", want, res.Output)
+		}
+	}
+}
+
+func containsLine(out, want string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if line == want || strings.HasSuffix(line, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFSListExec(t *testing.T) {
