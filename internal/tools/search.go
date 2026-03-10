@@ -154,10 +154,14 @@ func defaultSearchExcludes(workspaceDir string) []string {
 		out = append(out, p)
 	}
 
-	// Hard safety defaults.
+	// Hard safety defaults — exclude version control, run artifacts, caches, and generated binaries.
 	add(".git/**")
 	add("runs/**")
 	add(".gocache/**")
+	add("v100")       // compiled binary
+	add("*.tar.gz")   // export tarballs
+	add("*.tar")
+	add("*.zip")
 
 	if workspaceDir == "" {
 		return out

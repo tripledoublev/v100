@@ -58,6 +58,9 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	if !ok {
 		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
 	}
+	if looksLikeBinary(path) {
+		return failResult(start, fmt.Sprintf("fs_read: %q appears to be a binary file — reading it would produce noise. Use project_search or fs_list to explore the workspace instead.", filepath.Base(path))), nil
+	}
 	content, err := readFileSelection(path, a.StartLine, a.EndLine)
 	if err != nil {
 		return failResult(start, err.Error()), nil
@@ -73,6 +76,52 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 		Output:     content,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+// isLowSalienceEntry returns true for filenames that are generated artifacts
+// agents should not read during workspace exploration.
+func isLowSalienceEntry(name string) bool {
+	// Known compiled binary names
+	switch name {
+	case "v100", "v100.exe":
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".tar", ".gz", ".zip", ".so", ".a", ".o", ".dylib", ".exe", ".wasm":
+		return true
+	}
+	return false
+}
+
+// looksLikeBinary returns true if the file is likely a compiled binary or
+// archive that would produce noise if read as text.
+func looksLikeBinary(path string) bool {
+	// Extension-based fast path
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".tar", ".gz", ".zip", ".so", ".a", ".o", ".dylib", ".exe", ".wasm":
+		return true
+	}
+	// No extension — peek at first 512 bytes for NUL bytes (ELF, Mach-O, etc.)
+	if ext == "" {
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = f.Close() }()
+		buf := make([]byte, 512)
+		n, err := f.Read(buf)
+		if err != nil || n == 0 {
+			return false
+		}
+		for _, b := range buf[:n] {
+			if b == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func readFileSelection(path string, startLine, endLine int) (string, error) {
@@ -233,10 +282,12 @@ func (t *fsListTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 		n := e.Name()
 		if e.IsDir() {
 			n += "/"
+		} else if isLowSalienceEntry(n) {
+			n += "  [binary/generated — skip]"
 		}
 		names = append(names, n)
 	}
-	b, _ := json.Marshal(map[string]interface{}{"entries": names})
+	b, _ := json.Marshal(map[string]any{"entries": names})
 	return ToolResult{
 		OK:         true,
 		Output:     string(b),
