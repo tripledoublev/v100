@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"strings"
-
-	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
 // MetricBarConfig holds configuration for ASCII metric bars.
@@ -105,7 +103,7 @@ func CostBar(used, max float64, cfg MetricBarConfig) string {
 	}
 
 	cfg.Width = constrainWidth(cfg.Width, 10, 40)
-	used = min(used, max)
+	used = minFloat(used, max)
 	percent := used / max
 
 	bar := renderBar(percent, cfg)
@@ -228,38 +226,23 @@ func constrainWidth(width, min, max int) int {
 	return width
 }
 
-// LiveMetricDashboard renders a complete live metrics dashboard with
-// token budget burn-down and step progress visualization.
-func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inputTokens, outputTokens int, usedCost, maxCost float64, width int) string {
-	width = constrainWidth(width, 30, 60)
-
-	cfg := DefaultMetricBarConfig()
-	cfg.Width = (width - 20) / 2 // Leave room for labels
-	if cfg.Width < 10 {
-		cfg.Width = 10
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	var lines []string
-
-	// Header
-	lines = append(lines, styleBold.Render("┌─ live metrics ────────────────────────────────┐"))
-
-	// Step progress
-	stepLine := StepProgressBar(currentStep, maxSteps, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+stepLine+strings.Repeat(" ", max(0, width-lipgloss.Width(stepLine))))
-
-	// Token budget (split view if we have input/output)
-	tokenLine := TokenBudgetBar(usedTokens, maxTokens, inputTokens, outputTokens, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+tokenLine+strings.Repeat(" ", max(0, width-lipgloss.Width(tokenLine))))
-
-	// Cost
-	costLine := CostBar(usedCost, maxCost, cfg)
-	lines = append(lines, stylePrimary.Render("│ ")+costLine+strings.Repeat(" ", max(0, width-lipgloss.Width(costLine))))
-
-	// Footer
-	lines = append(lines, styleBold.Render("└─────────────────────────────────────────────────┘"))
-
-	return strings.Join(lines, "\n")
+	return b
 }
 
-// stripStyles is no longer needed since we use lipgloss.Width.
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
