@@ -164,6 +164,26 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		finalText = assistantText.String()
 		modelCalls++
 
+		// ── Intervention Hooks ──────────────────────────────────────────
+		if hres := l.runHooks(stepID); hres.Action != HookContinue {
+			switch hres.Action {
+			case HookInjectMessage:
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: hres.Message,
+				})
+				continue
+			case HookTerminate:
+				return SolveResult{FinalText: finalText, Steps: 1}, fmt.Errorf("hook terminated: %s", hres.Reason)
+			case HookForceReplan:
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: "System intervention: please discard your current plan and reassess.",
+				})
+				continue
+			}
+		}
+
 		if len(toolCalls) == 0 {
 			break
 		}

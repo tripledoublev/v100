@@ -32,7 +32,39 @@ const (
 	EventStepSummary     EventType = "step.summary"
 	EventSolverPlan      EventType = "solver.plan"
 	EventSolverReplan    EventType = "solver.replan"
+	EventHookIntervention EventType = "hook.intervention"
 )
+
+// HookAction identifies the action a policy hook wants to take.
+type HookAction int
+
+const (
+	HookContinue      HookAction = iota
+	HookInjectMessage            // inject a user message before next model call
+	HookForceReplan              // trigger solver replan
+	HookTerminate                // end run with reason "hook_terminated"
+)
+
+// HookResult is the outcome of a policy hook execution.
+type HookResult struct {
+	Action  HookAction
+	Message string // for HookInjectMessage
+	Reason  string // for HookTerminate
+}
+
+// LoopState provides a snapshot of the agent's current progress for hooks.
+type LoopState struct {
+	RunID            string
+	StepCount        int
+	MessageCount     int
+	LastToolOK       bool
+	LastToolOutput   string
+	BudgetRemaining  Budget
+	CompressionCount int
+}
+
+// PolicyHook is a callback invoked after every model response to observe or intervene.
+type PolicyHook func(state LoopState) HookResult
 
 // Event is a single entry in the trace log.
 type Event struct {
@@ -141,6 +173,13 @@ type SolverReplanPayload struct {
 	Attempt int    `json:"attempt"`
 	Error   string `json:"error,omitempty"`
 	Plan    string `json:"plan,omitempty"`
+}
+
+// HookInterventionPayload is the payload for EventHookIntervention.
+type HookInterventionPayload struct {
+	Action  string `json:"action"`
+	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // ToolCallPayload is the Payload for EventToolCall.

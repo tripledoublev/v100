@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -43,11 +44,54 @@ type Loop struct {
 	Mapper           *PathMapper
 	ModelMetadata    providers.ModelMetadata
 	NetworkTier      string
+	Hooks            []PolicyHook
 
 	Snapshots SnapshotManager
 	stepCount int // running step counter for step.summary events
 	ended     bool
 	mu        sync.Mutex
+
+	lastToolOK     bool
+	lastToolOutput string
+}
+
+func (l *Loop) runHooks(stepID string) HookResult {
+	if len(l.Hooks) == 0 {
+		return HookResult{Action: HookContinue}
+	}
+
+	state := LoopState{
+		RunID:        l.Run.ID,
+		StepCount:    l.stepCount,
+		MessageCount: len(l.Messages),
+		LastToolOK:   l.lastToolOK,
+		LastToolOutput: l.lastToolOutput,
+		BudgetRemaining: l.Budget.Budget(),
+		// CompressionCount could be tracked if needed, using stats for now
+	}
+
+	for _, hook := range l.Hooks {
+		res := hook(state)
+		if res.Action != HookContinue {
+			actionStr := ""
+			switch res.Action {
+			case HookInjectMessage:
+				actionStr = "inject_message"
+			case HookForceReplan:
+				actionStr = "force_replan"
+			case HookTerminate:
+				actionStr = "terminate"
+			}
+			_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+				Action:  actionStr,
+				Message: res.Message,
+				Reason:  res.Reason,
+			})
+			return res
+		}
+	}
+
+	return HookResult{Action: HookContinue}
 }
 
 // Step processes a single user input through the full model + tool execution cycle.
@@ -360,6 +404,9 @@ func (l *Loop) snapshotManager() SnapshotManager {
 }
 
 func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools.ToolResult) error {
+	l.lastToolOK = result.OK
+	l.lastToolOutput = result.Output
+
 	_, err := l.emit(EventToolResult, stepID, ToolResultPayload{
 		CallID:     tc.ID,
 		Name:       tc.Name,
@@ -687,4 +734,32 @@ func newID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// ThresholdHook returns a hook that terminates the run after N consecutive tool failures.
+func ThresholdHook(maxFailures int) PolicyHook {
+	consecutiveFailures := 0
+	return func(state LoopState) HookResult {
+		if state.LastToolOK {
+			consecutiveFailures = 0
+			return HookResult{Action: HookContinue}
+		}
+		consecutiveFailures++
+		if consecutiveFailures >= maxFailures {
+			return HookResult{
+				Action: HookTerminate,
+				Reason: fmt.Sprintf("threshold reached: %d consecutive tool failures", maxFailures),
+			}
+		}
+		return HookResult{Action: HookContinue}
+	}
+}
+
+// LogHook returns a hook that logs loop state to a file for external monitoring.
+func LogHook(w io.Writer) PolicyHook {
+	return func(state LoopState) HookResult {
+		b, _ := json.Marshal(state)
+		_, _ = w.Write(append(b, '\n'))
+		return HookResult{Action: HookContinue}
+	}
 }

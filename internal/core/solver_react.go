@@ -175,6 +175,29 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 
 		finalText = assistantText.String()
 		modelCalls++
+
+		// ── Intervention Hooks ──────────────────────────────────────────
+		if hres := l.runHooks(stepID); hres.Action != HookContinue {
+			switch hres.Action {
+			case HookInjectMessage:
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: hres.Message,
+				})
+				// Continue the loop to let the model respond to the injected message
+				continue
+			case HookTerminate:
+				return SolveResult{FinalText: finalText, Steps: 1}, fmt.Errorf("hook terminated: %s", hres.Reason)
+			case HookForceReplan:
+				// React doesn't have a plan-specific state, but we could inject a "replan" instruction
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: "System intervention: please discard your current plan and reassess.",
+				})
+				continue
+			}
+		}
+
 		if terminalErr != nil {
 			break
 		}
