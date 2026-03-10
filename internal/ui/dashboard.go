@@ -96,8 +96,9 @@ func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) s
 	
 	barStyle := lipgloss.NewStyle().Foreground(color)
 	
-	return fmt.Sprintf("%s %s%s%s", 
+	return fmt.Sprintf("%s %s%s%s%s",
 		styleMuted.Render(label),
+		styleMuted.Render("["),
 		barStyle.Render(strings.Repeat("█", filled)),
 		styleMuted.Render(strings.Repeat("░", empty)),
 		styleMuted.Render("]"),
