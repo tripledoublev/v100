@@ -133,6 +133,9 @@ func (p *MiniMaxProvider) Complete(ctx context.Context, req CompleteRequest) (Co
 				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
 			}
 		}
+		if strings.Contains(string(raw), "2013") {
+			return CompleteResponse{}, fmt.Errorf("minimax error 2013: tool results not contiguous with tool calls (message ordering bug): %w", baseErr)
+		}
 		return CompleteResponse{}, baseErr
 	}
 
@@ -186,6 +189,9 @@ func (p *MiniMaxProvider) StreamComplete(ctx context.Context, req CompleteReques
 				StatusCode: httpResp.StatusCode,
 				RetryAfter: retryAfterFromHeader(httpResp.Header.Get("Retry-After")),
 			}
+		}
+		if strings.Contains(string(raw), "2013") {
+			return nil, fmt.Errorf("minimax error 2013: tool results not contiguous with tool calls (message ordering bug): %w", baseErr)
 		}
 		return nil, baseErr
 	}

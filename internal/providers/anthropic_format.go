@@ -68,10 +68,58 @@ type anthropicError struct {
 	} `json:"error"`
 }
 
+// ensureToolResultContiguity reorders messages so that tool results always
+// immediately follow the assistant message containing their tool calls.
+// This is required by MiniMax (error 2013) and is good practice generally.
+// Any non-tool messages that appear between a tool_use and its results are
+// moved to after the results block.
+func ensureToolResultContiguity(msgs []Message) []Message {
+	out := make([]Message, 0, len(msgs))
+	i := 0
+	for i < len(msgs) {
+		m := msgs[i]
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			out = append(out, m)
+			i++
+			continue
+		}
+		// Collect the IDs this assistant turn expects results for.
+		needed := make(map[string]bool, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			needed[tc.ID] = true
+		}
+		out = append(out, m)
+		i++
+		// Scan ahead: gather matching tool results and any interleaved non-tool messages.
+		var results []Message
+		var deferred []Message
+		for i < len(msgs) && len(needed) > 0 {
+			cur := msgs[i]
+			if cur.Role == "tool" && needed[cur.ToolCallID] {
+				results = append(results, cur)
+				delete(needed, cur.ToolCallID)
+				i++
+			} else if cur.Role == "tool" {
+				// Tool result for a different call — emit it later.
+				deferred = append(deferred, cur)
+				i++
+			} else {
+				// Non-tool message: defer until after results.
+				deferred = append(deferred, cur)
+				i++
+			}
+		}
+		out = append(out, results...)
+		out = append(out, deferred...)
+	}
+	return out
+}
+
 // anthropicConvertMessages converts provider messages to Anthropic format.
 // Returns (system, messages). System messages are extracted; tool results
 // are wrapped in tool_result content blocks within user turns.
 func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
+	msgs = ensureToolResultContiguity(msgs)
 	var system string
 	var out []anthropicMessage
 

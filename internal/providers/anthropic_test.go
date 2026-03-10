@@ -77,6 +77,65 @@ func TestAnthropicConvertMessagesMultipleTools(t *testing.T) {
 	}
 }
 
+// TestEnsureToolResultContiguity_InterleavedUserMessage covers the MiniMax
+// error 2013 scenario: a user message appears between an assistant tool_use
+// and its tool results (e.g. from a budget-alert injection).
+func TestEnsureToolResultContiguity_InterleavedUserMessage(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "do it"},
+		{Role: "assistant", ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "fs_read", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: "user", Content: "budget alert: 90% used"}, // interleaved
+		{Role: "tool", Content: "file contents", ToolCallID: "tc1"},
+	}
+
+	reordered := ensureToolResultContiguity(msgs)
+
+	// Find positions
+	var assistantIdx, toolResultIdx, userAlertIdx int
+	for i, m := range reordered {
+		switch {
+		case m.Role == "assistant":
+			assistantIdx = i
+		case m.Role == "tool":
+			toolResultIdx = i
+		case m.Role == "user" && m.Content == "budget alert: 90% used":
+			userAlertIdx = i
+		}
+	}
+
+	if toolResultIdx != assistantIdx+1 {
+		t.Errorf("tool result should immediately follow assistant (got assistant=%d, tool=%d)", assistantIdx, toolResultIdx)
+	}
+	if userAlertIdx <= toolResultIdx {
+		t.Errorf("deferred user message should come after tool result (got tool=%d, user=%d)", toolResultIdx, userAlertIdx)
+	}
+}
+
+// TestEnsureToolResultContiguity_AlreadyOrdered verifies no reordering when messages are already correct.
+func TestEnsureToolResultContiguity_AlreadyOrdered(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "do it"},
+		{Role: "assistant", ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "fs_read", Args: json.RawMessage(`{}`)},
+			{ID: "tc2", Name: "fs_read", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: "tool", Content: "a", ToolCallID: "tc1"},
+		{Role: "tool", Content: "b", ToolCallID: "tc2"},
+	}
+
+	reordered := ensureToolResultContiguity(msgs)
+	if len(reordered) != len(msgs) {
+		t.Fatalf("expected same length, got %d", len(reordered))
+	}
+	for i, m := range reordered {
+		if m.Role != msgs[i].Role {
+			t.Errorf("pos %d: expected role %s, got %s", i, msgs[i].Role, m.Role)
+		}
+	}
+}
+
 func TestAnthropicEstimateCost(t *testing.T) {
 	tests := []struct {
 		model  string
