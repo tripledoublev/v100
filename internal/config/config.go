@@ -174,7 +174,7 @@ func DefaultConfig() *Config {
 			CheapProvider:         "ollama",
 			ConfirmTools:          "dangerous",
 			BudgetSteps:           50,
-			BudgetTokens:          100000,
+			BudgetTokens:          1000000,
 			ToolTimeoutMS:         30000,
 			MaxToolCallsPerStep:   50,
 			ContextLimit:          80000,
@@ -244,7 +244,7 @@ smart_provider = "minimax"    # for router solver escalation
 cheap_provider = "ollama"     # for router solver discovery
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
-budget_tokens = 100000
+budget_tokens = 1000000
 budget_cost_usd = 0.0
 tool_timeout_ms = 30000
 max_tool_calls_per_step = 50

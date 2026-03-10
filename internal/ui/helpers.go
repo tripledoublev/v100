@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -121,4 +122,30 @@ func TruncateOutput(s string, verbose bool) string {
 	}
 
 	return strings.ReplaceAll(s, "\n", " ↵ ")
+}
+
+// SmartSummary provides a structured summary of a tool's output for clean TUI display.
+func SmartSummary(toolName, output string, verbose bool) string {
+	if verbose {
+		return TruncateOutput(output, true)
+	}
+
+	// Heuristic: summarize directory listings
+	if toolName == "fs_list" || toolName == "fs_ls" {
+		if strings.HasPrefix(output, "{") {
+			var m struct {
+				Entries []string `json:"entries"`
+			}
+			if json.Unmarshal([]byte(output), &m) == nil {
+				return fmt.Sprintf("%d items: %s", len(m.Entries), strings.Join(m.Entries, ", "))
+			}
+		}
+	}
+
+	// Heuristic: summarize large outputs
+	if len(output) > 200 {
+		return fmt.Sprintf("(%d chars) %s", len(output), TruncateOutput(output, false))
+	}
+
+	return TruncateOutput(output, false)
 }

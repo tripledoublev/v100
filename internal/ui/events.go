@@ -82,7 +82,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if !p.OK {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
 		}
-		out := TruncateOutput(p.Output, m.verbose)
+		out := SmartSummary(p.Name, p.Output, m.verbose)
 		out = m.wrapPlainForTranscript(out)
 		_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s  %s  %s\n", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)), out)
 
@@ -225,10 +225,11 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		dur := styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS))
+		summary := SmartSummary(p.Name, p.Output, m.verbose)
 		if p.OK {
-			return sep + "  " + indent + styleOK.Render("✓") + "  " + styleOK.Render(p.Name) + "  " + dur
+			return sep + "  " + indent + styleOK.Render("✓") + "  " + styleOK.Render(p.Name) + "  " + dur + "  " + styleMuted.Render(summary)
 		}
-		return sep + "  " + indent + styleFail.Render("✗") + "  " + styleFail.Render(p.Name) + "  " + dur + "  " + styleFail.Render("[err]")
+		return sep + "  " + indent + styleFail.Render("✗") + "  " + styleFail.Render(p.Name) + "  " + dur + "  " + styleFail.Render("[err] ") + styleMuted.Render(summary)
 	case core.EventRunError:
 		return sep + "  " + indent + styleFail.Render("!!") + "  " + styleFail.Render("error")
 	case core.EventRunEnd:

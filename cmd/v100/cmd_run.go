@@ -29,6 +29,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		workspaceFlag    string
 		unsafeFlag       bool
 		autoFlag         bool
+		yoloFlag         bool
 		sandboxFlag      bool
 		streamingFlag    bool
 		budgetStepsFlag  int
@@ -236,6 +237,10 @@ func runCmd(cfgPath *string) *cobra.Command {
 			budget := core.NewBudgetTracker(&run.Budget)
 
 			// Decide confirm mode
+			if yoloFlag {
+				autoFlag = true
+				unsafeFlag = true
+			}
 			confirmMode := cfg.Defaults.ConfirmTools
 			if autoFlag {
 				confirmMode = "never"
@@ -270,6 +275,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations")
 	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "disable path guardrails and confirmations")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "shorthand for --auto --unsafe (researcher mode)")
 	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable isolated sandbox execution")
 	cmd.Flags().BoolVar(&streamingFlag, "streaming", false, "enable real-time token streaming")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
