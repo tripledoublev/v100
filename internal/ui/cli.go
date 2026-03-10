@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 	"github.com/tripledoublev/v100/internal/core"
 )
 
@@ -28,6 +29,15 @@ func NewCLIRenderer() *CLIRenderer {
 	return &CLIRenderer{
 		agentStarts: make(map[string]time.Time),
 	}
+}
+
+// formatTokens formats token count as "Nk" for ≥1000 tokens, or "N" for <1000.
+// Fix #6: Show actual token count when <1k instead of rounding to "0k"
+func formatTokens(tokens int) string {
+	if tokens >= 1000 {
+		return fmt.Sprintf("%dk", tokens/1000)
+	}
+	return fmt.Sprintf("%d", tokens)
 }
 
 // RenderEvent prints a human-readable, colorized representation of an event.
@@ -236,8 +246,8 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		fmt.Printf("\n%s  %s  %s\n",
 			ts,
 			stylePrimary.Render(fmt.Sprintf("── step %d ──", p.StepNumber)),
-			styleMuted.Render(fmt.Sprintf("tok=%dk  $%.4f  %d tools  %d model calls  %dms",
-				p.InputTokens/1000, p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
+			styleMuted.Render(fmt.Sprintf("tok=%s  $%.4f  %d tools  %d model calls  %dms",
+				formatTokens(p.InputTokens), p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
 		)
 
 	default:
@@ -271,6 +281,13 @@ func (r *CLIRenderer) runSpinner() {
 
 // ConfirmTool prompts the user on stdin to approve a dangerous tool call.
 func ConfirmTool(toolName, args string) bool {
+	// Fix #2: Detect if stdin is not a TTY (e.g., piped input) and auto-deny
+	// to prevent commands like /quit from being misinterpreted as confirmation
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintf(os.Stderr, "⚠  Dangerous tool %q denied: stdin is not a terminal (piped/scripted input)\n", toolName)
+		return false
+	}
+
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(clrDanger).

@@ -317,6 +317,10 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if l.Policy != nil && l.Policy.MaxToolResultChars > 0 {
 		content = TruncateToolResult(content, l.Policy.MaxToolResultChars)
 	}
+	// Fix #1: Sanitize host paths in tool results to prevent double-prepend bug
+	if l.Mapper != nil {
+		content = l.Mapper.SanitizeText(content)
+	}
 	l.Messages = append(l.Messages, providers.Message{
 		Role:       "tool",
 		Content:    content,

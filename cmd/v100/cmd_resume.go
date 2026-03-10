@@ -202,6 +202,10 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
 	fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", run.ID, len(events))))
+	// Fix #8: Show resume context banner with provider/model/budget/context count
+	fmt.Println(ui.Info(ui.Dim("provider: ") + prov.Name() + ui.Dim(" · ") + model))
+	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
+	fmt.Println(ui.Info(ui.Dim("context: ") + fmt.Sprintf("%d messages", len(msgs))))
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 
 	ctx := context.Background()

@@ -23,6 +23,27 @@ type AnalysisReport struct {
 	Efficiency float64         `json:"efficiency_score"`
 }
 
+// calculateConfidence determines the confidence score for a given behavior label.
+// For now, this is a simple lookup, but can be expanded for dynamic calculation.
+func calculateConfidence(labelName string) float64 {
+	switch labelName {
+	case "tool_hallucination":
+		return 1.0
+	case "thrashing":
+		return 0.8
+	case "context_pressure":
+		return 1.0
+	case "normal":
+		// 'normal' is typically an absence of other labels, or a default confidence for a successful run.
+		// If a specific label for 'normal' is created, its confidence would be defined here.
+		return 1.0
+	default:
+		// Default confidence for other labels, especially those coming from core.ClassifyRun
+		// where confidence is implicitly 1.0 based on current implementation.
+		return 1.0
+	}
+}
+
 // AnalyzeTrajectory runs heuristic classifiers over a trace to detect behavioral patterns.
 func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 	report := AnalysisReport{
@@ -50,9 +71,10 @@ func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 		}
 	}
 	if len(hallucinations) > 0 {
+		labelName := "tool_hallucination"
 		report.Labels = append(report.Labels, BehaviorLabel{
-			Name:       "tool_hallucination",
-			Confidence: 1.0,
+			Name:       labelName,
+			Confidence: calculateConfidence(labelName),
 			Evidence:   fmt.Sprintf("Agent attempted non-existent tools: %s", strings.Join(hallucinations, ", ")),
 		})
 	}
@@ -74,9 +96,10 @@ func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 		}
 	}
 	if maxRepeats >= 3 {
+		labelName := "thrashing"
 		report.Labels = append(report.Labels, BehaviorLabel{
-			Name:       "thrashing",
-			Confidence: 0.8,
+			Name:       labelName,
+			Confidence: calculateConfidence(labelName),
 			Evidence:   fmt.Sprintf("Tool call repeated %d times with identical arguments.", maxRepeats),
 		})
 	}
@@ -89,17 +112,19 @@ func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 		}
 	}
 	if compressionCount > 0 {
+		labelName := "context_pressure"
 		report.Labels = append(report.Labels, BehaviorLabel{
-			Name:       "context_pressure",
-			Confidence: 1.0,
+			Name:       labelName,
+			Confidence: calculateConfidence(labelName),
 			Evidence:   fmt.Sprintf("Context compression triggered %d times.", compressionCount),
 		})
 	}
 
 	if classification.Label != "" && classification.Label != "normal" {
+		labelName := classification.Label
 		report.Labels = append(report.Labels, BehaviorLabel{
-			Name:       classification.Label,
-			Confidence: 1.0,
+			Name:       labelName,
+			Confidence: calculateConfidence(labelName),
 			Evidence:   strings.Join(classification.Evidence, "; "),
 		})
 	}

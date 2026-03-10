@@ -1,0 +1,21 @@
+name = "refactor-experiment-v1"
+
+[[prompts]]
+message = "Refactor internal/eval/analysis.go to extract the confidence calculation logic into a standalone function named 'calculateConfidence'. Ensure all existing behavioral labels still compute confidence correctly. Run tests to verify."
+expected = "Did the agent correctly extract calculateConfidence and do the tests pass?"
+scorer = "reflective"
+
+[[variants]]
+name = "gemini-react"
+provider = "gemini"
+model = "gemini-2.0-flash"
+solver = "react"
+budget_steps = 15
+
+[[variants]]
+name = "gemini-router"
+provider = "gemini"
+model = "gemini-2.0-flash"
+solver = "router"
+budget_steps = 15
+# Router will use gemini-2.0-flash for discovery and escalate to minimax (smart) for edits

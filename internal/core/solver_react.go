@@ -18,6 +18,9 @@ func (s *ReactSolver) Name() string { return "react" }
 const (
 	inspectionWatchdogToolThreshold  = 8
 	inspectionWatchdogModelThreshold = 3
+	readHeavyWatchdogToolThreshold   = 6
+	readHeavyWatchdogModelThreshold  = 2
+	readHeavyWatchdogTokenThreshold  = 40000
 )
 
 func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
@@ -47,6 +50,8 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	var finalText string
 	var terminalErr error
 	inspectionOnly := true
+	inspectionToolCalls := 0
+	stepTokensUsed := 0
 	watchdogInjected := false
 
 	for {
@@ -151,6 +156,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		if err := l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens); err != nil && terminalErr == nil {
 			terminalErr = err
 		}
+		stepTokensUsed += usage.InputTokens + usage.OutputTokens
 		if err := l.Budget.AddCost(usage.CostUSD); err != nil && terminalErr == nil {
 			terminalErr = err
 		}
@@ -214,7 +220,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 
 		for _, tc := range toolCalls {
-			if !isInspectionTool(tc.Name) {
+			if isInspectionTool(tc.Name) {
+				inspectionToolCalls++
+			} else {
 				inspectionOnly = false
 			}
 			if toolCallsUsed >= maxToolCalls {
@@ -231,21 +239,19 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		if toolCallsUsed >= maxToolCalls {
 			break
 		}
-		if !watchdogInjected &&
-			inspectionOnly &&
-			toolCallsUsed >= inspectionWatchdogToolThreshold &&
-			modelCalls >= inspectionWatchdogModelThreshold {
-			msg := "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Stop exploring, synthesize what you already know, and answer without calling more tools unless a missing fact is absolutely required."
-			_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
-				Action:  "inject_message",
-				Message: msg,
-				Reason:  "inspection_watchdog",
-			})
-			l.Messages = append(l.Messages, providers.Message{
-				Role:    "user",
-				Content: msg,
-			})
-			watchdogInjected = true
+		if !watchdogInjected {
+			if msg, reason, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
+				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+					Action:  "inject_message",
+					Message: msg,
+					Reason:  reason,
+				})
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: msg,
+				})
+				watchdogInjected = true
+			}
 		}
 	}
 
@@ -261,6 +267,20 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		ModelCalls:   modelCalls,
 		DurationMS:   time.Since(stepStart).Milliseconds(),
 	})
+
+	// Fix #5: Warn when token budget usage exceeds 50% and 80%
+	if budgetAfter.MaxTokens > 0 {
+		usagePercent := (budgetAfter.UsedTokens * 100) / budgetAfter.MaxTokens
+		if usagePercent >= 80 && usagePercent < 100 {
+			_, _ = l.emit(EventUserMsg, stepID, UserMsgPayload{
+				Content: fmt.Sprintf("⚠ System alert: token budget 80%% consumed (%d/%d tokens). Remaining budget is limited.", budgetAfter.UsedTokens, budgetAfter.MaxTokens),
+			})
+		} else if usagePercent >= 50 && usagePercent < 80 {
+			_, _ = l.emit(EventUserMsg, stepID, UserMsgPayload{
+				Content: fmt.Sprintf("⚠ System alert: token budget 50%% consumed (%d/%d tokens). Plan remaining steps carefully.", budgetAfter.UsedTokens, budgetAfter.MaxTokens),
+			})
+		}
+	}
 
 	// Increment step budget
 	if err := l.Budget.AddStep(); err != nil && terminalErr == nil {
@@ -286,4 +306,22 @@ func isInspectionTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, bool) {
+	if inspectionOnly &&
+		toolCallsUsed >= inspectionWatchdogToolThreshold &&
+		modelCalls >= inspectionWatchdogModelThreshold {
+		return "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Stop exploring, synthesize what you already know, and answer without calling more tools unless a missing fact is absolutely required.", "inspection_watchdog", true
+	}
+
+	if modelCalls < readHeavyWatchdogModelThreshold ||
+		stepTokensUsed < readHeavyWatchdogTokenThreshold ||
+		inspectionToolCalls < readHeavyWatchdogToolThreshold {
+		return "", "", false
+	}
+	if toolCallsUsed == 0 || inspectionToolCalls*5 < toolCallsUsed*4 {
+		return "", "", false
+	}
+	return "System watchdog: this step is spending too many tokens on read-heavy inspection. Stop searching and reading, synthesize the evidence you already have, and answer now unless one specific missing fact is essential.", "read_heavy_watchdog", true
 }

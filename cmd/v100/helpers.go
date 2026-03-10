@@ -63,7 +63,13 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 
 func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
 	if pc.Type == "codex" {
-		pc.DefaultModel, _ = normalizeCodexModelOverride(pc.DefaultModel)
+		original := pc.DefaultModel
+		normalized, changed := normalizeCodexModelOverride(pc.DefaultModel)
+		// Fix #11: Log model normalization to prevent silent changes
+		if changed {
+			fmt.Fprintf(os.Stderr, "→ model normalized: %s → %s (%s)\n", original, normalized, pc.Type)
+			pc.DefaultModel = normalized
+		}
 	}
 	return pc
 }
@@ -200,14 +206,8 @@ func enabledToolSummary(reg *tools.Registry) string {
 	if len(names) == 0 {
 		return "0 enabled"
 	}
-	preview := names
-	if len(preview) > 8 {
-		preview = preview[:8]
-	}
-	summary := fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(preview, ", "))
-	if len(names) > len(preview) {
-		summary += fmt.Sprintf(", +%d more", len(names)-len(preview))
-	}
+	// Fix #7: Show all enabled tools instead of truncating with "+N more"
+	summary := fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(names, ", "))
 	return summary
 }
 

@@ -161,12 +161,20 @@ func compareCmd() *cobra.Command {
 func benchCmd(cfgPath *string) *cobra.Command {
 	var evalType string
 	var rubricOverride string
+	var autoFlag bool
+	var unsafeFlag bool
+	var yoloFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "bench <bench.toml>",
 		Short: "Run batch evaluation from a bench config file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if yoloFlag {
+				autoFlag = true
+				unsafeFlag = true
+			}
+
 			bc, err := core.LoadBenchConfig(args[0])
 			if err != nil {
 				return err
@@ -259,8 +267,14 @@ func benchCmd(cfgPath *string) *cobra.Command {
 						MaxCostUSD: cfg.Defaults.BudgetCostUSD,
 					})
 
+					// Decide confirm mode
+					confirmMode := "never" // Bench is usually non-interactive
+					if err := validateExecutionSafety(cfg, confirmMode, unsafeFlag); err != nil {
+						return err
+					}
+
 					renderer := ui.NewCLIRenderer()
-					confirmFn := func(_, _ string) bool { return true } // auto-approve
+					confirmFn := func(_, _ string) bool { return true } // auto-approve after safety check
 					outputFn := core.OutputFn(renderer.RenderEvent)
 					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
 
@@ -352,6 +366,9 @@ func benchCmd(cfgPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&evalType, "eval", "", "automated scorer type (exact_match, contains, regex, reflective)")
 	cmd.Flags().StringVar(&rubricOverride, "rubric", "", "override expected string with this rubric for reflective eval")
+	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "disable path guardrails and confirmations")
+	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "shorthand for --auto --unsafe")
 
 	return cmd
 }
@@ -359,14 +376,20 @@ func benchCmd(cfgPath *string) *cobra.Command {
 func queryCmd() *cobra.Command {
 	var tagFilter []string
 	var scoreFilter string
+	var runDirFlag string
 
 	cmd := &cobra.Command{
 		Use:   "query",
 		Short: "Query runs by tags, score, or name",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := os.ReadDir("runs")
+			// Fix #12: Use findRunDir helper and respect --run-dir flag
+			runDir := runDirFlag
+			if runDir == "" {
+				runDir = "runs"
+			}
+			entries, err := os.ReadDir(runDir)
 			if err != nil {
-				return fmt.Errorf("cannot read runs/: %w", err)
+				return fmt.Errorf("cannot read %s/: %w", runDir, err)
 			}
 
 			wantTags := parseTags(tagFilter)
@@ -375,7 +398,7 @@ func queryCmd() *cobra.Command {
 				if !entry.IsDir() {
 					continue
 				}
-				dir := filepath.Join("runs", entry.Name())
+				dir := filepath.Join(runDir, entry.Name())
 				meta, err := core.ReadMeta(dir)
 				if err != nil {
 					continue
@@ -417,6 +440,7 @@ func queryCmd() *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&tagFilter, "tag", nil, "filter by tag key=value (repeatable)")
 	cmd.Flags().StringVar(&scoreFilter, "score", "", "filter by score (pass|fail|partial)")
+	cmd.Flags().StringVar(&runDirFlag, "run-dir", "", "base directory for runs (default: ./runs)")
 	return cmd
 }
 
@@ -838,7 +862,8 @@ func evalCmd(cfgPath *string) *cobra.Command {
 }
 
 func diffCmd() *cobra.Command {
-	return &cobra.Command{
+	var runDirFlag string
+	cmd := &cobra.Command{
 		Use:   "diff <run_id_a> <run_id_b>",
 		Short: "Find the point of divergence between two run traces",
 		Args:  cobra.ExactArgs(2),
@@ -846,11 +871,17 @@ func diffCmd() *cobra.Command {
 			runA := args[0]
 			runB := args[1]
 
-			eventsA, err := core.ReadAll(filepath.Join("runs", runA, "trace.jsonl"))
+			// Fix #12: Respect --run-dir flag
+			runDir := runDirFlag
+			if runDir == "" {
+				runDir = "runs"
+			}
+
+			eventsA, err := core.ReadAll(filepath.Join(runDir, runA, "trace.jsonl"))
 			if err != nil {
 				return err
 			}
-			eventsB, err := core.ReadAll(filepath.Join("runs", runB, "trace.jsonl"))
+			eventsB, err := core.ReadAll(filepath.Join(runDir, runB, "trace.jsonl"))
 			if err != nil {
 				return err
 			}
@@ -870,6 +901,8 @@ func diffCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&runDirFlag, "run-dir", "", "base directory for runs (default: ./runs)")
+	return cmd
 }
 
 func verifyCmd() *cobra.Command {
