@@ -118,6 +118,48 @@ func TestCheckpointSnapshotSkipsCacheDirectories(t *testing.T) {
 	}
 }
 
+func TestCheckpointSnapshotSkipsGoTelemetry(t *testing.T) {
+	workspace := t.TempDir()
+	tracePath := filepath.Join(t.TempDir(), "trace.jsonl")
+
+	telDir := filepath.Join(workspace, ".config", "go", "telemetry", "local")
+	if err := os.MkdirAll(telDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(telDir, "count"), []byte("noise\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "state.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	snapshotRoot := filepath.Join(filepath.Dir(workspace), "snapshots")
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "cp-run-tel", Dir: workspace, TraceFile: tracePath},
+		Trace:     trace,
+		Snapshots: core.NewWorkspaceSnapshotManager(workspace, snapshotRoot),
+	}
+
+	cp, err := loop.CheckpointWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("CheckpointWithContext returned error: %v", err)
+	}
+
+	snapPath := filepath.Join(snapshotRoot, cp.SnapshotID)
+	if _, err := os.Stat(filepath.Join(snapPath, ".config", "go", "telemetry")); !os.IsNotExist(err) {
+		t.Fatalf("expected .config/go/telemetry to be excluded from snapshot, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snapPath, "state.txt")); err != nil {
+		t.Fatalf("expected state.txt in snapshot: %v", err)
+	}
+}
+
 func assertRestoreEvent(t *testing.T, tracePath, snapshotID string) {
 	t.Helper()
 

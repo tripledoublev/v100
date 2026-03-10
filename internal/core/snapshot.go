@@ -191,6 +191,9 @@ func shouldSkipSnapshotPath(rel string, info os.FileInfo) bool {
 	if rel == ".cache" || strings.HasPrefix(rel, ".cache/") {
 		return true
 	}
+	if rel == ".config/go/telemetry" || strings.HasPrefix(rel, ".config/go/telemetry/") {
+		return true
+	}
 	return false
 }
 
