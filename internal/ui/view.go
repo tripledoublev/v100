@@ -81,9 +81,15 @@ func (m *TUIModel) View() string {
 
 		paneInnerH := remaining - 2
 		statusH := 0
+		metricsH := 9 // fixed height for visual inspector (7 lines + 2 for borders)
 		traceH := paneInnerH
+
 		if m.showStatus {
-			rightBudget := remaining - 4
+			// Budget for 3 panes: trace, status, metrics
+			rightBudget := remaining - metricsH - 4 // -4 for other 2 pane borders
+			if rightBudget < 8 {
+				rightBudget = 8 // minimum usable height
+			}
 			traceH = rightBudget * m.tracePanePct / 100
 			if traceH < 4 {
 				traceH = 4
@@ -92,6 +98,12 @@ func (m *TUIModel) View() string {
 			if statusH < 2 {
 				statusH = 2
 				traceH = rightBudget - statusH
+			}
+		} else {
+			// Budget for 2 panes: trace, metrics
+			traceH = remaining - metricsH - 2
+			if traceH < 4 {
+				traceH = 4
 			}
 		}
 
@@ -104,18 +116,18 @@ func (m *TUIModel) View() string {
 		tracePane := rightSt.Width(rightW).Height(traceH).Render(
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
 		)
-		rightCol := tracePane
+		
+		metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps, m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens, m.usedCost, m.maxCost, rightW)
+		metricsPane := tuiPaneStyle.Width(rightW).Height(metricsH).Render(metricsView)
+
+		rightCol := lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
 		if m.showStatus {
 			statusSt := tuiPaneStyle
 			if m.focus == focusStatus {
 				statusSt = tuiActivePaneStyle
 			}
 			statusPane := statusSt.Width(rightW).Height(statusH).Render(m.statusView(rightW, statusH))
-			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, statusPane)
-		}
-		if m.showMetrics {
-			metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps, m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens, m.usedCost, m.maxCost, rightW)
-			rightCol = lipgloss.JoinVertical(lipgloss.Left, rightCol, tuiPaneStyle.Width(rightW).Render(metricsView))
+			rightCol = lipgloss.JoinVertical(lipgloss.Left, rightCol, statusPane)
 		}
 
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", rightCol)
