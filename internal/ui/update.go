@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,6 +40,13 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendEvent(core.Event(msg))
 
 	case RequestConfirmMsg:
+		go func() {
+			PlaySine(220, 100)
+			time.Sleep(100 * time.Millisecond)
+			PlaySine(440, 100)
+			time.Sleep(100 * time.Millisecond)
+			PlaySine(880, 200)
+		}()
 		m.pendConfirm = &confirmState{
 			active:   true,
 			toolName: msg.ToolName,
@@ -100,8 +108,20 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showStatus && m.focus == focusStatus {
 				m.focus = focusTrace
 			}
-		case "ctrl+m":
+		case "ctrl+g":
 			m.showMetrics = !m.showMetrics
+		case "ctrl+m":
+			switch m.mascotPersonality {
+			case "classic":
+				m.mascotPersonality = "glitch-ghost"
+			case "glitch-ghost":
+				m.mascotPersonality = "monolith"
+			case "monolith":
+				m.mascotPersonality = "classic"
+			default:
+				m.mascotPersonality = "classic"
+			}
+			m.refreshMascot()
 		case "ctrl+a":
 			if err := copyToClipboard(m.plainBuf.String()); err != nil {
 				m.statusLine = "copy failed: " + err.Error()

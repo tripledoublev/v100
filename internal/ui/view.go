@@ -146,6 +146,8 @@ func (m *TUIModel) statusView(width, height int) string {
 		styleBold.Render(strings.ToUpper(m.statusMode)),
 		styleMuted.Render(line),
 		"",
+		stylePrimary.Render(Mascot(m.statusMode, m.mascotPersonality)),
+		"",
 		styleMuted.Render(fmt.Sprintf("sub-agents: active=%d done=%d failed=%d",
 			len(m.activeAgents), m.agentDoneCount, m.agentFailCount)),
 		styleMuted.Render(m.subAgentStatusLine()),
@@ -253,11 +255,15 @@ func centerToWidth(s string, width int) string {
 func (m *TUIModel) seedWelcomeContent() {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
+	if m.mascotPersonality == "" {
+		m.mascotPersonality = "classic"
+	}
+
 	m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+now) + "\n\n")
 
 	// ASCII mascot with reactive expression based on status mode
 	m.mascotStartLine = strings.Count(m.transcriptBuf.String(), "\n")
-	mascotStr := stylePrimary.Render(Mascot(m.statusMode))
+	mascotStr := stylePrimary.Render(Mascot(m.statusMode, m.mascotPersonality))
 	m.transcriptBuf.WriteString(mascotStr + "\n")
 	m.mascotEndLine = strings.Count(m.transcriptBuf.String(), "\n") - 1
 
@@ -292,8 +298,8 @@ func (m *TUIModel) refreshMascot() {
 		return
 	}
 
-	// Generate new mascot with current status mode
-	newMascotLines := strings.Split(stylePrimary.Render(Mascot(m.statusMode)), "\n")
+	// Generate new mascot with current status mode and personality
+	newMascotLines := strings.Split(stylePrimary.Render(Mascot(m.statusMode, m.mascotPersonality)), "\n")
 
 	// Ensure we have the same number of lines to avoid shifting the transcript
 	mSpan := m.mascotEndLine - m.mascotStartLine + 1

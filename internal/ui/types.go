@@ -81,10 +81,11 @@ type TUIModel struct {
 
 	// mascot line offset for reactive updates
 
-	mascotStartLine int
-	mascotEndLine   int
-	radioURL        string
-	radioPlayer     string
+	mascotStartLine  int
+	mascotEndLine    int
+	mascotPersonality string
+	radioURL         string
+	radioPlayer      string
 	radioVolume     int
 	radioPlaying    bool
 	radioWave       string
