@@ -339,6 +339,14 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					if baseURL == "" {
 						baseURL = "http://localhost:11434"
 					}
+					// Warn when env vars differ from config
+					envURL := os.Getenv("OLLAMA_BASE_URL")
+					if envURL == "" {
+						envURL = os.Getenv("OLLAMA_HOST")
+					}
+					if envURL != "" && envURL != baseURL {
+						fmt.Println(ui.Warn(fmt.Sprintf("Provider %s: env OLLAMA_BASE_URL=%s differs from config base_url=%s (config wins)", name, envURL, baseURL)))
+					}
 					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/tags", nil)
 					resp, err := http.DefaultClient.Do(req)

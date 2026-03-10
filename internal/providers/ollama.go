@@ -27,42 +27,35 @@ type OllamaProvider struct {
 }
 
 func NewOllamaProvider(baseURL, defaultModel, username, password string) (*OllamaProvider, error) {
-	// 1. Check environment variables first (allows .env to be the source of truth)
-	envBaseURL := os.Getenv("OLLAMA_BASE_URL")
-	if envBaseURL == "" {
-		envBaseURL = os.Getenv("OLLAMA_HOST")
-	}
-	envModel := os.Getenv("OLLAMA_MODEL")
-	envUser := os.Getenv("OLLAMA_USER")
-	envPass := os.Getenv("OLLAMA_PASS")
-
-	// 2. Use passed-in values if they are NOT the hardcoded defaults and NOT empty.
-	// Otherwise, use environment or hardcoded default.
+	// Config values (passed in) take precedence over env vars.
+	// Env vars are only used when the config value is empty.
 	finalBaseURL := baseURL
-	if finalBaseURL == "" || finalBaseURL == ollamaDefaultBaseURL {
-		if envBaseURL != "" {
-			finalBaseURL = envBaseURL
-		} else if finalBaseURL == "" {
+	if finalBaseURL == "" {
+		if v := os.Getenv("OLLAMA_BASE_URL"); v != "" {
+			finalBaseURL = v
+		} else if v := os.Getenv("OLLAMA_HOST"); v != "" {
+			finalBaseURL = v
+		} else {
 			finalBaseURL = ollamaDefaultBaseURL
 		}
 	}
 
 	finalModel := defaultModel
-	if finalModel == "" || finalModel == ollamaDefaultModel {
-		if envModel != "" {
-			finalModel = envModel
-		} else if finalModel == "" {
+	if finalModel == "" {
+		if v := os.Getenv("OLLAMA_MODEL"); v != "" {
+			finalModel = v
+		} else {
 			finalModel = ollamaDefaultModel
 		}
 	}
 
 	finalUser := username
 	if finalUser == "" {
-		finalUser = envUser
+		finalUser = os.Getenv("OLLAMA_USER")
 	}
 	finalPass := password
 	if finalPass == "" {
-		finalPass = envPass
+		finalPass = os.Getenv("OLLAMA_PASS")
 	}
 
 	return &OllamaProvider{

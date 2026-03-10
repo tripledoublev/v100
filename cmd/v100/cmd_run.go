@@ -106,7 +106,16 @@ func runCmd(cfgPath *string) *cobra.Command {
 
 			// Apply overrides to the ACTIVE provider
 			if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-				if authFlag != "" {
+				if authFlag == "env" {
+					// --auth with no value: load from .env / environment
+					pc.Auth.Username = os.Getenv("OLLAMA_USER")
+					pc.Auth.Password = os.Getenv("OLLAMA_PASS")
+					if !cmd.Flags().Changed("base-url") {
+						if envURL := os.Getenv("OLLAMA_BASE_URL"); envURL != "" {
+							pc.BaseURL = envURL
+						}
+					}
+				} else if authFlag != "" {
 					parts := strings.SplitN(authFlag, ":", 2)
 					if len(parts) == 2 {
 						pc.Auth.Username = parts[0]
@@ -274,7 +283,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
-	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth credentials (user:password) for providers like ollama")
+	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth (user:pass); bare --auth loads from .env")
+	cmd.Flags().Lookup("auth").NoOptDefVal = "env"
 	cmd.Flags().StringVar(&baseURLFlag, "base-url", "", "override the provider's base API URL")
 	cmd.Flags().IntVar(&maxReplansFlag, "max-replans", 0, "max replans for plan_execute solver")
 	cmd.Flags().Float64Var(&temperatureFlag, "temperature", 0, "sampling temperature (0=provider default)")
