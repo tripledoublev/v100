@@ -33,8 +33,6 @@ func NewTUIModel() *TUIModel {
 		radioURL:        "https://n04.radiojar.com/78cxy6wkxtzuv",
 		radioPlayer:     detectRadioPlayer(),
 		radioVolume:     60,
-		mascotStartLine: -1,
-		mascotEndLine:   -1,
 	}
 	m.seedWelcomeContent()
 	return m
