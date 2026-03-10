@@ -70,7 +70,6 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		tokenBar,
 		ioBar,
 		costBar,
-		"",
 		fmt.Sprintf("%s %s", styleMuted.Render("HEARTBEAT:"), heartbeat),
 	)
 

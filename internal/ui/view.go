@@ -81,7 +81,7 @@ func (m *TUIModel) View() string {
 
 		paneInnerH := remaining - 2
 		statusH := 0
-		metricsH := 9 // fixed height for visual inspector (7 lines + 2 for borders)
+		metricsH := 8 // fixed height for visual inspector (6 content lines + 2 border rows)
 		var traceH int
 
 		if m.showStatus {
