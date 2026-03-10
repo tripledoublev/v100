@@ -29,7 +29,7 @@ func NewTUIModel() *TUIModel {
 		statusLine:   "ready and waiting",
 		runSummary:   "v100 run pending",
 		leftPanePct:  66,
-		tracePanePct: 70,
+		tracePanePct: 50,
 		radioURL:     "https://n04.radiojar.com/78cxy6wkxtzuv",
 		radioPlayer:  detectRadioPlayer(),
 		radioVolume:  60,
