@@ -27,6 +27,10 @@ func (m *TUIModel) View() string {
 		return m.confirmView()
 	}
 
+	if m.showRadioSelect {
+		return m.radioSelectView()
+	}
+
 	// Header bar with responsive width to avoid terminal soft-wrap.
 	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+A:copy all  Ctrl+C:quit"
 	if m.width < 130 {

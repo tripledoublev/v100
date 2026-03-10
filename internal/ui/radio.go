@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
 const radioIPCSocket = "/tmp/v100-radio.sock"
@@ -360,4 +361,35 @@ func fetchNowPlaying(stationID string) (string, string, error) {
 		return "", "", err
 	}
 	return strings.TrimSpace(payload.Artist), strings.TrimSpace(payload.Title), nil
+}
+
+func (m *TUIModel) radioSelectView() string {
+	var sb strings.Builder
+	sb.WriteString(tuiHeaderStyle.Render("Radio Station Selector") + "\n\n")
+	
+	for i, s := range availableStations {
+		prefix := "  "
+		if i == m.radioSelectIdx {
+			prefix = "> "
+		}
+		
+		nameStr := s.Name
+		if m.radioURL == s.URL {
+			nameStr += " (playing)"
+		}
+		
+		line := prefix + nameStr
+		if i == m.radioSelectIdx {
+			sb.WriteString(tuiInputActiveStyle.Render(line) + "\n")
+		} else if m.radioURL == s.URL {
+			sb.WriteString(tuiHeaderStyle.Render(line) + "\n")
+		} else {
+			sb.WriteString(tuiHeaderDimStyle.Render(line) + "\n")
+		}
+	}
+	
+	sb.WriteString("\n" + tuiHeaderDimStyle.Render("  ↑/↓: navigate   Enter: select   Esc: cancel"))
+	
+	box := tuiPaneStyle.Render(sb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

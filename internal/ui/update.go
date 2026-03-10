@@ -109,6 +109,8 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusLine = "full transcript copied to clipboard"
 			}
+		case "alt+r":
+			m.showRadioSelect = !m.showRadioSelect
 		case "ctrl+r":
 			m.toggleRadio()
 		case "]":
@@ -151,7 +153,30 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return ConfirmMsg{Approved: false, confirm: confirm} }
 			}
 
+		case "up", "k":
+			if m.showRadioSelect {
+				m.radioSelectIdx--
+				if m.radioSelectIdx < 0 {
+					m.radioSelectIdx = len(availableStations) - 1
+				}
+				return m, nil
+			}
+
+		case "down", "j":
+			if m.showRadioSelect {
+				m.radioSelectIdx++
+				if m.radioSelectIdx >= len(availableStations) {
+					m.radioSelectIdx = 0
+				}
+				return m, nil
+			}
+
 		case "enter":
+			if m.showRadioSelect {
+				m.jumpToStation(m.radioSelectIdx)
+				m.showRadioSelect = false
+				return m, nil
+			}
 			if m.focus == focusInput && !m.pendConfirm.isActive() {
 				val := sanitizeInputNoise(strings.TrimSpace(m.input.Value()))
 				if val != "" {
@@ -165,11 +190,17 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			
+		case "esc":
+			if m.showRadioSelect {
+				m.showRadioSelect = false
+				return m, nil
+			}
 		}
 	}
 
 	// Route key input to focused pane
-	if _, ok := msg.(tea.KeyMsg); ok {
+	if _, ok := msg.(tea.KeyMsg); ok && !m.showRadioSelect {
 		switch m.focus {
 		case focusTranscript:
 			var cmd tea.Cmd
@@ -285,6 +316,10 @@ func (m *TUIModel) resizeFocused(dxPct, dyPct int) {
 func (m *TUIModel) handleBuiltInCommand(input string) tea.Cmd {
 	if strings.EqualFold(strings.TrimSpace(input), "download this song") {
 		return m.startDownloadCmd()
+	}
+	if strings.EqualFold(strings.TrimSpace(input), "/radio") {
+		m.showRadioSelect = true
+		return nil
 	}
 	return nil
 }

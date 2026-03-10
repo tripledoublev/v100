@@ -91,6 +91,9 @@ type TUIModel struct {
 	radioTitle    string
 	radioLastPoll time.Time
 
+	showRadioSelect bool
+	radioSelectIdx  int
+
 	copyTargets    []copyTarget
 	plainBuf       strings.Builder // plain-text transcript for full-copy
 	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
