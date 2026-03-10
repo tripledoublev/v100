@@ -69,6 +69,24 @@ func TestContains(t *testing.T) {
 	if r.Score != "fail" {
 		t.Errorf("expected fail, got %s", r.Score)
 	}
+
+	// Case-insensitive: model answers "Yes." but bench expects "yes"
+	r, err = s.Score(ctx, makeTrace("Yes."), "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Score != "pass" {
+		t.Errorf("expected pass for 'Yes.' vs 'yes', got %s", r.Score)
+	}
+
+	// Case-insensitive: upper-case answer
+	r, err = s.Score(ctx, makeTrace("The answer is YES"), "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Score != "pass" {
+		t.Errorf("expected pass for 'YES' vs 'yes', got %s", r.Score)
+	}
 }
 
 func TestRegexMatch(t *testing.T) {

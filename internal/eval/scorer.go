@@ -166,7 +166,7 @@ type Contains struct{}
 func (Contains) Name() string { return "contains" }
 func (Contains) Score(_ context.Context, trace []core.Event, expected string) (ScoreResult, error) {
 	last := lastAssistantText(trace)
-	if strings.Contains(last, expected) {
+	if strings.Contains(strings.ToLower(last), strings.ToLower(expected)) {
 		return ScoreResult{Score: "pass", Value: 1.0}, nil
 	}
 	return ScoreResult{Score: "fail", Value: 0.0, Notes: "expected substring not found"}, nil
