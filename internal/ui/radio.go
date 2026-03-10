@@ -18,6 +18,99 @@ import (
 
 const radioIPCSocket = "/tmp/v100-radio.sock"
 
+// RadioStation represents a selectable radio station
+type RadioStation struct {
+	Name string // Display name
+	URL  string // Stream URL
+}
+
+// availableStations defines the radio stations users can choose from
+var availableStations = []RadioStation{
+	{Name: "Radiojar", URL: "https://n04.radiojar.com/78cxy6wkxtzuv"},
+	{Name: "NTS Radio 1", URL: "https://stream-relay-geo.ntslive.net/stream"},
+	{Name: "NTS Radio 2", URL: "https://stream-relay-geo.ntslive.net/stream2"},
+}
+
+
+func (m *TUIModel) jumpToStation(idx int) {
+	if idx < 0 || idx >= len(availableStations) {
+		return
+	}
+	wasPlaying := m.radioPlaying
+	if wasPlaying {
+		m.stopRadio()
+	}
+	m.radioURL = availableStations[idx].URL
+	if wasPlaying {
+		m.startRadio()
+	}
+}
+
+func (m *TUIModel) cycleStation(direction int) {
+	// Find current station index
+	currentIdx := -1
+	for i, s := range availableStations {
+		if s.URL == m.radioURL {
+			currentIdx = i
+			break
+		}
+	}
+
+	// If current URL not in list, try to find by checking if it starts with known URL
+	if currentIdx == -1 {
+		for i, s := range availableStations {
+			if strings.HasPrefix(m.radioURL, strings.TrimSuffix(s.URL, "/")) {
+				currentIdx = i
+				break
+			}
+		}
+	}
+
+	// Cycle to next/previous station
+	newIdx := currentIdx + direction
+	if newIdx < 0 {
+		newIdx = len(availableStations) - 1
+	} else if newIdx >= len(availableStations) {
+		newIdx = 0
+	}
+
+	// Stop current radio if playing and switch station
+	wasPlaying := m.radioPlaying
+	if wasPlaying {
+		m.stopRadio()
+	}
+
+	m.radioURL = availableStations[newIdx].URL
+
+	if wasPlaying {
+		m.startRadio()
+	}
+
+	m.statusLine = "radio: switched to " + availableStations[newIdx].Name
+	m.statusMode = "radio"
+}
+
+// getCurrentStationName returns the name of the current station
+func (m *TUIModel) getCurrentStationName() string {
+	for _, s := range availableStations {
+		if s.URL == m.radioURL {
+			return s.Name
+		}
+	}
+	// Check by prefix match
+	for _, s := range availableStations {
+		if strings.HasPrefix(m.radioURL, strings.TrimSuffix(s.URL, "/")) {
+			return s.Name
+		}
+	}
+	// Try to extract station ID for display
+	stationID := m.radioStationID()
+	if stationID != "" {
+		return "Radio: " + stationID
+	}
+	return "Custom"
+}
+
 func radioTickCmd() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return radioTickMsg{} })
 }
@@ -83,13 +176,14 @@ func (m *TUIModel) radioStateLine() string {
 	if m.radioPlaying {
 		state = "playing"
 	}
-	return fmt.Sprintf("%s  vol=%d%%  Ctrl+R play/stop  [/] volume", state, m.radioVolume)
+	stationName := m.getCurrentStationName()
+	return fmt.Sprintf("%s  %s  vol=%d%%  Ctrl+R play/stop  [/] volume  N/P station", state, stationName, m.radioVolume)
 }
 
 func (m *TUIModel) startRadio() {
 	m.radioErr = ""
 	if m.radioURL == "" {
-		m.radioURL = "https://n04.radiojar.com/78cxy6wkxtzuv"
+		m.radioURL = availableStations[0].URL
 	}
 	if m.radioPlayer == "" {
 		m.radioPlayer = detectRadioPlayer()
