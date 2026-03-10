@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -196,6 +197,66 @@ func TestLoopBudgetExceeded(t *testing.T) {
 	if err != nil && !isErrBudgetExceeded(err, &budgetErr) {
 		t.Logf("got error: %v (type: %T)", err, err)
 		// Budget may trigger on step increment — that's OK
+	}
+}
+
+func TestLoopTokenBudgetExceededStillCountsStep(t *testing.T) {
+	prov := &mockProvider{
+		responses: []providers.CompleteResponse{
+			{
+				AssistantText: "large response",
+				Usage: providers.Usage{
+					InputTokens:  9,
+					OutputTokens: 5,
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, _ := core.OpenTrace(tracePath)
+	defer func() { _ = trace.Close() }()
+
+	run := &core.Run{ID: "test", Dir: dir, TraceFile: tracePath}
+	budget := &core.Budget{MaxSteps: 5, MaxTokens: 10}
+
+	loop := &core.Loop{
+		Run:       run,
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    policy.Default(),
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(budget),
+		ConfirmFn: func(_, _ string) bool { return true },
+		Mapper:    core.NewPathMapper(dir, dir),
+	}
+
+	err := loop.Step(context.Background(), "hi")
+	var budgetErr *core.ErrBudgetExceeded
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("expected budget exceeded error, got %v", err)
+	}
+
+	events, readErr := core.ReadAll(trace.Path())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	foundSummary := false
+	for _, ev := range events {
+		if ev.Type != core.EventStepSummary {
+			continue
+		}
+		var payload core.StepSummaryPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.StepNumber != 1 {
+			t.Fatalf("step summary number = %d, want 1", payload.StepNumber)
+		}
+		foundSummary = true
+	}
+	if !foundSummary {
+		t.Fatal("expected step summary event before budget error")
 	}
 }
 

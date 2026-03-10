@@ -54,7 +54,13 @@ func providersCmd(cfgPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for name, pc := range cfg.Providers {
+			names := make([]string, 0, len(cfg.Providers))
+			for name := range cfg.Providers {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				pc := cfg.Providers[name]
 				pc = normalizedProviderConfig(pc)
 				fmt.Printf("%-15s type=%-10s model=%s\n", name, pc.Type, pc.DefaultModel)
 			}

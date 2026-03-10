@@ -31,6 +31,22 @@ func loadConfig(cfgPath string) (*config.Config, error) {
 	return config.Load(cfgPath)
 }
 
+func validateExecutionSafety(cfg *config.Config, confirmMode string, allowUnsafeHost bool) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.Sandbox.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(confirmMode) != "never" {
+		return nil
+	}
+	if allowUnsafeHost {
+		return nil
+	}
+	return fmt.Errorf("refusing to run with confirmations disabled on the host workspace; enable --sandbox or pass --unsafe to acknowledge the risk")
+}
+
 func buildProvider(cfg *config.Config, providerName string) (providers.Provider, error) {
 	pc, ok := cfg.Providers[providerName]
 	if !ok {

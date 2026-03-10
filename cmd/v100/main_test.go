@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -175,5 +177,43 @@ func TestNormalizedProviderConfig(t *testing.T) {
 	})
 	if other.DefaultModel != "gpt-4o" {
 		t.Fatalf("normalizedProviderConfig should leave non-codex models unchanged, got %q", other.DefaultModel)
+	}
+}
+
+func TestValidateExecutionSafety(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Sandbox.Enabled = false
+
+	if err := validateExecutionSafety(cfg, "dangerous", false); err != nil {
+		t.Fatalf("dangerous confirm mode should be allowed, got %v", err)
+	}
+	if err := validateExecutionSafety(cfg, "never", true); err != nil {
+		t.Fatalf("unsafe host execution should be allowed explicitly, got %v", err)
+	}
+	if err := validateExecutionSafety(cfg, "never", false); err == nil {
+		t.Fatal("expected host auto-approval without sandbox to be rejected")
+	}
+}
+
+func TestLoadConfigAddsDefaultProviders(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	content := `
+[providers.codex]
+type = "codex"
+default_model = "gpt-5.4"
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"codex", "gemini", "minimax", "anthropic", "openai", "ollama"} {
+		if _, ok := cfg.Providers[name]; !ok {
+			t.Fatalf("expected provider %q to be present after load", name)
+		}
 	}
 }

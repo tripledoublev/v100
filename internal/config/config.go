@@ -279,6 +279,7 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	applyProviderDefaults(&cfg, DefaultConfig())
 	// Backward-compatible tool migrations for older config files.
 	ensureString(&cfg.Tools.Enabled, "sh")
 	ensureString(&cfg.Tools.Dangerous, "sh")
@@ -309,6 +310,20 @@ func Load(path string) (*Config, error) {
 	}
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	return &cfg, nil
+}
+
+func applyProviderDefaults(cfg *Config, defaults *Config) {
+	if cfg == nil || defaults == nil {
+		return
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]ProviderConfig, len(defaults.Providers))
+	}
+	for name, pc := range defaults.Providers {
+		if _, ok := cfg.Providers[name]; !ok {
+			cfg.Providers[name] = pc
+		}
+	}
 }
 
 // LoadDotEnv is a minimal .env file parser.

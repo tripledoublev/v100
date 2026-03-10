@@ -109,6 +109,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			if autoFlag {
 				cfg.Defaults.ConfirmTools = "never"
 			}
+			if err := validateExecutionSafety(cfg, cfg.Defaults.ConfirmTools, false); err != nil {
+				return err
+			}
 
 			budget := core.NewBudgetTracker(&core.Budget{
 				MaxSteps:   maxSteps,

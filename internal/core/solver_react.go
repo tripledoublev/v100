@@ -40,6 +40,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	}
 	toolCallsUsed := 0
 	var finalText string
+	var terminalErr error
 
 	for {
 		msgs := l.buildMessages()
@@ -140,11 +141,11 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			usage = resp.Usage
 		}
 
-		if err := l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens); err != nil {
-			return SolveResult{}, err
+		if err := l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens); err != nil && terminalErr == nil {
+			terminalErr = err
 		}
-		if err := l.Budget.AddCost(usage.CostUSD); err != nil {
-			return SolveResult{}, err
+		if err := l.Budget.AddCost(usage.CostUSD); err != nil && terminalErr == nil {
+			terminalErr = err
 		}
 
 		tcPayload := make([]ToolCall, len(toolCalls))
@@ -174,6 +175,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 
 		finalText = assistantText.String()
 		modelCalls++
+		if terminalErr != nil {
+			break
+		}
 
 		if len(toolCalls) == 0 {
 			break
@@ -210,14 +214,18 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	})
 
 	// Increment step budget
-	if err := l.Budget.AddStep(); err != nil {
-		return SolveResult{}, err
+	if err := l.Budget.AddStep(); err != nil && terminalErr == nil {
+		terminalErr = err
 	}
 
-	return SolveResult{
+	result := SolveResult{
 		FinalText: finalText,
 		Steps:     1,
 		Tokens:    budgetAfter.UsedTokens - budgetBefore.UsedTokens,
 		CostUSD:   budgetAfter.UsedCostUSD - budgetBefore.UsedCostUSD,
-	}, nil
+	}
+	if terminalErr != nil {
+		return result, terminalErr
+	}
+	return result, nil
 }

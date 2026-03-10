@@ -409,7 +409,7 @@ func TestBulkFallbackAfterTargeted(t *testing.T) {
 	if len(loop.Messages) > 0 {
 		first := loop.Messages[0]
 		if strings.Contains(first.Content, "CONTEXT SUMMARY") {
-			// Bulk fallback fired — good
+			t.Log("bulk fallback fired")
 		}
 	}
 }
@@ -452,8 +452,8 @@ func TestTargetedCompressionBudgetAccounted(t *testing.T) {
 // ── Memory injection ──────────────────────────────────────────────────────────
 
 // TestMemoryInjectedIntoProviderCall verifies that when Policy.MemoryPath points
-// to an existing MEMORY.md, its contents appear as a system message in the
-// messages sent to the provider.
+// to an existing MEMORY.md, its contents appear as a reference assistant message
+// instead of an extra system instruction.
 func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	dir := t.TempDir()
 	memPath := filepath.Join(dir, "MEMORY.md")
@@ -497,13 +497,16 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	msgs := prov.requests[0].Messages
 	found := false
 	for _, m := range msgs {
-		if m.Role == "system" && strings.Contains(m.Content, memContent) {
+		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+			if !strings.Contains(m.Content, "background context only") {
+				t.Fatalf("memory reference message missing warning: %q", m.Content)
+			}
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("memory content not found in any system message sent to provider")
+		t.Error("memory content not found in any assistant reference message sent to provider")
 	}
 }
 
@@ -550,4 +553,52 @@ func TestMemoryAbsentWhenFileNotFound(t *testing.T) {
 	if systemCount != 1 {
 		t.Errorf("expected 1 system message (prompt only), got %d", systemCount)
 	}
+}
+
+func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
+	dir := t.TempDir()
+	memPath := filepath.Join(dir, "MEMORY.md")
+	memContent := strings.Repeat("x", 5000)
+	if err := os.WriteFile(memPath, []byte(memContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "ok"}},
+	}
+
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	pol := policy.Default()
+	pol.MemoryPath = memPath
+
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 100_000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+	}
+
+	if err := loop.Step(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := prov.requests[0].Messages
+	for _, m := range msgs {
+		if m.Role == "assistant" && strings.Contains(m.Content, "Reference notes from MEMORY.md") {
+			if !strings.Contains(m.Content, "[truncated]") {
+				t.Fatalf("expected truncation marker in %q", m.Content)
+			}
+			return
+		}
+	}
+	t.Fatal("expected memory reference assistant message")
 }

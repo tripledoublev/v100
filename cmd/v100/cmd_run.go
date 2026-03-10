@@ -231,6 +231,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if unsafeFlag {
 				confirmMode = "never"
 			}
+			if err := validateExecutionSafety(cfg, confirmMode, unsafeFlag); err != nil {
+				return err
+			}
 
 			// Build generation params from flags and config defaults
 			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)

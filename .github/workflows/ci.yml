@@ -43,8 +43,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Read golangci-lint version
+        id: golangci
+        run: echo "version=$(tr -d '\n\r[:space:]' < .golangci-version)" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.11.2
+          version: ${{ steps.golangci.outputs.version }}
           args: --timeout=5m

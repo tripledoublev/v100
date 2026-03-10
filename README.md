@@ -87,6 +87,17 @@ v100 run --tui
 v100 run --name "parser refactor" --tag team=core --tag sprint=12
 ```
 
+## Development checks
+
+Use the repo-local lint wrapper so local lint matches CI:
+
+```bash
+GOCACHE="$PWD/.gocache" go test ./...
+GOCACHE="$PWD/.gocache" go build ./...
+GOCACHE="$PWD/.gocache" go vet ./...
+./scripts/lint.sh
+```
+
 ## Providers
 
 ### ChatGPT subscription (default)
