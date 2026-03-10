@@ -17,7 +17,7 @@ func ProjectSearch() Tool { return &projectSearchTool{} }
 
 func (t *projectSearchTool) Name() string { return "project_search" }
 func (t *projectSearchTool) Description() string {
-	return "Search for a pattern in project files using ripgrep (rg)."
+	return "Search project files with line-numbered matches. Use this before fs_read, then read only the relevant line range."
 }
 func (t *projectSearchTool) DangerLevel() DangerLevel { return Safe }
 func (t *projectSearchTool) Effects() ToolEffects     { return ToolEffects{} }

@@ -1,11 +1,13 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -17,8 +19,10 @@ type fsReadTool struct{}
 
 func FSRead() Tool { return &fsReadTool{} }
 
-func (t *fsReadTool) Name() string             { return "fs_read" }
-func (t *fsReadTool) Description() string      { return "Read the contents of a file." }
+func (t *fsReadTool) Name() string { return "fs_read" }
+func (t *fsReadTool) Description() string {
+	return "Read a file, preferably using line ranges for targeted inspection after project_search hits."
+}
 func (t *fsReadTool) DangerLevel() DangerLevel { return Safe }
 func (t *fsReadTool) Effects() ToolEffects     { return ToolEffects{} }
 
@@ -27,7 +31,10 @@ func (t *fsReadTool) InputSchema() json.RawMessage {
 		"type": "object",
 		"required": ["path"],
 		"properties": {
-			"path": {"type": "string", "description": "Absolute or relative file path to read."}
+			"path": {"type": "string", "description": "Absolute or relative file path to read."},
+			"start_line": {"type": "integer", "description": "Optional 1-based starting line for a targeted read."},
+			"end_line": {"type": "integer", "description": "Optional 1-based ending line for a targeted read."},
+			"max_chars": {"type": "integer", "description": "Optional hard cap on returned characters.", "default": 12000}
 		}
 	}`)
 }
@@ -39,7 +46,10 @@ func (t *fsReadTool) OutputSchema() json.RawMessage {
 func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	start := time.Now()
 	var a struct {
-		Path string `json:"path"`
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+		MaxChars  int    `json:"max_chars"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
@@ -48,15 +58,60 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	if !ok {
 		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
 	}
-	data, err := os.ReadFile(path)
+	content, err := readFileSelection(path, a.StartLine, a.EndLine)
 	if err != nil {
 		return failResult(start, err.Error()), nil
 	}
+	if a.MaxChars <= 0 {
+		a.MaxChars = 12000
+	}
+	if a.MaxChars > 0 && len(content) > a.MaxChars {
+		content = content[:a.MaxChars] + "\n... truncated to max_chars"
+	}
 	return ToolResult{
 		OK:         true,
-		Output:     string(data),
+		Output:     content,
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func readFileSelection(path string, startLine, endLine int) (string, error) {
+	if startLine <= 0 && endLine <= 0 {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	if startLine <= 0 {
+		startLine = 1
+	}
+	if endLine > 0 && endLine < startLine {
+		return "", fmt.Errorf("end_line must be >= start_line")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	var b strings.Builder
+	scanner := bufio.NewScanner(f)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		if lineNo < startLine {
+			continue
+		}
+		if endLine > 0 && lineNo > endLine {
+			break
+		}
+		_, _ = fmt.Fprintf(&b, "%d:%s\n", lineNo, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // ─────────────────────────────────────────
