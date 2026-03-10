@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -850,11 +851,29 @@ func findRunDir(runID string) (string, error) {
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
 	}
+	// Search nested run directories under runs/
+	var nested string
+	_ = filepath.WalkDir("runs", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || nested != "" || !d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) != runID {
+			return nil
+		}
+		if _, err := os.Stat(filepath.Join(path, "trace.jsonl")); err == nil {
+			nested = path
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if nested != "" {
+		return nested, nil
+	}
 	// Try exact path
 	if _, err := os.Stat(runID); err == nil {
 		return runID, nil
 	}
-	return "", fmt.Errorf("run %q not found (checked runs/%s)", runID, runID)
+	return "", fmt.Errorf("run %q not found (checked runs/%s, nested runs/**/%s, and exact path)", runID, runID, runID)
 }
 
 func findInPath(name string) (string, error) {

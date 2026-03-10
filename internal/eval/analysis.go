@@ -33,6 +33,9 @@ func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 		return report
 	}
 	report.RunID = events[0].RunID
+	metrics := core.ComputeMetrics(events)
+	classification := core.ClassifyRun(events)
+	report.Efficiency = metrics.EfficiencyScore
 
 	// 1. Detect Tool Hallucinations (Model tried a tool that doesn't exist)
 	hallucinations := []string{}
@@ -93,16 +96,12 @@ func AnalyzeTrajectory(events []core.Event) AnalysisReport {
 		})
 	}
 
-	// 4. Calculate Research-Grade Efficiency
-	// Formula: (Successful Steps) / (Total Model Calls)
-	modelCalls := 0
-	for _, ev := range events {
-		if ev.Type == core.EventModelCall {
-			modelCalls++
-		}
-	}
-	if modelCalls > 0 {
-		report.Efficiency = float64(len(events)-report.ToolErrors) / float64(modelCalls) * 10.0 // Scaled to 0-100ish
+	if classification.Label != "" && classification.Label != "normal" {
+		report.Labels = append(report.Labels, BehaviorLabel{
+			Name:       classification.Label,
+			Confidence: 1.0,
+			Evidence:   strings.Join(classification.Evidence, "; "),
+		})
 	}
 
 	return report

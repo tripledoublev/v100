@@ -217,3 +217,27 @@ default_model = "gpt-5.4"
 		}
 	}
 }
+
+func TestFindRunDirFindsNestedRun(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "runs", "bench", "run-123")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "trace.jsonl"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := withWorkingDir(root, func() error {
+		got, err := findRunDir("run-123")
+		if err != nil {
+			return err
+		}
+		if got != filepath.Join("runs", "bench", "run-123") {
+			t.Fatalf("findRunDir returned %q", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
