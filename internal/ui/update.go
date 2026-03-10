@@ -2,7 +2,6 @@ package ui
 
 import (
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,13 +39,6 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendEvent(core.Event(msg))
 
 	case RequestConfirmMsg:
-		go func() {
-			PlaySine(220, 100)
-			time.Sleep(100 * time.Millisecond)
-			PlaySine(440, 100)
-			time.Sleep(100 * time.Millisecond)
-			PlaySine(880, 200)
-		}()
 		m.pendConfirm = &confirmState{
 			active:   true,
 			toolName: msg.ToolName,

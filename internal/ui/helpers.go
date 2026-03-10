@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -61,21 +60,6 @@ func (m *TUIModel) subAgentStatusLine() string {
 		return "last: " + m.lastAgentNote
 	}
 	return "last: none"
-}
-
-// PlaySine uses mpv to play a short sine wave tone at the given frequency and duration.
-func PlaySine(freq int, durationMS int) {
-	if _, err := exec.LookPath("mpv"); err != nil {
-		return
-	}
-	// Syntax: mpv --no-video --audio-device=... lavfi://aid=1:graph=sine=f=FREQ:d=DURATION
-	durSec := float64(durationMS) / 1000.0
-	args := []string{
-		"--no-video",
-		"--really-quiet",
-		fmt.Sprintf("lavfi://graph=sine=f=%d:d=%.3f", freq, durSec),
-	}
-	_ = exec.Command("mpv", args...).Start()
 }
 
 func envSizeFallback() (int, int) {

@@ -17,7 +17,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 
 	switch ev.Type {
 	case core.EventRunStart:
-		PlaySine(220, 300) // Deep start pad
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		// Initialize metrics metadata
@@ -48,7 +47,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		}
 
 	case core.EventModelResp:
-		PlaySine(880, 50) // High reasoning chirp
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if sub {
@@ -80,11 +78,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if sub {
 			break // suppress sub-agent tool results from transcript
 		}
-		if p.OK {
-			PlaySine(440, 50) // Mid success click
-		} else {
-			PlaySine(110, 150) // Low error thud
-		}
 		icon, nameStr := styleOK.Render("✓"), styleOK.Render(p.Name)
 		if !p.OK {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
@@ -96,19 +89,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		if p.Reason == "completed" {
-			go func() {
-				PlaySine(440, 100)
-				time.Sleep(100 * time.Millisecond)
-				PlaySine(880, 200)
-			}()
-		} else {
-			go func() {
-				PlaySine(440, 100)
-				time.Sleep(100 * time.Millisecond)
-				PlaySine(110, 200)
-			}()
-		}
 		if !sub {
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d", p.Reason, p.UsedSteps, p.UsedTokens)))
 			if p.Summary != "" {
