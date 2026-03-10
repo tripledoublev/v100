@@ -54,6 +54,9 @@ type DockerExecutor struct {
 }
 
 func NewDockerExecutor(cfg config.SandboxConfig, baseDir string) *DockerExecutor {
+	if abs, err := filepath.Abs(baseDir); err == nil {
+		baseDir = abs
+	}
 	return &DockerExecutor{BaseDir: baseDir, Cfg: cfg}
 }
 
@@ -174,6 +177,9 @@ func (s *DockerSession) execArgs(req RunRequest) []string {
 		args = append(args, "-i")
 	}
 	args = append(args, "-w", workdir)
+	for _, env := range s.defaultExecEnv() {
+		args = append(args, "-e", env)
+	}
 	for _, env := range req.Env {
 		if strings.TrimSpace(env) == "" {
 			continue
@@ -183,6 +189,15 @@ func (s *DockerSession) execArgs(req RunRequest) []string {
 	args = append(args, s.containerName, req.Command)
 	args = append(args, req.Args...)
 	return args
+}
+
+func (s *DockerSession) defaultExecEnv() []string {
+	return []string{
+		"HOME=/workspace",
+		"GOCACHE=/workspace/.cache/go-build",
+		"GOMODCACHE=/workspace/.cache/go-mod",
+		"GOPATH=/workspace/.cache/go",
+	}
 }
 
 func (s *DockerSession) runDocker(ctx context.Context, stdin io.Reader, stdoutWriter, stderrWriter io.Writer, args ...string) (Result, error) {

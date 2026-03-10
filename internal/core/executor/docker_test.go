@@ -75,6 +75,10 @@ func TestDockerSessionExecArgs(t *testing.T) {
 	for _, want := range []string{
 		"exec -i",
 		"-w /workspace/subdir",
+		"-e HOME=/workspace",
+		"-e GOCACHE=/workspace/.cache/go-build",
+		"-e GOMODCACHE=/workspace/.cache/go-mod",
+		"-e GOPATH=/workspace/.cache/go",
 		"-e A=B",
 		"v100-run-1 git status",
 	} {
@@ -125,5 +129,21 @@ func TestDockerExecutorSessionWorkspace(t *testing.T) {
 	}
 	if got := session.Workspace(); got != filepath.Join(baseDir, "run-1", "workspace") {
 		t.Fatalf("Workspace() = %q, want %q", got, filepath.Join(baseDir, "run-1", "workspace"))
+	}
+}
+
+func TestNewDockerExecutorNormalizesBaseDirToAbsolute(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execFactory := NewDockerExecutor(config.SandboxConfig{
+		Image: "example/v100:latest",
+	}, "runs")
+	if !filepath.IsAbs(execFactory.BaseDir) {
+		t.Fatalf("BaseDir = %q, want absolute path", execFactory.BaseDir)
+	}
+	if execFactory.BaseDir != filepath.Join(cwd, "runs") {
+		t.Fatalf("BaseDir = %q, want %q", execFactory.BaseDir, filepath.Join(cwd, "runs"))
 	}
 }

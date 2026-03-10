@@ -135,7 +135,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		return l.emitToolResult(stepID, tc, result)
 	}
 
-	if tool.Effects().NeedsNetwork && !l.networkAllowed() {
+	if toolRequiresNetworkGate(tool, l.Session) && !l.networkAllowed() {
 		result := tools.ToolResult{
 			OK:     false,
 			Output: fmt.Sprintf("network access is disabled by sandbox policy (network_tier=%q)", l.effectiveNetworkTier()),
@@ -282,13 +282,28 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 
 	// Feedback Loop: Auto-verify build if tool mutated workspace
 	if result.OK && tool.Effects().MutatesWorkspace {
-		if err := l.verifyBuild(ctx, stepID); err != nil {
-			// verifyBuild handles its own event emission and message injection
-			// we don't return error here so the loop continues with the alert context
-		}
+		// verifyBuild handles its own event emission and message injection.
+		// Ignore the returned error so the loop can continue with the injected alert context.
+		_ = l.verifyBuild(ctx, stepID)
 	}
 
 	return nil
+}
+
+func toolRequiresNetworkGate(tool tools.Tool, session executor.Session) bool {
+	if tool == nil {
+		return false
+	}
+	if !tool.Effects().NeedsNetwork {
+		return false
+	}
+	// Docker network mode already enforces shell command connectivity. Blocking all
+	// shell commands here turns "network_tier=off" into "no subprocesses", which is
+	// too blunt for local build/test loops.
+	if tool.Name() == "sh" && session != nil && session.Type() == "docker" {
+		return false
+	}
+	return true
 }
 
 // verifyBuild runs a background build check and injects an alert if it fails.
