@@ -6,3 +6,4 @@ runs/
 *.local
 *.pdf
 /todos/roadmap.md
+exports/
