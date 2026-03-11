@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.3 — 2026-03-10
+
+**Phase 300: Autonomous Optimization Foundation**
+
+This release introduces the first set of meta-cognitive and optimization tools to enable agents to refine their own behavior.
+
+### Autonomous Optimization
+
+- **`reflect` tool** — Enables agents to perform self-critique, evaluate plan alignment, and identify logical loops during execution.
+- **`v100 mutate` command** — Trace-driven prompt optimizer that analyzes failure signatures (qualitative and quantitative) to suggest improved prompts.
+- **Quantitative Failure Signatures** — Grounded the optimizer in hard data: step counts, tool failure rates, and context saturation percentages.
+
+### Evaluation & Automation
+
+- **JSON Output** — Added `--format json` to `stats`, `metrics`, `analyze`, `digest`, and `diff` commands for seamless integration with automation pipelines.
+- **Scoring Persistence** — Benchmarks and experiments now save full LLM-graded reasoning to `meta.json` and a detailed `evaluation.json` artifact in the run directory.
+
+### UI & UX
+
+- **Dynamic TUI Layout** — Implemented proportional height allocation to ensure perfect column alignment across all terminal sizes.
+
 ## v0.2.2 — 2026-03-10
 
 **Phase 250: Harness Stabilization & Mission Control**

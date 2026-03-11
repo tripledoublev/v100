@@ -75,4 +75,4 @@ v100 implements a **Post-Mutation Build Hook** in `loop.go`. After any workspace
 3.  The agent must fix the error before proceeding, ensuring structural integrity.
 
 ---
-*Document produced by v100 Research Harness - System Architecture v0.2.2*
+*Document produced by v100 Research Harness - System Architecture v0.2.3*

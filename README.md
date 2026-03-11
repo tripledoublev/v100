@@ -36,7 +36,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 ```bash
 git clone https://github.com/tripledoublev/v100
 cd v100
-go build -ldflags "-X main.version=v0.2.2" -o v100 ./cmd/v100/
+go build -ldflags "-X main.version=v0.2.3" -o v100 ./cmd/v100/
 ```
 
 Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, `mpv` or `ffplay` for `radio`.
