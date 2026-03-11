@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
@@ -311,6 +312,11 @@ func runCmd(cfgPath *string) *cobra.Command {
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
 	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
+	// Auto-exit when stdin is piped (not a TTY) to avoid hanging after prompt
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		exitAfterPrompt = true
+	}
+
 	renderer := ui.NewCLIRenderer()
 	renderer.Verbose = verbose
 
@@ -435,6 +441,8 @@ done:
 	}
 
 	fmt.Println(ui.Dim("budget: " + budget.Summary()))
+	fmt.Println(ui.Dim("run id: ") + run.ID)
+	fmt.Println(ui.Dim("  → v100 stats " + run.ID))
 	return nil
 }
 

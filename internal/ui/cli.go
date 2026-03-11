@@ -16,12 +16,15 @@ import (
 
 // CLIRenderer prints events to stdout line by line with colors.
 type CLIRenderer struct {
-	agentStarts map[string]time.Time // agentRunID → start time
-	inSubAgent  int                  // nesting depth of sub-agents
-	spinnerStop chan struct{}
-	spinnerDone chan struct{}
-	Verbose     bool
-	mu          sync.Mutex
+	agentStarts    map[string]time.Time // agentRunID → start time
+	inSubAgent     int                  // nesting depth of sub-agents
+	spinnerStop    chan struct{}
+	spinnerDone    chan struct{}
+	modelCallStart time.Time
+	modelCallStop  chan struct{}
+	modelCallDone  chan struct{}
+	Verbose        bool
+	mu             sync.Mutex
 }
 
 // NewCLIRenderer creates a CLI renderer.
@@ -63,7 +66,53 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			p.Content,
 		)
 
+	case core.EventModelCall:
+		if r.inSubAgent > 0 {
+			break
+		}
+		r.mu.Lock()
+		r.modelCallStart = time.Now()
+		r.modelCallStop = make(chan struct{})
+		r.modelCallDone = make(chan struct{})
+		stop := r.modelCallStop
+		done := r.modelCallDone
+		start := r.modelCallStart
+		r.mu.Unlock()
+		go func() {
+			defer close(done)
+			frames := []string{"-", "\\", "|", "/"}
+			i := 0
+			ticker := time.NewTicker(200 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					fmt.Print("\r\033[K")
+					return
+				case <-ticker.C:
+					elapsed := time.Since(start).Round(time.Second)
+					fmt.Printf("\r  %s  %s thinking... %s",
+						styleMuted.Render("⎿"),
+						styleMuted.Render(frames[i%len(frames)]),
+						styleMuted.Render(elapsed.String()),
+					)
+					i++
+				}
+			}
+		}()
+
 	case core.EventModelResp:
+		r.mu.Lock()
+		if r.modelCallStop != nil {
+			close(r.modelCallStop)
+			r.modelCallStop = nil
+		}
+		done := r.modelCallDone
+		r.modelCallDone = nil
+		r.mu.Unlock()
+		if done != nil {
+			<-done
+		}
 		if r.inSubAgent > 0 {
 			break // suppress sub-agent model responses
 		}
