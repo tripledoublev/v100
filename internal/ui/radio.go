@@ -23,15 +23,31 @@ const radioIPCSocket = "/tmp/v100-radio.sock"
 type RadioStation struct {
 	Name string // Display name
 	URL  string // Stream URL
+	Type string // "radiojar" or "nts"
+	ID   string // Station ID for the API
 }
 
 // availableStations defines the radio stations users can choose from
 var availableStations = []RadioStation{
-	{Name: "Radio Al Hara", URL: "https://n04.radiojar.com/78cxy6wkxtzuv"},
-	{Name: "NTS Radio 1", URL: "https://stream-relay-geo.ntslive.net/stream"},
-	{Name: "NTS Radio 2", URL: "https://stream-relay-geo.ntslive.net/stream2"},
+	{
+		Name: "Radio Al Hara",
+		URL:  "https://n04.radiojar.com/78cxy6wkxtzuv",
+		Type: "radiojar",
+		ID:   "78cxy6wkxtzuv",
+	},
+	{
+		Name: "NTS Radio 1",
+		URL:  "https://stream-relay-geo.ntslive.net/stream",
+		Type: "nts",
+		ID:   "1",
+	},
+	{
+		Name: "NTS Radio 2",
+		URL:  "https://stream-relay-geo.ntslive.net/stream2",
+		Type: "nts",
+		ID:   "2",
+	},
 }
-
 
 func (m *TUIModel) jumpToStation(idx int) {
 	if idx < 0 || idx >= len(availableStations) {
@@ -47,24 +63,27 @@ func (m *TUIModel) jumpToStation(idx int) {
 	}
 }
 
-
-// getCurrentStationName returns the name of the current station
-func (m *TUIModel) getCurrentStationName() string {
+// getCurrentStation returns the current RadioStation object
+func (m *TUIModel) getCurrentStation() *RadioStation {
 	for _, s := range availableStations {
 		if s.URL == m.radioURL {
-			return s.Name
+			return &s
 		}
 	}
 	// Check by prefix match
 	for _, s := range availableStations {
 		if strings.HasPrefix(m.radioURL, strings.TrimSuffix(s.URL, "/")) {
-			return s.Name
+			return &s
 		}
 	}
-	// Try to extract station ID for display
-	stationID := m.radioStationID()
-	if stationID != "" {
-		return "Radio: " + stationID
+	return nil
+}
+
+// getCurrentStationName returns the name of the current station
+func (m *TUIModel) getCurrentStationName() string {
+	s := m.getCurrentStation()
+	if s != nil {
+		return s.Name
 	}
 	return "Custom"
 }
@@ -89,7 +108,10 @@ func (m *TUIModel) onRadioTick() tea.Cmd {
 	// Poll now-playing metadata conservatively to avoid rate limits.
 	if m.radioLastPoll.IsZero() || time.Since(m.radioLastPoll) >= 30*time.Second {
 		m.radioLastPoll = time.Now()
-		return fetchNowPlayingCmd(m.radioStationID())
+		s := m.getCurrentStation()
+		if s != nil {
+			return fetchNowPlayingCmd(s.Type, s.ID)
+		}
 	}
 	return nil
 }
@@ -202,12 +224,12 @@ func detectRadioPlayer() string {
 	return ""
 }
 
-func fetchNowPlayingCmd(stationID string) tea.Cmd {
-	if strings.TrimSpace(stationID) == "" {
+func fetchNowPlayingCmd(stationType, stationID string) tea.Cmd {
+	if stationType == "" || stationID == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		artist, title, err := fetchNowPlaying(stationID)
+		artist, title, err := fetchNowPlaying(stationType, stationID)
 		if err != nil {
 			return radioNowPlayingMsg{Err: "now-playing unavailable"}
 		}
@@ -216,8 +238,8 @@ func fetchNowPlayingCmd(stationID string) tea.Cmd {
 }
 
 func (m *TUIModel) startDownloadCmd() tea.Cmd {
-	stationID := m.radioStationID()
-	if stationID == "" {
+	s := m.getCurrentStation()
+	if s == nil {
 		m.radioErr = "no radio station configured"
 		return nil
 	}
@@ -226,7 +248,7 @@ func (m *TUIModel) startDownloadCmd() tea.Cmd {
 	m.radioErr = ""
 
 	return func() tea.Msg {
-		artist, title, err := fetchNowPlaying(stationID)
+		artist, title, err := fetchNowPlaying(s.Type, s.ID)
 		if err != nil {
 			return downloadDoneMsg{err: "now-playing unavailable"}
 		}
@@ -258,18 +280,6 @@ func (m *TUIModel) startDownloadCmd() tea.Cmd {
 	}
 }
 
-func (m *TUIModel) radioStationID() string {
-	u := strings.TrimSpace(strings.TrimSuffix(m.radioURL, "/"))
-	if u == "" {
-		return ""
-	}
-	i := strings.LastIndex(u, "/")
-	if i < 0 || i+1 >= len(u) {
-		return ""
-	}
-	return u[i+1:]
-}
-
 func (m *TUIModel) renderWaveForWidth(width int) string {
 	if width < 8 {
 		return "♪"
@@ -289,10 +299,22 @@ func (m *TUIModel) renderWaveForWidth(width int) string {
 	return wave[:target]
 }
 
-func fetchNowPlaying(stationID string) (string, string, error) {
+func fetchNowPlaying(stationType, stationID string) (string, string, error) {
 	if stationID == "" {
 		return "", "", fmt.Errorf("missing station id")
 	}
+
+	switch stationType {
+	case "radiojar":
+		return fetchRadiojarNowPlaying(stationID)
+	case "nts":
+		return fetchNTSNowPlaying(stationID)
+	default:
+		return "", "", fmt.Errorf("unsupported station type: %s", stationType)
+	}
+}
+
+func fetchRadiojarNowPlaying(stationID string) (string, string, error) {
 	url := "https://proxy.radiojar.com/api/stations/" + stationID + "/now_playing/?callback=x"
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
@@ -318,6 +340,114 @@ func fetchNowPlaying(stationID string) (string, string, error) {
 		return "", "", err
 	}
 	return strings.TrimSpace(payload.Artist), strings.TrimSpace(payload.Title), nil
+}
+
+func fetchNTSNowPlaying(channel string) (string, string, error) {
+	url := "https://www.nts.live/api/v2/live"
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var liveData struct {
+		Results []struct {
+			ChannelName string `json:"channel_name"`
+			Now         struct {
+				BroadcastTitle string    `json:"broadcast_title"`
+				StartTimestamp time.Time `json:"start_timestamp"`
+				Embeds         struct {
+					Details struct {
+						Links []struct {
+							Rel  string `json:"rel"`
+							Href string `json:"href"`
+						} `json:"links"`
+					} `json:"details"`
+				} `json:"embeds"`
+			} `json:"now"`
+		} `json:"results"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&liveData); err != nil {
+		return "", "", err
+	}
+
+	var channelData *struct {
+		ChannelName string `json:"channel_name"`
+		Now         struct {
+			BroadcastTitle string    `json:"broadcast_title"`
+			StartTimestamp time.Time `json:"start_timestamp"`
+			Embeds         struct {
+				Details struct {
+					Links []struct {
+						Rel  string `json:"rel"`
+						Href string `json:"href"`
+					} `json:"links"`
+				} `json:"details"`
+			} `json:"embeds"`
+		} `json:"now"`
+	}
+
+	for i := range liveData.Results {
+		if liveData.Results[i].ChannelName == channel {
+			channelData = &liveData.Results[i]
+			break
+		}
+	}
+
+	if channelData == nil {
+		return "", "", fmt.Errorf("channel %s not found", channel)
+	}
+
+	showTitle := channelData.Now.BroadcastTitle
+	tracklistURL := ""
+	for _, l := range channelData.Now.Embeds.Details.Links {
+		if l.Rel == "tracklist" {
+			tracklistURL = l.Href
+			break
+		}
+	}
+
+	if tracklistURL == "" {
+		return "NTS", showTitle, nil
+	}
+
+	// Fetch tracklist to find current song
+	tResp, err := client.Get(tracklistURL)
+	if err != nil {
+		return "NTS", showTitle, nil
+	}
+	defer func() { _ = tResp.Body.Close() }()
+
+	var tData struct {
+		Results []struct {
+			Artist string `json:"artist"`
+			Title  string `json:"title"`
+			Offset int    `json:"offset"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(tResp.Body).Decode(&tData); err != nil {
+		return "NTS", showTitle, nil
+	}
+
+	elapsed := int(time.Since(channelData.Now.StartTimestamp).Seconds())
+	
+	// Find the track with the largest offset <= elapsed
+	bestIdx := -1
+	for i, t := range tData.Results {
+		if t.Offset <= elapsed {
+			if bestIdx == -1 || t.Offset > tData.Results[bestIdx].Offset {
+				bestIdx = i
+			}
+		}
+	}
+
+	if bestIdx != -1 {
+		return tData.Results[bestIdx].Artist, tData.Results[bestIdx].Title, nil
+	}
+
+	return "NTS", showTitle, nil
 }
 
 func (m *TUIModel) radioSelectView() string {
