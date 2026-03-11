@@ -26,10 +26,17 @@ Your goal is to mutate an agent's initial prompt to prevent behavioral failures 
 ### Behavioral Analysis Findings:
 {{analysis}}
 
+### Quantitative Failure Signature:
+- Total steps: {{steps}}
+- Tool failures: {{errors}}
+- Total tokens consumed: {{tokens}}
+- Context saturation: {{saturation}}% (at end of run)
+
 ### Instructions:
-1. Analyze the findings (e.g. thrashing, context pressure, tool errors).
+1. Analyze both the qualitative findings and the quantitative signatures.
 2. Rewrite the prompt to be more specific, add constraints, or provide better guidance to avoid these issues.
-3. Keep the original intent of the task intact.
+3. If context saturation is high (>80%), suggest instructions for more concise tool usage or periodic summarization.
+4. Keep the original intent of the task intact.
 
 Reply in the following format:
 MUTATED PROMPT: <new prompt text>
@@ -38,6 +45,7 @@ RATIONALE: <why this change prevents the detected failure>`
 // MutatePrompt analyzes a run and suggests a better prompt.
 func MutatePrompt(ctx context.Context, prov providers.Provider, model string, events []core.Event) (MutationResult, error) {
 	report := AnalyzeTrajectory(events)
+	stats := core.ComputeStats(events)
 	
 	originalPrompt := ""
 	for _, ev := range events {
@@ -53,11 +61,11 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, ev
 		return MutationResult{}, fmt.Errorf("could not find original prompt in trace")
 	}
 
-	if len(report.Labels) == 0 && report.ToolErrors == 0 {
+	if len(report.Labels) == 0 && report.ToolErrors == 0 && stats.ToolFailures == 0 {
 		return MutationResult{
 			OriginalPrompt: originalPrompt,
 			MutatedPrompt:  originalPrompt,
-			Rationale:      "No behavioral issues detected; original prompt is likely fine.",
+			Rationale:      "No behavioral issues or tool failures detected; original prompt is likely fine.",
 		}, nil
 	}
 
@@ -66,11 +74,22 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, ev
 		fmt.Fprintf(&analysisSb, "- [%s] %s\n", l.Name, l.Evidence)
 	}
 	if report.ToolErrors > 0 {
-		fmt.Fprintf(&analysisSb, "- %d tool execution errors occurred.\n", report.ToolErrors)
+		fmt.Fprintf(&analysisSb, "- %d tool execution errors (e.g. non-existent tools) occurred.\n", report.ToolErrors)
 	}
 
 	prompt := strings.ReplaceAll(mutationSystemPrompt, "{{original}}", originalPrompt)
 	prompt = strings.ReplaceAll(prompt, "{{analysis}}", analysisSb.String())
+	
+	// Inject quantitative metrics
+	prompt = strings.ReplaceAll(prompt, "{{steps}}", fmt.Sprintf("%d", stats.TotalSteps))
+	prompt = strings.ReplaceAll(prompt, "{{errors}}", fmt.Sprintf("%d", stats.ToolFailures))
+	prompt = strings.ReplaceAll(prompt, "{{tokens}}", fmt.Sprintf("%d", stats.TokensIn+stats.TokensOut))
+	
+	saturation := 0.0
+	if stats.ModelMetadata.ContextSize > 0 {
+		saturation = float64(stats.TokensIn) / float64(stats.ModelMetadata.ContextSize) * 100
+	}
+	prompt = strings.ReplaceAll(prompt, "{{saturation}}", fmt.Sprintf("%.1f", saturation))
 
 	resp, err := prov.Complete(ctx, providers.CompleteRequest{
 		Messages: []providers.Message{
