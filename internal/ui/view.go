@@ -81,38 +81,39 @@ func (m *TUIModel) View() string {
 
 		paneInnerH := remaining - 2
 		statusH := 0
-		metricsH := 8 // fixed height for visual inspector (6 content lines + 2 border rows)
+		metricsH := 9 // fixed height for visual inspector (7 content lines + 2 border rows)
 		var traceH int
 
-		// lipgloss .Height(h) sets CONTENT height; rendered outer = h + 2 (border).
-		// Left pane outer = paneInnerH + 2.
-		// Right column outer = sum(paneH + 2) for each pane.
-		// To match: sum(paneH) + 2*numPanes = paneInnerH + 2
-		//         → sum(paneH) = paneInnerH - 2*(numPanes - 1)
+		// lipgloss .Height(h) sets total rendered height including borders.
+		// Left column height = paneInnerH + 2 = remaining.
+		// Right column total height must also = remaining.
+		// Right Height = hTrace + hMetrics + hStatus (if shown)
 		if m.showStatus {
-			// 3 panes → sum = paneInnerH - 4
-			budget := paneInnerH - 4
-			statusH = 10
-			traceH = budget - metricsH - statusH
-			if traceH < 3 {
-				traceH = 3
-				statusH = budget - metricsH - traceH
-			}
-			if statusH < 3 {
-				statusH = 3
+			// Total height budget for 3 panes must sum to 'remaining'.
+			budget := remaining - metricsH
+			statusH = 12 // fixed height for status
+			traceH = budget - statusH
+			if traceH < 4 {
+				traceH = 4
+				statusH = budget - traceH
 			}
 		} else {
-			// 2 panes → sum = paneInnerH - 2
-			traceH = paneInnerH - 2 - metricsH
-			if traceH < 3 {
-				traceH = 3
+			// Budget for 2 panes
+			traceH = remaining - metricsH
+			if traceH < 4 {
+				traceH = 4
 			}
 		}
 
 		m.transcript.Width = leftW - 4
 		m.transcript.Height = paneInnerH
+		
+		// Trace viewport height: traceH total - 2 (borders) - 1 (label) = traceH - 3
 		m.traceView.Width = rightW - 4
-		m.traceView.Height = traceH - 2
+		m.traceView.Height = traceH - 3
+		if m.traceView.Height < 1 {
+			m.traceView.Height = 1
+		}
 
 		left := leftSt.Width(leftW).Height(paneInnerH).Render(m.transcript.View())
 		
@@ -126,14 +127,16 @@ func (m *TUIModel) View() string {
 		metricsPane := tuiPaneStyle.Width(rightW).Height(metricsH).Render(metricsView)
 
 		// 3. Status Pane (if shown)
-		rightCol := lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
+		var rightCol string
 		if m.showStatus {
 			statusSt := tuiPaneStyle
 			if m.focus == focusStatus {
 				statusSt = tuiActivePaneStyle
 			}
 			statusPane := statusSt.Width(rightW).Height(statusH).Render(m.statusView(rightW, statusH))
-			rightCol = lipgloss.JoinVertical(lipgloss.Left, rightCol, statusPane)
+			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane, statusPane)
+		} else {
+			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
 		}
 
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", rightCol)
@@ -155,46 +158,51 @@ func (m *TUIModel) View() string {
 }
 
 func (m *TUIModel) statusView(width, height int) string {
-	line := m.statusLine
-	w := width - 6
+	w := width - 2 // content width inside borders
 	if w < 12 {
 		w = 12
 	}
-	line = wrap.String(line, w)
 
 	lines := []string{
 		tuiStatusLabelStyle.Render("status"),
 		stylePrimary.Render(wrap.String(m.runSummary, w)),
 		styleBold.Render(strings.ToUpper(m.statusMode)),
-		styleMuted.Render(line),
+		styleMuted.Render(wrap.String(m.statusLine, w)),
 		"",
 		styleMuted.Render(fmt.Sprintf("sub-agents: active=%d done=%d failed=%d",
 			len(m.activeAgents), m.agentDoneCount, m.agentFailCount)),
 		styleMuted.Render(m.subAgentStatusLine()),
 		"",
 		styleMuted.Render("radio") + " " + m.radioStateLine(),
-		styleMuted.Render("feed: " + m.radioURL),
+		styleMuted.Render(wrap.String("feed: "+m.radioURL, w)),
 	}
 	if m.radioArtist != "" || m.radioTitle != "" {
-		lines = append(lines, stylePrimary.Render("now: "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle)))
+		lines = append(lines, stylePrimary.Render(wrap.String("now: "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle), w)))
 	}
 	if m.radioWave != "" {
 		wave := m.renderWaveForWidth(w)
 		lines = append(lines, styleInfo.Render(centerToWidth(wave, w)))
 	}
 	if m.radioErr != "" {
-		lines = append(lines, styleFail.Render(m.radioErr))
+		lines = append(lines, styleFail.Render(wrap.String(m.radioErr, w)))
+	}
+
+	// Flatten wrapped lines into a single list of strings
+	var flattened []string
+	for _, l := range lines {
+		parts := strings.Split(l, "\n")
+		flattened = append(flattened, parts...)
 	}
 
 	// Keep content bounded to pane height to avoid stale lines after resize.
-	contentH := height - 2 // border consumes 2 lines in rounded style
+	contentH := height - 2 // border consumes 2 lines
 	if contentH < 1 {
 		contentH = 1
 	}
-	if len(lines) > contentH {
-		lines = lines[:contentH]
+	if len(flattened) > contentH {
+		flattened = flattened[:contentH]
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(flattened, "\n")
 }
 
 func (m TUIModel) confirmView() string {
