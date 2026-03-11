@@ -80,56 +80,44 @@ func (m *TUIModel) View() string {
 		}
 
 		// ── Height allocation ──────────────────────────────────────
-		// lipgloss .Height(n) sets CONTENT height; rendered = n + 2 (borders).
-		// Both columns must render to exactly `remaining` rows.
+		// lipgloss .Height(n) sets CONTENT height (minimum); rendered = n + 2.
+		// Overflowing content expands the pane, so we render fixed panes
+		// first, measure their actual rendered height, then give the
+		// scrollable trace pane whatever is left.
 
-		// 1. Measure visual inspector (fixed content)
+		// 1. Render metrics pane (fixed content, natural size)
 		metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps,
 			m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
 			m.usedCost, m.maxCost, rightW)
-		metricsCH := lipgloss.Height(metricsView) // content height
+		metricsPane := tuiPaneStyle.Width(rightW).Render(metricsView)
+		metricsRendered := lipgloss.Height(metricsPane)
 
-		// Number of right-column panes determines border overhead.
-		nPanes := 2
+		// 2. Optionally render status pane (may wrap lines)
+		var statusPane string
+		var statusRendered int
 		if m.showStatus {
-			nPanes = 3
-		}
-		borderOverhead := nPanes * 2           // each pane adds 2 rows of border
-		contentBudget := remaining - borderOverhead // total content rows for right column
-		if contentBudget < nPanes*2 {
-			contentBudget = nPanes * 2
-		}
-
-		var traceCH, statusCH int // content heights
-
-		if m.showStatus {
-			// Measure status content at natural height
-			statusContent := m.statusView(rightW, 9999)
-			statusNatCH := lipgloss.Height(statusContent)
-
-			// Cap status to 40% of content budget
-			maxStatusCH := contentBudget * 2 / 5
+			statusSt := tuiPaneStyle
+			if m.focus == focusStatus {
+				statusSt = tuiActivePaneStyle
+			}
+			// Cap status content to ~40% of remaining
+			maxStatusCH := (remaining * 2 / 5) - 2
 			if maxStatusCH < 4 {
 				maxStatusCH = 4
 			}
-			statusCH = statusNatCH
-			if statusCH > maxStatusCH {
-				statusCH = maxStatusCH
-			}
+			statusPane = statusSt.Width(rightW).Render(
+				m.statusView(rightW, maxStatusCH+2))
+			statusRendered = lipgloss.Height(statusPane)
+		}
 
-			traceCH = contentBudget - metricsCH - statusCH
-			if traceCH < 2 {
-				traceCH = 2
-				statusCH = contentBudget - metricsCH - traceCH
-				if statusCH < 2 {
-					statusCH = 2
-				}
-			}
-		} else {
-			traceCH = contentBudget - metricsCH
-			if traceCH < 2 {
-				traceCH = 2
-			}
+		// 3. Trace gets everything left over
+		traceRendered := remaining - metricsRendered - statusRendered
+		if traceRendered < 4 {
+			traceRendered = 4
+		}
+		traceCH := traceRendered - 2 // content height inside border
+		if traceCH < 1 {
+			traceCH = 1
 		}
 
 		// Left column: content = remaining - 2 so rendered = remaining.
@@ -149,16 +137,8 @@ func (m *TUIModel) View() string {
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
 		)
 
-		metricsPane := tuiPaneStyle.Width(rightW).Height(metricsCH).Render(metricsView)
-
 		var rightCol string
 		if m.showStatus {
-			statusSt := tuiPaneStyle
-			if m.focus == focusStatus {
-				statusSt = tuiActivePaneStyle
-			}
-			statusPane := statusSt.Width(rightW).Height(statusCH).Render(
-				m.statusView(rightW, statusCH+2))
 			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane, statusPane)
 		} else {
 			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
