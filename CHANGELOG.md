@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.2.2 — 2026-03-10
+
+**Phase 250: Harness Stabilization & Mission Control**
+
+This release focuses on operator experience, TUI aesthetics, and provider hardening to support long-horizon research.
+
+### UIs
+
+- **Mission Control TUI** — Re-architected the right column to include three persistent panes: Trace, Visual Inspector, and Status.
+- **Visual Inspector** — New gaming-inspired dashboard with real-time entropy gauges for token window saturation, step budget, and reasoning intensity (I/O ratio).
+- **Cognitive Heartbeat** — Animated ASCII pulse indicating real-time agent cognitive activity.
+- **Radio Station Selector** — Dedicated modal (`Alt+R` or `/radio`) for selecting ambient background stations by name. Renamed "Radiojar" to "Radio Al Hara".
+- **Typing Hygiene** — Removed conflicting single-key radio shortcuts (`n`, `p`, `1`) to prevent interference with text input.
+- **Layout Math** — Refined vertical budgeting to ensure all panes fit perfectly across different terminal sizes.
+
+### Core & CLI
+
+- **Non-Interactive Mode** — New `--exit` flag for `v100 run` that executes the initial prompt and automatically finalizes the run without entering the interactive loop.
+- **MiniMax Hardening** — Implemented contiguous tool-result ordering to fix Error 2013.
+- **Improved Diagnostics** — Explicit logging for message ordering bugs and Gemini multi-tool desyncs.
+
+### Dogfooding
+
+- **Expanded Quest Pack** — Added DF-12 (Non-Interactive Smoke) and updated DF-07/DF-08 to include MiniMax as a standard benchmark provider.
+
 ## v0.2.0 — 2026-03-09
 
 **Phase 100: Recursive Self-Evolution**

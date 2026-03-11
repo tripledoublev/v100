@@ -16,7 +16,7 @@ Use these conventions so runs stay queryable:
 
 ```bash
 # Example provider choice
-export V100_PROVIDER=codex
+export V100_PROVIDER=gemini
 
 # Useful after every run
 v100 query --tag dogfood=phase3
@@ -33,7 +33,7 @@ Recommended defaults for most quests:
 
 Use `--confirm-tools never` only when the quest is explicitly testing mutation flow.
 
-## Ten Quests
+## Twelve Quests
 
 ### DF-01 Repo Map Smoke
 
@@ -131,36 +131,42 @@ Pass if you can explain why the run succeeded or failed using trace evidence ins
 
 ### DF-07 Provider Duel
 
-Purpose: compare `codex` and `gemini` on the same repo-local reasoning task.
+Purpose: compare `codex`, `gemini`, and `minimax` on the same repo-local reasoning task.
 
 ```bash
 v100 run --provider codex --sandbox \
   --budget-steps 4 --max-tool-calls-per-step 4 \
-  --name "DF-07 provider duel codex" \
-  --tag dogfood=phase3 --tag quest=df07 --tag provider_duel=codex \
+  --name "DF-07 duel codex" \
+  --tag dogfood=phase3 --tag quest=df07 --tag duel=codex \
   "Inspect internal/core/workspace_applyback.go and summarize how sandbox apply-back works in five sentences."
 
 v100 run --provider gemini --sandbox \
   --budget-steps 4 --max-tool-calls-per-step 4 \
-  --name "DF-07 provider duel gemini" \
-  --tag dogfood=phase3 --tag quest=df07 --tag provider_duel=gemini \
+  --name "DF-07 duel gemini" \
+  --tag dogfood=phase3 --tag quest=df07 --tag duel=gemini \
   "Inspect internal/core/workspace_applyback.go and summarize how sandbox apply-back works in five sentences."
 
-v100 compare <run_id_codex> <run_id_gemini>
+v100 run --provider minimax --sandbox \
+  --budget-steps 4 --max-tool-calls-per-step 4 \
+  --name "DF-07 duel minimax" \
+  --tag dogfood=phase3 --tag quest=df07 --tag duel=minimax \
+  "Inspect internal/core/workspace_applyback.go and summarize how sandbox apply-back works in five sentences."
+
+v100 compare <id_codex> <id_gemini> <id_minimax>
 ```
 
 Pass if you can say which provider was more accurate per token and per step.
 
 ### DF-08 Bench Smoke
 
-Purpose: batch-run a small factual bench and make provider drift visible.
+Purpose: batch-run a factual bench across all primary providers to make drift visible.
 
 ```bash
 v100 bench dogfood/smoke.bench.toml
 v100 query --tag experiment=dogfood-smoke-v1
 ```
 
-Pass if both variants complete and the runs are easy to query by `experiment=dogfood-smoke-v1`.
+Pass if Codex, Gemini, and Minimax variants complete and results are easy to compare.
 
 ### DF-09 Resume Drill
 
@@ -213,6 +219,17 @@ v100 run --provider "$V100_PROVIDER" --sandbox \
 ```
 
 Pass if the agent successfully uses a dynamic tool it found in the registry and produces a distilled JSONL artifact.
+
+### DF-12 Non-Interactive Smoke
+
+Purpose: verify the `--exit` flag for automation.
+
+```bash
+v100 run --provider gemini --sandbox --exit \
+  "List the root of the repository and identify the version string in cmd/v100/main.go"
+```
+
+Pass if the command completes the task, prints the final summary, and returns control to the shell without waiting for user input.
 
 ## Starter Scoring Rubric
 

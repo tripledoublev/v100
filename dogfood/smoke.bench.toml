@@ -28,3 +28,10 @@ provider = "gemini"
 model = "gemini-2.5-flash"
 solver = "react"
 budget_steps = 4
+
+[[variants]]
+name = "minimax-react"
+provider = "minimax"
+model = "MiniMax-M2.5"
+solver = "react"
+budget_steps = 4

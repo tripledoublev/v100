@@ -44,16 +44,30 @@ Tools are Go implementations that the agent can invoke.
 
 ---
 
-## 5. Evaluation & Self-Evolution (`internal/eval/`)
+## 5. User Interfaces
+
+v100 provides two ways to interact with the agent loop:
+
+*   **CLI**: Line-by-line streaming output, ideal for automation and logs.
+*   **Mission Control TUI (`--tui`)**: A rich Bubble Tea-based dashboard featuring:
+    *   **Transcript Pane**: Live agent reasoning and tool conversation.
+    *   **Trace Pane**: Real-time event log for deep inspection.
+    *   **Visual Inspector**: A "Gaming Minimap" style dashboard with entropy gauges for tokens, steps, and reasoning intensity.
+    *   **Radio Station Selector**: Ambient background audio integration via `Alt+R`.
+
+---
+
+## 6. Evaluation & Self-Evolution (`internal/eval/`)
 
 This layer turns trajectories into knowledge.
 
 *   **`stats.go` / `metrics.go`**: Quantitative analysis of run efficiency.
 *   **`distill.go`**: Converts JSONL traces into ShareGPT format for dataset generation and DPO.
+*   **Reflective Scoring**: Nuanced evaluation rubrics for autonomous agents.
 
 ---
 
-## 6. The Feedback Loop (The "Reality Check")
+## 7. The Feedback Loop (The "Reality Check")
 
 v100 implements a **Post-Mutation Build Hook** in `loop.go`. After any workspace-mutating tool (`fs_write`, `patch_apply`):
 1.  The harness runs `go build ./...`.
@@ -61,4 +75,4 @@ v100 implements a **Post-Mutation Build Hook** in `loop.go`. After any workspace
 3.  The agent must fix the error before proceeding, ensuring structural integrity.
 
 ---
-*Document produced by v100 Research Harness - System Architecture v0.2.0*
+*Document produced by v100 Research Harness - System Architecture v0.2.2*

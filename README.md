@@ -14,19 +14,21 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Run metadata + scoring** — attach names/tags and score outcomes for later analysis
 - **Evaluation tooling** — per-run stats, run comparisons, experiments, and batch bench execution
 - **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
+- **Phase 300 optimization** — autonomous agent refinement via reflective scoring and prompt mutation
+- **Self-evolution engine** — agents can distill trajectories and author new tools at runtime
 - **Delegated sub-agents** — `agent` tool can spawn bounded child loops
 - **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
 - **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
 - **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
 - **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
 - **Streaming** — real-time token streaming from providers that support it
-- **Tool execution** — 23 built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, and multi-agent coordination
+- **Tool execution** — 25+ built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, sql_search, graphviz, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Five providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, or local Ollama
-- **Two UIs** — line-by-line CLI (default) or Bubble Tea 3-pane TUI (`--tui`)
+- **Six providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, Minimax, or local Ollama
+- **Two UIs** — line-by-line CLI (default) or Bubble Tea "Mission Control" TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
 ## Install
@@ -34,10 +36,10 @@ The goal is to make agent behavior measurable and reproducible so different prom
 ```bash
 git clone https://github.com/tripledoublev/v100
 cd v100
-go build -ldflags "-X main.version=v0.0.2" -o v100 ./cmd/v100/
+go build -ldflags "-X main.version=v0.2.2" -o v100 ./cmd/v100/
 ```
 
-Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution.
+Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, `mpv` or `ffplay` for `radio`.
 
 Pre-built binaries are available on the [releases page](https://github.com/tripledoublev/v100/releases).
 
@@ -59,6 +61,9 @@ v100 doctor
 # Start a run (uses ChatGPT subscription by default)
 v100 run
 
+# Start a non-interactive run (executes prompt then exits)
+v100 run --exit "Summarize the project structure"
+
 # With a step budget
 v100 run --budget-steps 10
 
@@ -67,6 +72,9 @@ v100 run --provider openai
 
 # Use Anthropic API
 v100 run --provider anthropic
+
+# Use Minimax (MiniMax-M2.5)
+v100 run --provider minimax
 
 # Use local Ollama
 v100 run --provider ollama --model qwen3.5:9b
@@ -80,7 +88,7 @@ v100 run --sandbox
 # Enable real-time token streaming
 v100 run --streaming
 
-# Enable TUI
+# Enable "Mission Control" TUI
 v100 run --tui
 
 # Name and tag runs for later querying
@@ -156,6 +164,15 @@ v100 run --provider gemini --model gemini-2.5-pro
 
 Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, `gemini-3-flash-preview`
 
+### Minimax
+
+Advanced model support via MiniMax-M2.5.
+
+```bash
+v100 login --provider minimax
+v100 run --provider minimax
+```
+
 ### Ollama (local)
 
 Run fully local models via Ollama (no API key required).
@@ -173,6 +190,7 @@ v100 run --provider ollama --model qwen3.5:9b
 | `openai` | `OPENAI_API_KEY` | `gpt-4o` | yes | API-driven experiments |
 | `anthropic` | `ANTHROPIC_API_KEY` or `v100 login --provider anthropic` | `claude-sonnet-4-20250514` | yes | Claude API experiments |
 | `gemini` | OAuth (`v100 login --provider gemini`) | `gemini-2.5-flash` | yes | subscription-backed Gemini runs |
+| `minimax` | OAuth (`v100 login --provider minimax`) | `MiniMax-M2.5` | yes | high-fidelity research runs |
 | `ollama` | local daemon | `qwen3.5:2b` | yes | fully local runs |
 
 OAuth client config for subscription providers lives at `~/.config/v100/oauth_credentials.json`.
@@ -288,7 +306,7 @@ After a sandboxed run, changes can be merged back to the host workspace:
 ### `v100 run` flags
 
 ```
---provider string              Provider name (codex, gemini, openai, ollama, anthropic)
+--provider string              Provider name (codex, gemini, openai, ollama, anthropic, minimax)
 --model string                 Model override
 --solver string                Solver strategy: react (default), plan_execute
 --max-replans int              Max replans for plan_execute solver
@@ -309,7 +327,8 @@ After a sandboxed run, changes can be merged back to the host workspace:
 --top-k int                    Top-k sampling parameter
 --max-tokens int               Max output tokens per model call
 --seed int                     Random seed for reproducibility
---tui                          Enable Bubble Tea TUI
+--exit                         Finalize and exit after initial prompt completes
+--tui                          Enable "Mission Control" TUI
 --tui-no-alt                   Disable alternate screen
 --tui-plain                    Force monochrome rendering
 --tui-debug                    Write TUI debug log in run directory
@@ -393,6 +412,10 @@ base_url = "http://localhost:11434"
 type = "gemini"
 default_model = "gemini-2.5-flash"
 
+[providers.minimax]
+type = "minimax"
+default_model = "MiniMax-M2.5"
+
 [sandbox]
 enabled = false
 backend = "docker"
@@ -442,7 +465,7 @@ v100 stats <run_id>
 v100 metrics <run_id>
 
 # Compare several runs
-v100 compare <run_a> <run_b> <run_c>
+v100 compare <run_id> <run_id> [...]
 
 # Query by metadata
 v100 query --tag team=core --score pass
@@ -528,8 +551,11 @@ touch .v100-reload
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `Tab` | Cycle focus (input → transcript → trace) |
+| `Tab` | Cycle focus (input → transcript → trace → status) |
+| `Alt+R` | Open Radio Station Selector |
+| `Ctrl+M` | Toggle Visual Inspector Dashboard |
 | `Ctrl+T` | Toggle trace pane |
+| `Ctrl+S` | Toggle status pane |
 | `Ctrl+A` | Copy full plain-text transcript |
 | `Ctrl+Y` | Approve dangerous tool |
 | `Ctrl+N` | Deny dangerous tool |
@@ -543,6 +569,7 @@ touch .v100-reload
 - `~/.config/v100/oauth_credentials.json` — local OAuth client config for Codex/Gemini
 - `~/.config/v100/auth.json` — Codex subscription token after `v100 login`
 - `~/.config/v100/gemini_auth.json` — Gemini subscription token after `v100 login --provider gemini`
+- `~/.config/v100/minimax_auth.json` — Minimax auth token after `v100 login --provider minimax`
 - `~/.config/v100/anthropic_auth.json` — Anthropic API key after `v100 login --provider anthropic`
 - `runs/<run_id>/` — trace, metadata, and artifacts for each run
 
