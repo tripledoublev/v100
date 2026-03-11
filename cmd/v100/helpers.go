@@ -205,6 +205,10 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 }
 
 func enabledToolSummary(reg *tools.Registry) string {
+	return enabledToolSummaryVerbose(reg, false)
+}
+
+func enabledToolSummaryVerbose(reg *tools.Registry, verbose bool) string {
 	if reg == nil {
 		return "0 enabled"
 	}
@@ -886,6 +890,10 @@ func resolveWorkspace(workspaceFlag, runDir string) string {
 }
 
 func findRunDir(runID string) (string, error) {
+	// Strip trailing /trace.jsonl so users can pass the full path
+	runID = strings.TrimSuffix(runID, "/trace.jsonl")
+	runID = strings.TrimSuffix(runID, string(filepath.Separator)+"trace.jsonl")
+
 	// Try runs/<runID> first
 	candidate := filepath.Join("runs", runID)
 	if _, err := os.Stat(candidate); err == nil {
