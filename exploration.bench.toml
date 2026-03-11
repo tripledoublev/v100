@@ -1,0 +1,62 @@
+name = "exploration-bench-v1"
+
+[[prompts]]
+message = "List the repository root. Summarize the harness in five bullets covering traces, sandboxing, providers, resume/restore, and evaluation tooling."
+scorer = "reflective"
+
+[[prompts]]
+message = "Find the implementation of the ReAct loop in internal/core/solver_react.go. Explain how it handles tool execution and error reporting."
+scorer = "reflective"
+
+[[prompts]]
+message = "Look at internal/providers/gemini.go. How does it handle streaming responses and tool calls?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Inspect internal/core/executor/docker.go. How does the sandbox executor isolate tool processes and manage the workspace?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Explain how the 'agent' tool in internal/tools/agent.go allows for spawning bounded child loops."
+scorer = "reflective"
+
+[[prompts]]
+message = "Read internal/core/types.go. What are the 21 structured event types mentioned in the README? List them with a one-sentence description for each."
+scorer = "reflective"
+
+[[prompts]]
+message = "Find the implementation of the 'patch_apply' tool in internal/tools/patch.go. How does it ensure patches are applied correctly to the workspace?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Look at internal/core/workspace_applyback.go. Describe the workflow for applying sandbox changes back to the host workspace."
+scorer = "reflective"
+
+[[prompts]]
+message = "Examine internal/core/solver_plan.go. How does the plan-execute strategy differ from the standard ReAct loop in terms of coordination?"
+scorer = "reflective"
+
+[[prompts]]
+message = "Find the 'blackboard' tools in internal/tools/blackboard.go. Explain how they provide shared run state for multi-agent coordination."
+scorer = "reflective"
+
+[[variants]]
+name = "gemini-react"
+provider = "gemini"
+model = "gemini-2.5-flash"
+solver = "react"
+budget_steps = 10
+
+[[variants]]
+name = "minimax-react"
+provider = "minimax"
+model = "MiniMax-M2.5"
+solver = "react"
+budget_steps = 10
+
+[[variants]]
+name = "gemini-plan"
+provider = "gemini"
+model = "gemini-2.5-flash"
+solver = "plan_execute"
+budget_steps = 15
