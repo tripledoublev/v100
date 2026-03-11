@@ -243,38 +243,53 @@ func (m *TUIModel) startDownloadCmd() tea.Cmd {
 		m.radioErr = "no radio station configured"
 		return nil
 	}
+	
+	// Capture current metadata from the model to ensure consistency with UI
+	artist := m.radioArtist
+	title := m.radioTitle
+	
 	m.statusMode = "downloading"
-	m.statusLine = "fetching song info…"
+	m.statusLine = "initializing download..."
 	m.radioErr = ""
 
 	return func() tea.Msg {
-		artist, title, err := fetchNowPlaying(s.Type, s.ID)
-		if err != nil {
-			return downloadDoneMsg{err: "now-playing unavailable"}
+		// If current metadata is empty, try one fresh fetch
+		if artist == "" && title == "" {
+			var err error
+			artist, title, err = fetchNowPlaying(s.Type, s.ID)
+			if err != nil {
+				return downloadDoneMsg{err: "now-playing unavailable"}
+			}
 		}
+		
 		song := strings.TrimSpace(artist + " - " + title)
 		query := strings.TrimSpace(artist + " " + title + " audio")
-		if query == "" {
-			return downloadDoneMsg{err: "empty song metadata"}
+		if query == "" || query == "NTS audio" {
+			return downloadDoneMsg{err: "empty or invalid song metadata"}
 		}
+		
 		if _, err := exec.LookPath("yt-dlp"); err != nil {
 			return downloadDoneMsg{err: "yt-dlp not installed"}
 		}
+		
 		dir := "/home/v/Music/favorites"
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return downloadDoneMsg{err: "cannot create favorites folder"}
 		}
+		
 		metaPath := filepath.Join(dir, "favorites.txt")
 		if f, err := os.OpenFile(metaPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 			_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | " + song + "\n")
 			_ = f.Close()
 		}
+		
 		outTmpl := filepath.Join(dir, "%(title)s [%(id)s].%(ext)s")
 		cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "-o", outTmpl, "ytsearch1:"+query)
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
+		
 		if err := cmd.Run(); err != nil {
-			return downloadDoneMsg{err: "yt-dlp error"}
+			return downloadDoneMsg{err: "yt-dlp error: " + err.Error()}
 		}
 		return downloadDoneMsg{artist: artist, title: title}
 	}
