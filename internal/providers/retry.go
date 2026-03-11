@@ -3,9 +3,11 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
@@ -16,6 +18,8 @@ type RetryConfig struct {
 	BaseDelay   time.Duration // default 1s
 	MaxDelay    time.Duration // default 30s
 	JitterFrac  float64       // default 0.25
+	// OnRetry is called before each retry sleep. If nil, a default message is printed to stderr.
+	OnRetry func(attempt int, delay time.Duration, statusCode int)
 }
 
 // DefaultRetryConfig returns sensible defaults.
@@ -46,9 +50,6 @@ func WithRetry(p Provider, cfg RetryConfig) Provider {
 }
 
 func normalizeRetryConfig(cfg RetryConfig) RetryConfig {
-	if cfg == (RetryConfig{}) {
-		return DefaultRetryConfig()
-	}
 	defaults := DefaultRetryConfig()
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = defaults.MaxAttempts
@@ -103,7 +104,14 @@ func retryCall[T any](ctx context.Context, cfg RetryConfig, fn func() (T, error)
 			break
 		}
 
-		if err := waitForRetry(ctx, backoffDelay(cfg, attempt, re.RetryAfter)); err != nil {
+		delay := backoffDelay(cfg, attempt, re.RetryAfter)
+		if cfg.OnRetry != nil {
+			cfg.OnRetry(attempt, delay, re.StatusCode)
+		} else {
+			fmt.Fprintf(os.Stderr, "⏳ rate limited (HTTP %d) — retrying in %s (attempt %d/%d)...\n",
+				re.StatusCode, delay.Round(time.Second), attempt+1, cfg.MaxAttempts-1)
+		}
+		if err := waitForRetry(ctx, delay); err != nil {
 			return zero, err
 		}
 	}
