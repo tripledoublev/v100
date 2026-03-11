@@ -84,22 +84,28 @@ func (m *TUIModel) View() string {
 		metricsH := 8 // fixed height for visual inspector (6 content lines + 2 border rows)
 		var traceH int
 
+		// lipgloss .Height(h) sets CONTENT height; rendered outer = h + 2 (border).
+		// Left pane outer = paneInnerH + 2.
+		// Right column outer = sum(paneH + 2) for each pane.
+		// To match: sum(paneH) + 2*numPanes = paneInnerH + 2
+		//         → sum(paneH) = paneInnerH - 2*(numPanes - 1)
 		if m.showStatus {
-			// All 3 right panes must sum to paneInnerH to match left column height.
-			statusH = 12
-			traceH = paneInnerH - metricsH - statusH
-			if traceH < 4 {
-				traceH = 4
-				statusH = paneInnerH - metricsH - traceH
+			// 3 panes → sum = paneInnerH - 4
+			budget := paneInnerH - 4
+			statusH = 10
+			traceH = budget - metricsH - statusH
+			if traceH < 3 {
+				traceH = 3
+				statusH = budget - metricsH - traceH
 			}
-			if statusH < 4 {
-				statusH = 4
+			if statusH < 3 {
+				statusH = 3
 			}
 		} else {
-			// 2 right panes must sum to paneInnerH.
-			traceH = paneInnerH - metricsH
-			if traceH < 2 {
-				traceH = 2
+			// 2 panes → sum = paneInnerH - 2
+			traceH = paneInnerH - 2 - metricsH
+			if traceH < 3 {
+				traceH = 3
 			}
 		}
 

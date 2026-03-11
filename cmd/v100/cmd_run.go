@@ -278,7 +278,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "shorthand for --auto --unsafe (researcher mode)")
 	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable isolated sandbox execution")
-	cmd.Flags().BoolVar(&streamingFlag, "streaming", false, "enable real-time token streaming")
+	cmd.Flags().BoolVar(&streamingFlag, "streaming", true, "enable real-time token streaming (disable with --streaming=false)")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
 	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")
 	cmd.Flags().Float64Var(&budgetCostFlag, "budget-cost", 0, "max cost in USD (0=config default)")
@@ -444,7 +444,7 @@ func generateRunSummary(ctx context.Context, prov providers.Provider, model stri
 	if len(messages) <= 1 {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Pass only last 20 messages to avoid hitting token limits

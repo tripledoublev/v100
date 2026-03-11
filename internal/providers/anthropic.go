@@ -219,6 +219,7 @@ func anthropicStreamSSE(httpResp *http.Response, model string, ch chan<- StreamE
 
 	scanner := bufio.NewScanner(httpResp.Body)
 	var currentToolID string
+	var trackedUsage Usage // accumulate usage across SSE events
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -248,7 +249,9 @@ func anthropicStreamSSE(httpResp *http.Response, model string, ch chan<- StreamE
 
 		switch event.Type {
 		case "message_start":
-			// message_start contains initial usage or metadata if needed
+			if event.Message != nil {
+				trackedUsage.InputTokens = event.Message.Usage.InputTokens
+			}
 		case "content_block_start":
 			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
 				currentToolID = event.ContentBlock.ID
@@ -272,18 +275,12 @@ func anthropicStreamSSE(httpResp *http.Response, model string, ch chan<- StreamE
 				}
 			}
 		case "message_delta":
-			// partial usage updates
-		case "message_stop":
-			// message_stop usually has the final usage block
-			u := Usage{}
-			if event.Message != nil {
-				u = Usage{
-					InputTokens:  event.Message.Usage.InputTokens,
-					OutputTokens: event.Message.Usage.OutputTokens,
-					CostUSD:      anthropicEstimateCost(model, event.Message.Usage.InputTokens, event.Message.Usage.OutputTokens),
-				}
+			if event.Usage != nil {
+				trackedUsage.OutputTokens = event.Usage.OutputTokens
 			}
-			ch <- StreamEvent{Type: StreamDone, Usage: u}
+		case "message_stop":
+			trackedUsage.CostUSD = anthropicEstimateCost(model, trackedUsage.InputTokens, trackedUsage.OutputTokens)
+			ch <- StreamEvent{Type: StreamDone, Usage: trackedUsage}
 			return
 		case "error":
 			ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("anthropic stream error: %s", data)}

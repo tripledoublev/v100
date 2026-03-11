@@ -210,6 +210,7 @@ func minimaxStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 
 	scanner := bufio.NewScanner(httpResp.Body)
 	var currentToolID string
+	var trackedUsage Usage // accumulate usage across SSE events
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -227,6 +228,10 @@ func minimaxStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 				Text string `json:"text"`
 				JSON string `json:"partial_json"`
 			} `json:"delta"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
@@ -235,6 +240,9 @@ func minimaxStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 
 		switch event.Type {
 		case "message_start":
+			if event.Message != nil {
+				trackedUsage.InputTokens = event.Message.Usage.InputTokens
+			}
 		case "content_block_start":
 			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
 				currentToolID = event.ContentBlock.ID
@@ -258,16 +266,12 @@ func minimaxStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 				}
 			}
 		case "message_delta":
-		case "message_stop":
-			u := Usage{}
-			if event.Message != nil {
-				u = Usage{
-					InputTokens:  event.Message.Usage.InputTokens,
-					OutputTokens: event.Message.Usage.OutputTokens,
-					CostUSD:      0, // subscription-backed
-				}
+			if event.Usage != nil {
+				trackedUsage.OutputTokens = event.Usage.OutputTokens
 			}
-			ch <- StreamEvent{Type: StreamDone, Usage: u}
+		case "message_stop":
+			// subscription-backed: $0 cost
+			ch <- StreamEvent{Type: StreamDone, Usage: trackedUsage}
 			return
 		case "error":
 			ch <- StreamEvent{Type: StreamError, Err: fmt.Errorf("minimax stream error: %s", data)}

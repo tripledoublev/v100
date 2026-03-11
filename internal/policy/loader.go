@@ -15,7 +15,7 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 	p := &Policy{
 		Name:                name,
 		MaxToolCallsPerStep: cfg.MaxToolCallsPerStep,
-		Streaming:           cfg.Streaming,
+		Streaming:           true, // default ON; --streaming=false to disable
 	}
 	if p.MaxToolCallsPerStep == 0 {
 		p.MaxToolCallsPerStep = 20

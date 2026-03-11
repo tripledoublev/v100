@@ -156,6 +156,7 @@ type CompressPayload struct {
 	CostUSD            float64 `json:"cost_usd"`
 	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
 	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
+	MessagesFailed     int     `json:"messages_failed,omitempty"`     // compression failures
 }
 
 // StepSummaryPayload is the Payload for EventStepSummary.

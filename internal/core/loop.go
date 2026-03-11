@@ -590,6 +590,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 
 	var totalCompressCost float64
 	compressed := 0
+	failedCount := 0
 	cp := l.compressProvider()
 
 	for _, c := range candidates {
@@ -609,9 +610,11 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		}
 		resp, err := cp.Complete(ctx, summaryReq)
 		if err != nil {
+			failedCount++
 			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
 				Error: fmt.Sprintf("compress: failed to compress message %d (skipping): %v", c.idx, err),
 			})
+			fmt.Fprintf(os.Stderr, "warning: compression failed for message %d: %v\n", c.idx, err)
 			continue // skip this message, try next
 		}
 
@@ -629,7 +632,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		}
 	}
 
-	if compressed > 0 {
+	if compressed > 0 || failedCount > 0 {
 		tokensAfter := estimateTokens(l.buildMessages())
 		_, _ = l.emit(EventCompress, stepID, CompressPayload{
 			MessagesBefore:     msgsBefore,
@@ -639,6 +642,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			CostUSD:            totalCompressCost,
 			Strategy:           "targeted",
 			MessagesCompressed: compressed,
+			MessagesFailed:     failedCount,
 		})
 
 		if tokensAfter < threshold {
