@@ -58,8 +58,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Start an interactive agent run",
+		Use:          "run",
+		Short:        "Start an interactive agent run",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(*cfgPath)
 			if err != nil {
