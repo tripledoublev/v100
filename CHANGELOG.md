@@ -4,22 +4,28 @@
 
 **Phase 300: Autonomous Optimization Foundation**
 
-This release introduces the first set of meta-cognitive and optimization tools to enable agents to refine their own behavior.
+This release introduces meta-cognitive tools for agent self-refinement, hardens the TUI layout engine, and enables streaming by default.
 
 ### Autonomous Optimization
 
-- **`reflect` tool** — Enables agents to perform self-critique, evaluate plan alignment, and identify logical loops during execution.
-- **`v100 mutate` command** — Trace-driven prompt optimizer that analyzes failure signatures (qualitative and quantitative) to suggest improved prompts.
-- **Quantitative Failure Signatures** — Grounded the optimizer in hard data: step counts, tool failure rates, and context saturation percentages.
+- **`reflect` tool** — Meta-cognitive self-critique: agents can pause to evaluate progress, plan correctness, and goal alignment. Returns a PASS/FAIL/PARTIAL verdict with reasoning and suggested pivot.
+- **`v100 mutate` command** — Trace-driven prompt optimizer that analyzes both qualitative behavioral labels and quantitative failure signatures (step counts, tool error rates, context saturation) to suggest improved prompts.
+- **`v100 digest` command** — Compact failure digest for completed runs, surfacing key failure points without the full trace.
 
 ### Evaluation & Automation
 
 - **JSON Output** — Added `--format json` to `stats`, `metrics`, `analyze`, `digest`, and `diff` commands for seamless integration with automation pipelines.
 - **Scoring Persistence** — Benchmarks and experiments now save full LLM-graded reasoning to `meta.json` and a detailed `evaluation.json` artifact in the run directory.
 
+### Core
+
+- **Streaming by Default** — Token streaming is now enabled by default for all providers that support it.
+- **Compression Telemetry** — Enhanced context compression events with token tracking for Anthropic and MiniMax providers.
+
 ### UI & UX
 
-- **Dynamic TUI Layout** — Implemented proportional height allocation to ensure perfect column alignment across all terminal sizes.
+- **Dynamic TUI Layout** — Proportional height allocation ensures perfect column alignment across all terminal sizes and pane combinations.
+- **Overflow-Safe Status Pane** — Status pane text wrapping no longer breaks right-column height; trace pane absorbs the difference.
 
 ## v0.2.2 — 2026-03-10
 

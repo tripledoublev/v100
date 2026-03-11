@@ -22,7 +22,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
 - **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
 - **Streaming** — real-time token streaming from providers that support it
-- **Tool execution** — 25+ built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, sql_search, graphviz, and multi-agent coordination
+- **Tool execution** — 26+ built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, sql_search, graphviz, reflect, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
@@ -84,9 +84,6 @@ v100 run --solver plan_execute --max-replans 3
 
 # Enable sandbox execution
 v100 run --sandbox
-
-# Enable real-time token streaming
-v100 run --streaming
 
 # Enable "Mission Control" TUI
 v100 run --tui
@@ -299,6 +296,8 @@ After a sandboxed run, changes can be merged back to the host workspace:
 | `v100 experiment run <exp_id> --prompt <text>` | Execute all experiment variants |
 | `v100 experiment results <exp_id>` | Display statistical results |
 | `v100 analyze <run_id>` | Automated behavioral analysis |
+| `v100 digest <run_id>` | Compact failure digest for a completed run |
+| `v100 mutate <run_id>` | Suggest improved prompt based on failure analysis |
 | `v100 diff <run_a> <run_b>` | Find divergence point between traces |
 | `v100 query [--tag k=v ...] [--score <verdict>]` | Filter runs by metadata |
 | `v100 dev` | Rebuild/restart dev binary on `.v100-reload` |
@@ -311,7 +310,7 @@ After a sandboxed run, changes can be merged back to the host workspace:
 --solver string                Solver strategy: react (default), plan_execute
 --max-replans int              Max replans for plan_execute solver
 --sandbox                      Enable isolated sandbox execution
---streaming                    Enable real-time token streaming
+--streaming                    Enable real-time token streaming (default: true)
 --budget-steps int             Max steps before halting
 --budget-tokens int            Max tokens before halting
 --budget-cost float            Max cost in USD before halting
@@ -377,6 +376,7 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 | `orchestrate` | **dangerous** | Coordinate multiple dispatches (fanout/pipeline) |
 | `blackboard_read` | safe | Read shared run blackboard |
 | `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard |
+| `reflect` | safe | Meta-cognitive self-critique and plan evaluation |
 | `blackboard_search` | safe | Search vectorized blackboard memory |
 | `blackboard_store` | **dangerous** | Store a record in vectorized blackboard |
 

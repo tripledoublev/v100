@@ -41,6 +41,7 @@ Tools are Go implementations that the agent can invoke.
 *   **Static Tools**: Hard-coded capabilities like `fs_read`, `sh`, and `git_commit`.
 *   **Dynamic Tools (`internal/tools/dynamic/`)**: Tools authored by agents at runtime during Phase 100 runs.
 *   **Safety**: Tools are classified as `Safe` or `Dangerous`. Dangerous tools require a **Reflection Turn** or user confirmation.
+*   **`reflect` Tool**: Meta-cognitive self-critique that lets agents pause and evaluate plan alignment, logical loops, and progress.
 
 ---
 
