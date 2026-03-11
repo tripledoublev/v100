@@ -222,9 +222,10 @@ func enabledToolSummaryVerbose(reg *tools.Registry, verbose bool) string {
 	if len(names) == 0 {
 		return "0 enabled"
 	}
-	// Fix #7: Show all enabled tools instead of truncating with "+N more"
-	summary := fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(names, ", "))
-	return summary
+	if verbose {
+		return fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(names, ", "))
+	}
+	return fmt.Sprintf("%d enabled (%d dangerous)", len(names), dangerous)
 }
 
 func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase string) (executor.Session, *core.PathMapper, string, error) {

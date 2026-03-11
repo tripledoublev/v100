@@ -369,7 +369,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	fmt.Println(ui.Info(ui.Dim("trace: ") + run.TraceFile))
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 	fmt.Println(ui.Info(ui.Dim("budget: ") + budget.Summary()))
-	fmt.Println(ui.Info(ui.Dim("tools: ") + enabledToolSummary(reg)))
+	fmt.Println(ui.Info(ui.Dim("tools: ") + enabledToolSummaryVerbose(reg, verbose)))
 	{
 		solverName := solverDisplayName(solver)
 		policyName := pol.Name

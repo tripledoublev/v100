@@ -249,7 +249,7 @@ func TestEnabledToolSummary(t *testing.T) {
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.Sh())
 
-	got := enabledToolSummary(reg)
+	got := enabledToolSummaryVerbose(reg, true)
 	for _, want := range []string{"3 enabled", "2 dangerous", "fs_read", "fs_write", "sh"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("enabledToolSummary missing %q in %q", want, got)
