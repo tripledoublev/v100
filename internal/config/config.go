@@ -133,7 +133,7 @@ func DefaultConfig() *Config {
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
-				"sem_diff", "sem_impact", "sem_blame", "inspect_tool",
+				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
 		},
@@ -231,7 +231,7 @@ base_url = "https://api.minimax.chat/v1"
 env = "MINIMAX_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame", "inspect_tool"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"]
 
 [policies.default]
@@ -296,10 +296,10 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "blackboard_read")
 	ensureString(&cfg.Tools.Enabled, "blackboard_write")
 	ensureString(&cfg.Tools.Dangerous, "blackboard_write")
-	ensureString(&cfg.Tools.Enabled, "sem_diff")
 	ensureString(&cfg.Tools.Enabled, "sem_impact")
 	ensureString(&cfg.Tools.Enabled, "sem_blame")
 	ensureString(&cfg.Tools.Enabled, "inspect_tool")
+	ensureString(&cfg.Tools.Enabled, "reflect")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}

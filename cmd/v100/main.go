@@ -50,6 +50,7 @@ func rootCmd() *cobra.Command {
 		benchCmd(&cfgPath),
 		experimentCmd(&cfgPath),
 		analyzeCmd(),
+		mutateCmd(&cfgPath),
 		evalCmd(&cfgPath),
 		diffCmd(),
 		verifyCmd(),

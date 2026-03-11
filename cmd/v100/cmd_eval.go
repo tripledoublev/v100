@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,7 +79,8 @@ func distillCmd() *cobra.Command {
 }
 
 func statsCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "stats <run_id>",
 		Short: "Show statistics for a completed run",
 		Args:  cobra.ExactArgs(1),
@@ -99,14 +101,22 @@ func statsCmd() *cobra.Command {
 					stats.ModelMetadata = meta.ModelMetadata
 				}
 			}
+			if format == "json" {
+				b, _ := json.MarshalIndent(stats, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
 			fmt.Print(core.FormatStats(stats))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	return cmd
 }
 
 func digestCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "digest <run_id>",
 		Short: "Show a compact failure digest for a completed run",
 		Args:  cobra.ExactArgs(1),
@@ -120,14 +130,22 @@ func digestCmd() *cobra.Command {
 				return err
 			}
 			digest := core.ComputeDigest(events)
+			if format == "json" {
+				b, _ := json.MarshalIndent(digest, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
 			fmt.Print(core.FormatDigest(digest))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	return cmd
 }
 
 func metricsCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "metrics <run_id>",
 		Short: "Compute trace-derived metrics and automatic run classification",
 		Args:  cobra.ExactArgs(1),
@@ -142,14 +160,26 @@ func metricsCmd() *cobra.Command {
 			}
 			metrics := core.ComputeMetrics(events)
 			classification := core.ClassifyRun(events)
+			if format == "json" {
+				res := struct {
+					Metrics        core.RunMetrics        `json:"metrics"`
+					Classification core.RunClassification `json:"classification"`
+				}{metrics, classification}
+				b, _ := json.MarshalIndent(res, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
 			fmt.Print(core.FormatMetrics(metrics, classification))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	return cmd
 }
 
 func compareCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "compare <run_id> <run_id> [run_id...]",
 		Short: "Compare statistics across multiple runs",
 		Args:  cobra.MinimumNArgs(2),
@@ -173,10 +203,17 @@ func compareCmd() *cobra.Command {
 				}
 				allStats = append(allStats, s)
 			}
+			if format == "json" {
+				b, _ := json.MarshalIndent(allStats, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
 			fmt.Print(core.FormatCompare(allStats))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	return cmd
 }
 
 func benchCmd(cfgPath *string) *cobra.Command {
@@ -374,6 +411,13 @@ func benchCmd(cfgPath *string) *cobra.Command {
 							meta.Score = res.Score
 							meta.ScoreNotes = res.Notes
 							_ = core.WriteMeta(runDir, meta)
+
+							// Save detailed evaluation artifact
+							evalPath := filepath.Join(runDir, "evaluation.json")
+							if b, err := json.MarshalIndent(res, "", "  "); err == nil {
+								_ = os.WriteFile(evalPath, b, 0o644)
+							}
+
 							fmt.Printf("  %s Verdict: %s\n", ui.OK("done"), strings.ToUpper(res.Score))
 						}
 					}
@@ -680,6 +724,13 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 								meta.Score = res.Score
 								meta.ScoreNotes = res.Notes
 								_ = core.WriteMeta(runDir, meta)
+
+								// Save detailed evaluation artifact
+								evalPath := filepath.Join(runDir, "evaluation.json")
+								if b, err := json.MarshalIndent(res, "", "  "); err == nil {
+									_ = os.WriteFile(evalPath, b, 0o644)
+								}
+
 								fmt.Printf("  verdict: %s\n", strings.ToUpper(res.Score))
 							}
 						}
@@ -764,7 +815,8 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 }
 
 func analyzeCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+	cmd := &cobra.Command{
 		Use:   "analyze <run_id>",
 		Short: "Perform automated behavioral analysis on a run trace",
 		Args:  cobra.ExactArgs(1),
@@ -781,6 +833,12 @@ func analyzeCmd() *cobra.Command {
 
 			report := eval.AnalyzeTrajectory(events)
 
+			if format == "json" {
+				b, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+
 			fmt.Printf("Analysis for Run: %s\n", ui.Info(runID))
 			fmt.Printf("Efficiency Score: %.2f\n", report.Efficiency)
 			fmt.Printf("Tool Errors:      %d\n", report.ToolErrors)
@@ -794,6 +852,65 @@ func analyzeCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	return cmd
+}
+
+func mutateCmd(cfgPath *string) *cobra.Command {
+	var provider string
+	var model string
+
+	cmd := &cobra.Command{
+		Use:   "mutate <run_id>",
+		Short: "Analyze a failed run and suggest a mutated prompt to prevent issues",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+
+			if provider == "" {
+				provider = cfg.Defaults.Provider
+			}
+			prov, err := buildProvider(cfg, provider)
+			if err != nil {
+				return err
+			}
+
+			if model == "" {
+				model = cfg.Providers[provider].DefaultModel
+			}
+
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+
+			res, err := eval.MutatePrompt(context.Background(), prov, model, events)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Optimizer analysis for run %s\n", ui.Info(runID))
+			fmt.Printf("\n%s\n%s\n", ui.Header("ORIGINAL PROMPT"), res.OriginalPrompt)
+			fmt.Printf("\n%s\n%s\n", ui.Header("MUTATED PROMPT"), ui.OK(res.MutatedPrompt))
+			fmt.Printf("\n%s\n%s\n", ui.Header("RATIONALE"), res.Rationale)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "", "Provider override for optimizer")
+	cmd.Flags().StringVar(&model, "model", "", "Model override for optimizer")
+
+	return cmd
 }
 
 func evalCmd(cfgPath *string) *cobra.Command {
@@ -884,6 +1001,7 @@ func evalCmd(cfgPath *string) *cobra.Command {
 
 func diffCmd() *cobra.Command {
 	var runDirFlag string
+	var format string
 	cmd := &cobra.Command{
 		Use:   "diff <run_id_a> <run_id_b>",
 		Short: "Find the point of divergence between two run traces",
@@ -909,6 +1027,12 @@ func diffCmd() *cobra.Command {
 
 			diff := eval.DiffTraces(runA, runB, eventsA, eventsB)
 
+			if format == "json" {
+				b, _ := json.MarshalIndent(diff, "", "  ")
+				fmt.Println(string(b))
+				return nil
+			}
+
 			fmt.Printf("Comparing %s vs %s\n", ui.Info(runA), ui.Info(runB))
 			if diff.DivergeType == "none" {
 				fmt.Println(ui.OK("No divergence detected. Traces are structurally identical."))
@@ -923,6 +1047,7 @@ func diffCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&runDirFlag, "run-dir", "", "base directory for runs (default: ./runs)")
+	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
 	return cmd
 }
 
