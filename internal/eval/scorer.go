@@ -42,6 +42,8 @@ func LookupScorer(name string, prov providers.Provider, model string) (Scorer, e
 			return nil, fmt.Errorf("model_graded scorer requires a provider")
 		}
 		return &ModelGraded{Provider: prov, Model: model}, nil
+	case name == "file_content":
+		return FileContent{}, nil
 	case name == "reflective":
 		if prov == nil {
 			return nil, fmt.Errorf("reflective scorer requires a provider")
@@ -276,3 +278,31 @@ func (g *ModelGraded) Score(ctx context.Context, trace []core.Event, expected st
 }
 
 func ptrFloat64(v float64) *float64 { return &v }
+
+// FileContent scores pass if any fs_write tool call in the trace wrote content
+// matching the expected string (trimmed exact match).
+type FileContent struct{}
+
+func (FileContent) Name() string { return "file_content" }
+func (FileContent) Score(_ context.Context, trace []core.Event, expected string) (ScoreResult, error) {
+	expected = strings.TrimSpace(expected)
+	for _, ev := range trace {
+		if ev.Type != core.EventToolCall {
+			continue
+		}
+		var p core.ToolCallPayload
+		if json.Unmarshal(ev.Payload, &p) != nil || p.Name != "fs_write" {
+			continue
+		}
+		var args struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal([]byte(p.Args), &args) != nil {
+			continue
+		}
+		if strings.TrimSpace(args.Content) == expected {
+			return ScoreResult{Score: "pass", Value: 1.0}, nil
+		}
+	}
+	return ScoreResult{Score: "fail", Value: 0.0, Notes: "no fs_write content matched expected"}, nil
+}

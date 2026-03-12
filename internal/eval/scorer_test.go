@@ -150,6 +150,7 @@ func TestLookupScorer(t *testing.T) {
 		{"contains", false},
 		{"regex", false},
 		{"script:echo ok", false},
+		{"file_content", false},
 		{"model_graded", true}, // needs provider
 		{"unknown", true},
 	}
@@ -168,6 +169,62 @@ func TestLookupScorer(t *testing.T) {
 				t.Errorf("LookupScorer(%q): returned nil scorer", tt.name)
 			}
 		}
+	}
+}
+
+func makeToolCallTrace(toolName, argsJSON string) []core.Event {
+	callPayload, _ := json.Marshal(core.ToolCallPayload{
+		CallID: "c1",
+		Name:   toolName,
+		Args:   argsJSON,
+	})
+	return []core.Event{
+		{Type: core.EventToolCall, Payload: callPayload},
+	}
+}
+
+func TestFileContentScorerMatch(t *testing.T) {
+	ctx := context.Background()
+	s := eval.FileContent{}
+
+	args, _ := json.Marshal(map[string]string{"path": "out.txt", "content": "exact content"})
+	trace := makeToolCallTrace("fs_write", string(args))
+
+	r, err := s.Score(ctx, trace, "exact content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Score != "pass" {
+		t.Errorf("expected pass, got %s", r.Score)
+	}
+}
+
+func TestFileContentScorerMismatch(t *testing.T) {
+	ctx := context.Background()
+	s := eval.FileContent{}
+
+	args, _ := json.Marshal(map[string]string{"path": "out.txt", "content": "actual content."})
+	trace := makeToolCallTrace("fs_write", string(args))
+
+	r, err := s.Score(ctx, trace, "actual content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Score != "fail" {
+		t.Errorf("expected fail for trailing period mismatch, got %s", r.Score)
+	}
+}
+
+func TestFileContentScorerNoFSWrite(t *testing.T) {
+	ctx := context.Background()
+	s := eval.FileContent{}
+
+	r, err := s.Score(ctx, makeTrace("just text"), "expected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Score != "fail" {
+		t.Errorf("expected fail when no fs_write in trace, got %s", r.Score)
 	}
 }
 

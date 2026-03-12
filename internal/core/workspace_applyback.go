@@ -14,9 +14,10 @@ import (
 
 // WorkspaceDiff describes sandbox-visible changes relative to the source workspace.
 type WorkspaceDiff struct {
-	Added    []string `json:"added,omitempty"`
-	Modified []string `json:"modified,omitempty"`
-	Deleted  []string `json:"deleted,omitempty"`
+	Added    []string          `json:"added,omitempty"`
+	Modified []string          `json:"modified,omitempty"`
+	Deleted  []string          `json:"deleted,omitempty"`
+	Previews map[string]string `json:"previews,omitempty"`
 }
 
 // Empty reports whether the diff contains any file or directory changes.
@@ -288,6 +289,34 @@ func diffWorkspaceEntries(sourceEntries, sandboxEntries map[string]workspaceEntr
 			diff.Modified = append(diff.Modified, key)
 		}
 	}
+
+	// Populate content previews for small added/modified files (≤4KB).
+	const maxPreviewFile = 4096
+	const maxPreviewChars = 512
+	changed := append(diff.Added, diff.Modified...)
+	for _, key := range changed {
+		sand, ok := sandboxEntries[key]
+		if !ok || sand.IsDir {
+			continue
+		}
+		info, err := os.Stat(sand.Abs)
+		if err != nil || info.Size() > maxPreviewFile {
+			continue
+		}
+		data, err := os.ReadFile(sand.Abs)
+		if err != nil {
+			continue
+		}
+		preview := string(data)
+		if len(preview) > maxPreviewChars {
+			preview = preview[:maxPreviewChars] + "…"
+		}
+		if diff.Previews == nil {
+			diff.Previews = make(map[string]string)
+		}
+		diff.Previews[key] = preview
+	}
+
 	return diff
 }
 

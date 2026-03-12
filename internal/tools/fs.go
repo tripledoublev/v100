@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -227,9 +228,16 @@ func (t *fsWriteTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	if err != nil {
 		return failResult(start, err.Error()), nil
 	}
+
+	digest := sha256.Sum256([]byte(a.Content))
+	preview := a.Content
+	if len(preview) > 200 {
+		preview = preview[:200] + "…"
+	}
+	previewJSON, _ := json.Marshal(preview)
 	return ToolResult{
 		OK:         true,
-		Output:     fmt.Sprintf(`{"bytes_written":%d}`, n),
+		Output:     fmt.Sprintf(`{"bytes_written":%d,"sha256":"%x","preview":%s}`, n, digest, previewJSON),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

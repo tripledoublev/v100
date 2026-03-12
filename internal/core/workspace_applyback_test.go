@@ -215,6 +215,62 @@ func TestFinalizeSandboxWorkspaceSkipsGoTelemetry(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDiffIncludesPreviewsForSmallFiles(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+
+	writeFile(t, filepath.Join(source, "keep.txt"), "same\n")
+	writeFile(t, filepath.Join(sandbox, "keep.txt"), "same\n")
+	writeFile(t, filepath.Join(sandbox, "small.txt"), "hello world\n")
+
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:             "manual",
+		Success:          true,
+		SourceWorkspace:  source,
+		SandboxWorkspace: sandbox,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Diff.Added) != 1 || result.Diff.Added[0] != "small.txt" {
+		t.Fatalf("unexpected added: %v", result.Diff.Added)
+	}
+	preview, ok := result.Diff.Previews["small.txt"]
+	if !ok {
+		t.Fatal("expected preview for small.txt")
+	}
+	if preview != "hello world\n" {
+		t.Fatalf("preview = %q, want %q", preview, "hello world\n")
+	}
+}
+
+func TestWorkspaceDiffSkipsPreviewsForLargeFiles(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+
+	writeFile(t, filepath.Join(source, "keep.txt"), "same\n")
+	writeFile(t, filepath.Join(sandbox, "keep.txt"), "same\n")
+	// Write a file larger than 4KB
+	bigContent := make([]byte, 5000)
+	for i := range bigContent {
+		bigContent[i] = 'x'
+	}
+	writeFile(t, filepath.Join(sandbox, "big.bin"), string(bigContent))
+
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:             "manual",
+		Success:          true,
+		SourceWorkspace:  source,
+		SandboxWorkspace: sandbox,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Diff.Previews) != 0 {
+		t.Fatalf("expected no previews for large file, got %v", result.Diff.Previews)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
