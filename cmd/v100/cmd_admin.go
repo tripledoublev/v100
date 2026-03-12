@@ -322,6 +322,16 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// 2. Provider auth
+			// Only fail on the default provider; others just warn
+			defaultProvider := cfg.Defaults.Provider
+			providerIssue := func(name, msg string) {
+				if name == defaultProvider {
+					fmt.Println(ui.Fail(msg))
+					ok = false
+				} else {
+					fmt.Println(ui.Warn(msg))
+				}
+			}
 			for name, pc := range cfg.Providers {
 				switch pc.Type {
 				case "codex":
@@ -331,8 +341,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					if _, err := os.Stat(tokenPath); err == nil {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login'", name, tokenPath)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: no token at %s — run 'v100 login'", name, tokenPath))
 					}
 				case "gemini":
 					_, credsErr := auth.LoadGeminiCredentials()
@@ -343,8 +352,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						hasToken = true
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider gemini'", name, tokenPath)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider gemini'", name, tokenPath))
 					}
 					if hasToken {
 						pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -353,8 +361,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						pingResp, pingErr := http.DefaultClient.Do(pingReq)
 						pingCancel()
 						if pingErr != nil {
-							fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr)))
-							ok = false
+							providerIssue(name, fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr))
 						} else {
 							_ = pingResp.Body.Close()
 							latency := time.Since(t0).Milliseconds()
@@ -379,16 +386,14 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					resp, err := http.DefaultClient.Do(req)
 					cancel()
 					if err != nil {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: cannot reach %s (%v)", name, baseURL, err)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: cannot reach %s (%v)", name, baseURL, err))
 						break
 					}
 					_ = resp.Body.Close()
 					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable at %s", name, baseURL)))
 					} else {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode))
 					}
 				case "anthropic":
 					authEnv := pc.Auth.Env
@@ -409,8 +414,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						anthropicKey = key
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
 					} else {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv))
 					}
 					if anthropicKey != "" {
 						pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -421,16 +425,14 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						pingResp, pingErr := http.DefaultClient.Do(pingReq)
 						pingCancel()
 						if pingErr != nil {
-							fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr)))
-							ok = false
+							providerIssue(name, fmt.Sprintf("Provider %s: connectivity FAIL (%v)", name, pingErr))
 						} else {
 							_ = pingResp.Body.Close()
 							latency := time.Since(t0).Milliseconds()
 							if pingResp.StatusCode == 200 || pingResp.StatusCode == 401 {
 								fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable (%dms)", name, latency)))
 							} else {
-								fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: connectivity FAIL HTTP %d (%dms)", name, pingResp.StatusCode, latency)))
-								ok = false
+								providerIssue(name, fmt.Sprintf("Provider %s: connectivity FAIL HTTP %d (%dms)", name, pingResp.StatusCode, latency))
 							}
 						}
 					}
@@ -441,14 +443,12 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					if _, err := os.Stat(tokenPath); err == nil {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: token at %s", name, tokenPath)))
 					} else {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider minimax'", name, tokenPath)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider minimax'", name, tokenPath))
 					}
 				default:
 					key := os.Getenv(pc.Auth.Env)
 					if key == "" {
-						fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: env var %s not set", name, pc.Auth.Env)))
-						ok = false
+						providerIssue(name, fmt.Sprintf("Provider %s: env var %s not set", name, pc.Auth.Env))
 					} else {
 						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, pc.Auth.Env, len(key))))
 					}

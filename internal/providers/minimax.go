@@ -134,6 +134,9 @@ func (p *MiniMaxProvider) Complete(ctx context.Context, req CompleteRequest) (Co
 			}
 		}
 		if strings.Contains(string(raw), "2013") {
+			if strings.Contains(string(raw), "context window") || strings.Contains(string(raw), "exceeds limit") {
+				return CompleteResponse{}, fmt.Errorf("minimax: context window exceeded — reduce tool result size or use compression")
+			}
 			return CompleteResponse{}, fmt.Errorf("minimax error 2013: tool results not contiguous with tool calls (message ordering bug): %w", baseErr)
 		}
 		return CompleteResponse{}, baseErr
@@ -191,6 +194,9 @@ func (p *MiniMaxProvider) StreamComplete(ctx context.Context, req CompleteReques
 			}
 		}
 		if strings.Contains(string(raw), "2013") {
+			if strings.Contains(string(raw), "context window") || strings.Contains(string(raw), "exceeds limit") {
+				return nil, fmt.Errorf("minimax: context window exceeded — reduce tool result size or use compression")
+			}
 			return nil, fmt.Errorf("minimax error 2013: tool results not contiguous with tool calls (message ordering bug): %w", baseErr)
 		}
 		return nil, baseErr

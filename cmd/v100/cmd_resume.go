@@ -27,6 +27,8 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
 		autoFlag         bool
+		unsafeFlag       bool
+		yoloFlag         bool
 		sandboxFlag      bool
 		confirmToolsFlag string
 		workspaceFlag    string
@@ -36,9 +38,10 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resume <run_id>",
-		Short: "Resume an existing run from its trace",
-		Args:  cobra.ExactArgs(1),
+		Use:          "resume <run_id>",
+		Short:        "Resume an existing run from its trace",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runID := args[0]
 
@@ -103,13 +106,17 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				maxCost = cfg.Defaults.BudgetCostUSD
 			}
 
+			if yoloFlag {
+				autoFlag = true
+				unsafeFlag = true
+			}
 			if confirmToolsFlag != "" {
 				cfg.Defaults.ConfirmTools = confirmToolsFlag
 			}
 			if autoFlag {
 				cfg.Defaults.ConfirmTools = "never"
 			}
-			if err := validateExecutionSafety(cfg, cfg.Defaults.ConfirmTools, false); err != nil {
+			if err := validateExecutionSafety(cfg, cfg.Defaults.ConfirmTools, unsafeFlag); err != nil {
 				return err
 			}
 
@@ -165,6 +172,8 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
+	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "acknowledge host workspace risk (required with --auto outside sandbox)")
+	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "shorthand for --auto --unsafe")
 	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable sandbox for resumed run (inherited from meta.json by default)")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")

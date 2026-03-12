@@ -29,6 +29,25 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	budgetBefore := l.Budget.Budget()
 	var modelCalls int
 
+	// 0. Pre-step budget check — warn if budget is nearly exhausted
+	if b := l.Budget.Budget(); b.MaxTokens > 0 && b.UsedTokens > 0 {
+		remaining := b.MaxTokens - b.UsedTokens
+		// Only pre-reject if remaining is both <2000 and <5% of total budget
+		threshold := b.MaxTokens / 20
+		if threshold > 2000 {
+			threshold = 2000
+		}
+		if remaining > 0 && remaining < threshold {
+			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
+				Error: fmt.Sprintf("token budget nearly exhausted (%d/%d used) — not enough for another step", b.UsedTokens, b.MaxTokens),
+			})
+			return SolveResult{}, &ErrBudgetExceeded{Reason: fmt.Sprintf("tokens nearly exhausted: %d/%d", b.UsedTokens, b.MaxTokens)}
+		}
+	}
+	if b := l.Budget.Budget(); b.MaxSteps > 0 && b.UsedSteps >= b.MaxSteps {
+		return SolveResult{}, &ErrBudgetExceeded{Reason: fmt.Sprintf("steps exhausted: %d/%d", b.UsedSteps, b.MaxSteps)}
+	}
+
 	// 1. Append user message
 	_, err := l.emit(EventUserMsg, stepID, UserMsgPayload{Content: userInput})
 	if err != nil {

@@ -100,6 +100,13 @@ func ComputeStats(events []Event) RunStats {
 	}
 
 	s.WallClockMS = lastTS - firstTS
+
+	// If no step.summary events were emitted (aborted/errored runs),
+	// infer step count from the number of model responses.
+	if s.TotalSteps == 0 && s.ModelCalls > 0 {
+		s.TotalSteps = 1 // at least one partial step occurred
+	}
+
 	sort.Slice(s.ModelLatencyMS, func(i, j int) bool { return s.ModelLatencyMS[i] < s.ModelLatencyMS[j] })
 	return s
 }

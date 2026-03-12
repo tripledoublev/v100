@@ -43,6 +43,21 @@ func formatTokens(tokens int) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
+// stopModelSpinner stops the model-call spinner and waits for it to finish.
+func (r *CLIRenderer) stopModelSpinner() {
+	r.mu.Lock()
+	if r.modelCallStop != nil {
+		close(r.modelCallStop)
+		r.modelCallStop = nil
+	}
+	done := r.modelCallDone
+	r.modelCallDone = nil
+	r.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+
 // RenderEvent prints a human-readable, colorized representation of an event.
 func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
@@ -68,6 +83,10 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 
 	case core.EventModelCall:
 		if r.inSubAgent > 0 {
+			break
+		}
+		// Skip spinner when stdout is not a TTY (pipe/file redirect)
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			break
 		}
 		r.mu.Lock()
@@ -102,17 +121,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}()
 
 	case core.EventModelResp:
-		r.mu.Lock()
-		if r.modelCallStop != nil {
-			close(r.modelCallStop)
-			r.modelCallStop = nil
-		}
-		done := r.modelCallDone
-		r.modelCallDone = nil
-		r.mu.Unlock()
-		if done != nil {
-			<-done
-		}
+		r.stopModelSpinner()
 		if r.inSubAgent > 0 {
 			break // suppress sub-agent model responses
 		}
@@ -174,6 +183,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		break
 
 	case core.EventToolResult:
+		r.stopModelSpinner()
 		if r.inSubAgent > 0 {
 			break // suppress sub-agent tool results
 		}

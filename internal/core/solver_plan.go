@@ -104,13 +104,20 @@ func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, p
 	var usage providers.Usage
 	t0 := time.Now()
 
+	// Pass tool specs to the planner so it knows which tools are available
+	// and can create plans with valid tool names and parameters.
+	var planToolSpecs []providers.ToolSpec
+	if l.Tools != nil {
+		planToolSpecs = l.Tools.Specs()
+	}
+
 	streamer, isStreamer := l.Provider.(providers.Streamer)
 	if isStreamer && l.Policy != nil && l.Policy.Streaming {
 		ch, err := streamer.StreamComplete(ctx, providers.CompleteRequest{
 			RunID:    l.Run.ID,
 			StepID:   stepID,
 			Messages: msgs,
-			Tools:    nil,
+			Tools:    planToolSpecs,
 		})
 		if err != nil {
 			return "", err
@@ -129,7 +136,7 @@ func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, p
 			RunID:    l.Run.ID,
 			StepID:   stepID,
 			Messages: msgs,
-			Tools:    nil, // No tools in planning phase
+			Tools:    planToolSpecs,
 		})
 		if err != nil {
 			return "", err

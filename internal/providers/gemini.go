@@ -335,7 +335,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 		return CompleteResponse{}, fmt.Errorf("read body: %w", err)
 	}
 
-	baseErr := fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+	baseErr := geminiFormatError(httpResp.StatusCode, raw)
 	if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
 		retryAfter := retryAfterFromHeader(httpResp.Header.Get("Retry-After"))
 		if retryAfter == 0 && httpResp.StatusCode == http.StatusTooManyRequests {
@@ -672,7 +672,7 @@ func (p *GeminiProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	if httpResp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(httpResp.Body)
 		_ = httpResp.Body.Close()
-		baseErr := fmt.Errorf("gemini: HTTP %d: %s", httpResp.StatusCode, raw)
+		baseErr := geminiFormatError(httpResp.StatusCode, raw)
 		if httpResp.StatusCode == http.StatusTooManyRequests || (httpResp.StatusCode >= 500 && httpResp.StatusCode < 600) {
 			retryAfter := retryAfterFromHeader(httpResp.Header.Get("Retry-After"))
 			if retryAfter == 0 && httpResp.StatusCode == http.StatusTooManyRequests {
@@ -756,6 +756,26 @@ func (p *GeminiProvider) Metadata(ctx context.Context, model string) (ModelMetad
 		ContextSize: 1048576, // 1M
 		IsFree:      true,    // subscription-backed
 	}, nil
+}
+
+// geminiFormatError extracts a human-readable message from a Gemini error response.
+// For 429 responses, the JSON often contains a "message" field with user-facing text.
+func geminiFormatError(statusCode int, raw []byte) error {
+	var errResp struct {
+		Message string `json:"message"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &errResp) == nil {
+		if errResp.Message != "" {
+			return fmt.Errorf("gemini: %s", errResp.Message)
+		}
+		if errResp.Error != nil && errResp.Error.Message != "" {
+			return fmt.Errorf("gemini: %s", errResp.Error.Message)
+		}
+	}
+	return fmt.Errorf("gemini: HTTP %d: %s", statusCode, raw)
 }
 
 // geminiParseRetryWait extracts wait time from a 429 error body like "after 49s".

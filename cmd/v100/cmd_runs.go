@@ -18,6 +18,9 @@ import (
 func runsCmd() *cobra.Command {
 	var limit int
 	var runDir string
+	var allFlag bool
+	var providerFilter string
+	var failedFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "runs",
@@ -62,11 +65,32 @@ func runsCmd() *cobra.Command {
 			for _, d := range dirs {
 				dir := filepath.Join(runDir, d.name)
 				meta, _ := core.ReadMeta(dir)
+
+				// Filter: skip sub-runs unless --all
+				if !allFlag && meta.ParentRunID != "" {
+					continue
+				}
+				// Filter: --provider
+				if providerFilter != "" && meta.Provider != providerFilter {
+					continue
+				}
+				// Filter: --failed (end_reason != completed or score == fail)
+				if failedFlag {
+					events, _ := core.ReadAll(filepath.Join(dir, "trace.jsonl"))
+					stats := core.ComputeStats(events)
+					if stats.EndReason == "completed" && meta.Score != "fail" {
+						continue
+					}
+				}
+
 				name := strings.TrimSpace(meta.Name)
 				provider := strings.TrimSpace(meta.Provider)
 				model := strings.TrimSpace(meta.Model)
 
 				label := d.name
+				if meta.ParentRunID != "" {
+					label = "  ↳ " + d.name
+				}
 				parts := []string{}
 				if provider != "" {
 					parts = append(parts, provider)
@@ -97,6 +121,9 @@ func runsCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "max runs to show")
 	cmd.Flags().StringVar(&runDir, "run-dir", "", "runs directory (default: ./runs)")
+	cmd.Flags().BoolVar(&allFlag, "all", false, "show sub-runs and all entries")
+	cmd.Flags().StringVar(&providerFilter, "provider", "", "filter by provider name")
+	cmd.Flags().BoolVar(&failedFlag, "failed", false, "show only failed/errored runs")
 	return cmd
 }
 

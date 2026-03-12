@@ -23,6 +23,7 @@ type RunMeta struct {
 	SourceFingerprint string                  `json:"source_fingerprint,omitempty"`
 	Sandbox           config.SandboxConfig    `json:"sandbox,omitempty"`
 	CreatedAt         time.Time               `json:"created_at"`
+	ParentRunID       string                  `json:"parent_run_id,omitempty"`
 	Score             string                  `json:"score,omitempty"` // pass|fail|partial
 	ScoreNotes        string                  `json:"score_notes,omitempty"`
 }
