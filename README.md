@@ -36,7 +36,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 ```bash
 git clone https://github.com/tripledoublev/v100
 cd v100
-go build -ldflags "-X main.version=v0.2.3" -o v100 ./cmd/v100/
+go build -ldflags "-X main.version=v0.2.4" -o v100 ./cmd/v100/
 ```
 
 Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, `mpv` or `ffplay` for `radio`.
@@ -277,9 +277,10 @@ After a sandboxed run, changes can be merged back to the host workspace:
 | Command | Description |
 |---------|-------------|
 | `v100 run` | Start interactive agent run |
-| `v100 resume <run_id>` | Continue a run from its trace |
+| `v100 resume <run_id>` | Continue a run from its trace (`--auto --unsafe` supported) |
 | `v100 restore <run_id> [checkpoint_id]` | Restore sandbox checkpoint |
 | `v100 replay <run_id>` | Pretty-print run transcript |
+| `v100 runs [-n N] [--provider X] [--failed] [--all]` | List recent runs with optional filtering |
 | `v100 tools` | List registered tools |
 | `v100 providers` | List configured providers |
 | `v100 config init` | Write default config to `~/.config/v100/config.toml` |

@@ -141,7 +141,7 @@ All providers implement `providers.Provider`. Retry logic lives in `providers.Re
 Tools implement `tools.Tool`. The registry enforces an enabled allowlist and a dangerous flag. Dangerous tools require confirmation unless `--unsafe` or `--sandbox` is set.
 
 ### Confirmation safety
-`--auto` disables confirmations but requires `--unsafe` (host) or `--sandbox` (isolated). `--yolo` is shorthand for `--auto --unsafe`. Running `--auto` without either returns a clean one-line error — no usage dump.
+`--auto` disables confirmations but requires `--unsafe` (host) or `--sandbox` (isolated). `--yolo` is shorthand for `--auto --unsafe`. Running `--auto` without either returns a clean one-line error — no usage dump. Both `run` and `resume` commands support `--auto`, `--unsafe`, and `--yolo`.
 
 ---
 

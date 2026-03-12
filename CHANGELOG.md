@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.2.4 — 2026-03-12
+
+**UX Research Round 2: Dogfooding Fixes**
+
+This release addresses 12 issues found during intensive dogfooding with Gemini and MiniMax providers across ~25 runs.
+
+### Bug Fixes
+
+- **Spinner no longer pollutes non-TTY output** — Spinner frames (`\r\033[K`) are skipped entirely when stdout is redirected to a file or pipe, fixing garbled log captures.
+- **Spinner no longer interleaves with tool output** — The model-call spinner is now stopped before rendering tool results, eliminating visual artifacts in live terminal output.
+- **`resume --auto` works** — Added missing `--unsafe` and `--yolo` flags to the `resume` command, making `resume --auto --unsafe` and `resume --yolo` functional.
+- **`resume` no longer dumps usage on safety errors** — Added `SilenceUsage: true` to the resume command for clean error messages.
+- **MiniMax context overflow** — Error code 2013 with "context window exceeds limit" now shows a clear message instead of the misleading "message ordering bug" label.
+- **Gemini 429 shows human-readable message** — Rate-limit errors now extract the `message` field from the JSON response (e.g., "You have exhausted your capacity on this model") instead of dumping raw JSON.
+- **Stats no longer show zeros for aborted runs** — `ComputeStats` now infers `TotalSteps=1` when no `step.summary` events were emitted but model calls occurred (e.g., budget-exceeded or error-aborted runs).
+
+### UX Improvements
+
+- **Doctor warns instead of failing on unused providers** — Only the default provider causes a failure; other configured-but-unauthenticated providers show warnings (`⚠`) instead of failures (`✗`).
+- **`runs` list hides sub-runs by default** — Plan-execute sub-runs are filtered out unless `--all` is passed. Sub-runs display with `↳` prefix when shown.
+- **`runs` list filtering** — New flags: `--provider <name>`, `--failed` (show only failed/errored runs), `--all` (include sub-runs).
+
+### Architecture
+
+- **Schema-aware plan_execute planner** — The planning phase now receives tool specifications so the planner knows which tools exist and their parameter schemas, reducing hallucinated tool names.
+- **Pre-step budget check** — ReactSolver now checks remaining token budget before entering a step. If remaining tokens are below 5% of total budget, the run exits early with a clear error instead of failing mid-step.
+- **`ParentRunID` in run metadata** — `RunMeta` now tracks parent-child relationships between runs for sub-run hierarchy.
+
 ## v0.2.3 — 2026-03-10
 
 **Phase 300: Autonomous Optimization Foundation**
