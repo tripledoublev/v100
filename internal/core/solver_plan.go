@@ -97,7 +97,7 @@ func (s *PlanExecuteSolver) replan(ctx context.Context, l *Loop, stepID string, 
 }
 
 func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, prompt string) (string, error) {
-	msgs := append([]providers.Message{}, l.buildMessages(true)...)
+	msgs := append([]providers.Message{}, l.buildMessagesForStep(stepID)...)
 	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})
 
 	var assistantText strings.Builder

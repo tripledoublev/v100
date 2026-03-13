@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,18 @@ func (c *capturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (
 
 func (c *capturingProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
 	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
+
+type noopTool struct{}
+
+func (t noopTool) Name() string                     { return "noop" }
+func (t noopTool) Description() string              { return "no-op tool for tests" }
+func (t noopTool) InputSchema() json.RawMessage     { return json.RawMessage(`{"type":"object"}`) }
+func (t noopTool) OutputSchema() json.RawMessage    { return json.RawMessage(`{"type":"object"}`) }
+func (t noopTool) DangerLevel() tools.DangerLevel   { return tools.Safe }
+func (t noopTool) Effects() tools.ToolEffects       { return tools.ToolEffects{} }
+func (t noopTool) Exec(_ context.Context, _ tools.ToolCallContext, _ json.RawMessage) (tools.ToolResult, error) {
+	return tools.ToolResult{OK: true, Output: "ok"}, nil
 }
 
 // newCompressLoop builds a Loop wired for compression tests.
@@ -648,6 +661,77 @@ func TestMemorySkippedInAutoModeWhenTurnLooksUnrelated(t *testing.T) {
 	for _, m := range msgs {
 		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
 			t.Fatalf("unexpected memory injection for unrelated turn: %q", m.Content)
+		}
+	}
+}
+
+func TestMemoryAutoModeOnlyInjectsOnFirstModelCallOfStep(t *testing.T) {
+	dir := t.TempDir()
+	memPath := filepath.Join(dir, "MEMORY.md")
+	memContent := "- prior decision to use a noop tool"
+	if err := os.WriteFile(memPath, []byte(memContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{
+				AssistantText: "I'll check that.",
+				ToolCalls: []providers.ToolCall{{
+					ID:   "call-noop",
+					Name: "noop",
+					Args: json.RawMessage(`{}`),
+				}},
+			},
+			{AssistantText: "done"},
+		},
+	}
+
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	reg := tools.NewRegistry(nil)
+	reg.RegisterAndEnable(noopTool{})
+
+	pol := policy.Default()
+	pol.MemoryPath = memPath
+	pol.MemoryMode = "auto"
+
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     reg,
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 100_000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+	}
+
+	if err := loop.Step(context.Background(), "what do you remember before continuing?"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(prov.requests) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(prov.requests))
+	}
+
+	firstCount := 0
+	for _, m := range prov.requests[0].Messages {
+		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+			firstCount++
+		}
+	}
+	if firstCount != 1 {
+		t.Fatalf("expected first provider call to include memory once, got %d matches", firstCount)
+	}
+
+	for _, m := range prov.requests[1].Messages {
+		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+			t.Fatalf("expected second provider call in same step to omit memory, got %q", m.Content)
 		}
 	}
 }

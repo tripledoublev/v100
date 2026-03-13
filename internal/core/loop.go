@@ -53,6 +53,11 @@ type Loop struct {
 
 	lastToolOK     bool
 	lastToolOutput string
+
+	memoryStepID       string
+	memoryStepMessage  string
+	memoryStepEligible bool
+	memoryStepConsumed bool
 }
 
 func (l *Loop) runHooks(stepID string) HookResult {
@@ -455,6 +460,18 @@ func (l *Loop) reflectOnTool(ctx context.Context, stepID string, tc providers.To
 }
 
 func (l *Loop) buildMessages(includeMemory bool) []providers.Message {
+	return l.buildMessagesWithStepMemory("", includeMemory, false)
+}
+
+func (l *Loop) buildMessagesForStep(stepID string) []providers.Message {
+	return l.buildMessagesWithStepMemory(stepID, true, true)
+}
+
+func (l *Loop) previewMessagesForStep(stepID string) []providers.Message {
+	return l.buildMessagesWithStepMemory(stepID, true, false)
+}
+
+func (l *Loop) buildMessagesWithStepMemory(stepID string, includeMemory bool, consumeMemory bool) []providers.Message {
 	msgs := make([]providers.Message, 0, len(l.Messages)+2)
 
 	// 1. Static system prompt
@@ -467,7 +484,7 @@ func (l *Loop) buildMessages(includeMemory bool) []providers.Message {
 
 	// 2. Dynamic persistent memory — re-read when needed so in-run writes are visible.
 	if includeMemory {
-		if memMsg, ok := l.memoryReferenceMessage(); ok {
+		if memMsg, ok := l.memoryReferenceMessageForStep(stepID, consumeMemory); ok {
 			msgs = append(msgs, providers.Message{
 				Role:    "assistant",
 				Content: memMsg,
@@ -497,6 +514,34 @@ func (l *Loop) memoryReferenceMessage() (string, bool) {
 		fmt.Printf("loop: warning: could not read memory file %s: %v\n", l.Policy.MemoryPath, err)
 	}
 	return "", false
+}
+
+func (l *Loop) memoryReferenceMessageForStep(stepID string, consume bool) (string, bool) {
+	if stepID == "" {
+		return l.memoryReferenceMessage()
+	}
+	l.prepareMemoryForStep(stepID)
+	if !l.memoryStepEligible {
+		return "", false
+	}
+	if consume && l.memoryStepConsumed {
+		return "", false
+	}
+	if consume {
+		l.memoryStepConsumed = true
+	}
+	return l.memoryStepMessage, true
+}
+
+func (l *Loop) prepareMemoryForStep(stepID string) {
+	if l.memoryStepID == stepID {
+		return
+	}
+	msg, ok := l.memoryReferenceMessage()
+	l.memoryStepID = stepID
+	l.memoryStepMessage = msg
+	l.memoryStepEligible = ok
+	l.memoryStepConsumed = false
 }
 
 func (l *Loop) shouldIncludeMemory() bool {
@@ -617,7 +662,7 @@ func estimateTokens(msgs []providers.Message) int {
 //   - Pass 1 (targeted): compress the N largest non-recent messages individually
 //   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
 func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
-	tokensBefore := estimateTokens(l.buildMessages(true))
+	tokensBefore := estimateTokens(l.previewMessagesForStep(stepID))
 	threshold := l.Policy.ContextLimit * 3 / 4
 	if tokensBefore < threshold {
 		return nil
@@ -693,13 +738,13 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		compressed++
 
 		// Check if we're below threshold now
-		if estimateTokens(l.buildMessages(true)) < threshold {
+		if estimateTokens(l.previewMessagesForStep(stepID)) < threshold {
 			break
 		}
 	}
 
 	if compressed > 0 || failedCount > 0 {
-		tokensAfter := estimateTokens(l.buildMessages(true))
+		tokensAfter := estimateTokens(l.previewMessagesForStep(stepID))
 		_, _ = l.emit(EventCompress, stepID, CompressPayload{
 			MessagesBefore:     msgsBefore,
 			MessagesAfter:      len(l.Messages),
@@ -749,7 +794,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	}
 	l.Messages = append([]providers.Message{summary}, l.Messages[cutoff:]...)
 
-	tokensAfter := estimateTokens(l.buildMessages(true))
+	tokensAfter := estimateTokens(l.previewMessagesForStep(stepID))
 	_, _ = l.emit(EventCompress, stepID, CompressPayload{
 		MessagesBefore: msgsBefore,
 		MessagesAfter:  len(l.Messages),
