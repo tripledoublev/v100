@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		nameFlag         string
 		tagFlags         []string
 		solverFlag       string
+		promptFileFlag   string
 		authFlag         string
 		baseURLFlag      string
 		temperatureFlag  float64
@@ -140,6 +142,11 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if maxReplansFlag > 0 {
 				cfg.Defaults.MaxReplans = maxReplansFlag
+			}
+
+			initialPrompt, err := resolveInitialPrompt(args, promptFileFlag)
+			if err != nil {
+				return err
 			}
 
 			// Build run directory
@@ -265,9 +272,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, strings.Join(args, " "), session, mapper)
+				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, initialPrompt, session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, genParams, solver, strings.Join(args, " "), session, mapper)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, genParams, solver, initialPrompt, session, mapper)
 		},
 	}
 
@@ -296,6 +303,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
+	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "", "read the initial prompt from a file ('-' for stdin)")
 	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth (user:pass); bare --auth loads from .env")
 	cmd.Flags().Lookup("auth").NoOptDefVal = "env"
 	cmd.Flags().StringVar(&baseURLFlag, "base-url", "", "override the provider's base API URL")
@@ -307,6 +315,27 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&seedFlag, "seed", 0, "random seed for reproducibility (0=none)")
 
 	return cmd
+}
+
+func resolveInitialPrompt(args []string, promptFile string) (string, error) {
+	if promptFile != "" && len(args) > 0 {
+		return "", errors.New("initial prompt is ambiguous: use either trailing prompt args or --prompt-file")
+	}
+	if promptFile == "" {
+		return strings.Join(args, " "), nil
+	}
+	if promptFile == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read prompt from stdin: %w", err)
+		}
+		return string(data), nil
+	}
+	data, err := os.ReadFile(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %q: %w", promptFile, err)
+	}
+	return string(data), nil
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
