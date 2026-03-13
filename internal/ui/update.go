@@ -22,6 +22,8 @@ func (m *TUIModel) Init() tea.Cmd {
 		textinput.Blink,
 		tea.WindowSize(),
 		func() tea.Msg { return tea.ClearScreen() },
+		// Read device status immediately on startup
+		func() tea.Msg { return deviceTickMsg{} },
 		radioTickCmd(),
 		deviceTickCmd(),
 		tea.EnableMouseCellMotion,
