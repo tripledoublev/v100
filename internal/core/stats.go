@@ -11,25 +11,27 @@ import (
 
 // RunStats holds computed statistics from a trace.
 type RunStats struct {
-	RunID          string
-	Provider       string
-	Model          string
-	ModelMetadata  providers.ModelMetadata
-	TotalSteps     int
-	TokensIn       int
-	TokensOut      int
-	TotalCostUSD   float64
-	WallClockMS    int64
-	ModelCalls     int
-	ModelLatencyMS []int64
-	ToolCalls      int
-	ToolUsage      map[string]int
-	ToolFailures   int
-	ToolRetries    int
-	Compressions   int
-	WatchdogFires  int
-	EndReason      string
-	Score          string
+	RunID              string
+	Provider           string
+	Model              string
+	ModelMetadata      providers.ModelMetadata
+	TotalSteps         int
+	TokensIn           int
+	TokensOut          int
+	TotalCostUSD       float64
+	WallClockMS        int64
+	ModelCalls         int
+	ModelLatencyMS     []int64
+	ToolCalls          int
+	ToolUsage          map[string]int
+	ToolFailures       int
+	ToolRetries        int
+	Compressions       int
+	CompressCostUSD    float64
+	TokensSavedByCompress int
+	WatchdogFires      int
+	EndReason          string
+	Score              string
 }
 
 // ComputeStats derives RunStats from a slice of trace events.
@@ -98,7 +100,11 @@ func ComputeStats(events []Event) RunStats {
 			pendingRetryStep = ""
 
 		case EventCompress:
+			var p CompressPayload
+			_ = json.Unmarshal(ev.Payload, &p)
 			s.Compressions++
+			s.CompressCostUSD += p.CostUSD
+			s.TokensSavedByCompress += p.TokensSaved
 
 		case EventHookIntervention:
 			var p HookInterventionPayload
@@ -169,7 +175,11 @@ func FormatStats(s RunStats) string {
 	if s.ToolRetries > 0 {
 		_, _ = fmt.Fprintf(&b, "Tool retries: %d\n", s.ToolRetries)
 	}
-	_, _ = fmt.Fprintf(&b, "Compressions: %d\n", s.Compressions)
+	if s.Compressions > 0 {
+		_, _ = fmt.Fprintf(&b, "Compressions: %d  saved: %d tok  cost: $%.4f\n", s.Compressions, s.TokensSavedByCompress, s.CompressCostUSD)
+	} else {
+		_, _ = fmt.Fprintf(&b, "Compressions: %d\n", s.Compressions)
+	}
 	_, _ = fmt.Fprintf(&b, "End reason:   %s\n", s.EndReason)
 	if s.Score != "" {
 		_, _ = fmt.Fprintf(&b, "Score:        %s\n", s.Score)

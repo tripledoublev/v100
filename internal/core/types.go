@@ -157,6 +157,9 @@ type CompressPayload struct {
 	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
 	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
 	MessagesFailed     int     `json:"messages_failed,omitempty"`     // compression failures
+	TokensSaved        int     `json:"tokens_saved,omitempty"`        // derived: before - after
+	DurationMS         int64   `json:"duration_ms,omitempty"`         // wall time of compress calls
+	ProviderModel      string  `json:"provider_model,omitempty"`      // model used for compression
 }
 
 // StepSummaryPayload is the Payload for EventStepSummary.

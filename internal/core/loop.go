@@ -669,6 +669,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	}
 
 	msgsBefore := len(l.Messages)
+	startTime := time.Now()
 
 	// ── Pass 1: Targeted per-message compression ──────────────────────────
 	protectRecent := 6
@@ -754,6 +755,9 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			Strategy:           "targeted",
 			MessagesCompressed: compressed,
 			MessagesFailed:     failedCount,
+			TokensSaved:        tokensBefore - tokensAfter,
+			DurationMS:         time.Since(startTime).Milliseconds(),
+			ProviderModel:      cp.Name(),
 		})
 
 		if tokensAfter < threshold {
@@ -796,12 +800,16 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 
 	tokensAfter := estimateTokens(l.previewMessagesForStep(stepID))
 	_, _ = l.emit(EventCompress, stepID, CompressPayload{
-		MessagesBefore: msgsBefore,
-		MessagesAfter:  len(l.Messages),
-		TokensBefore:   tokensBefore,
-		TokensAfter:    tokensAfter,
-		CostUSD:        resp.Usage.CostUSD,
-		Strategy:       "bulk",
+		MessagesBefore:     msgsBefore,
+		MessagesAfter:      len(l.Messages),
+		TokensBefore:       tokensBefore,
+		TokensAfter:        tokensAfter,
+		CostUSD:            resp.Usage.CostUSD,
+		Strategy:           "bulk",
+		MessagesCompressed: cutoff,
+		TokensSaved:        tokensBefore - tokensAfter,
+		DurationMS:         time.Since(startTime).Milliseconds(),
+		ProviderModel:      cp.Name(),
 	})
 	return nil
 }

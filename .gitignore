@@ -2,6 +2,7 @@ runs/
 *.env
 .env
 /v100
+/v100_binary
 .gocache/
 *.local
 *.pdf

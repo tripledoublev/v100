@@ -415,11 +415,14 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		if policyName == "" {
 			policyName = "default"
 		}
-		compressInfo := ui.Dim("solver: ") + solverName + "  " + ui.Dim("policy: ") + policyName
+		compressInfo := ui.Dim("harness: ") + solverName + "  " + ui.Dim("policy: ") + policyName
 		if cp := cfg.Defaults.CompressProvider; cp != "" {
 			compressInfo += "  " + ui.Dim("compress: ") + cp
 		}
 		fmt.Println(ui.Info(compressInfo))
+		if verbose {
+			fmt.Println(ui.Info(ui.Dim("entrypoint: cmd/v100  runtime: internal/core (" + solverName + " loop)")))
+		}
 	}
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
