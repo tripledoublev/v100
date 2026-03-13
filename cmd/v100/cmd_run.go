@@ -452,6 +452,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
 	reason := "user_exit"
+	var providerErr bool
 
 	if initialPrompt != "" {
 		if err := runCLIInput(ctx, loop, initialPrompt, planMode); err != nil {
@@ -462,7 +463,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				_ = loop.EmitRunEnd(reason, "")
 				return nil
 			}
-			fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+			var retryErr *providers.RetryableError
+			if errors.As(err, &retryErr) {
+				providerErr = true
+				fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+			} else {
+				fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+			}
 		}
 		if exitAfterPrompt {
 			reason = "prompt_exit"
@@ -491,13 +498,21 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
 				break
 			}
-			fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
+			var retryErr *providers.RetryableError
+			if errors.As(err, &retryErr) {
+				providerErr = true
+				fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+			} else {
+				fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
+			}
 		}
 	}
 
 done:
-	// Generate summary if possible using the run's own provider
-	finalSummary := generateRunSummary(context.Background(), prov, model, loop.Messages)
+	var finalSummary string
+	if !providerErr {
+		finalSummary = generateRunSummary(context.Background(), prov, model, loop.Messages)
+	}
 
 	_ = loop.EmitRunEnd(reason, finalSummary)
 
@@ -552,6 +567,16 @@ func isApprovedPlanAnswer(answer string) bool {
 	default:
 		return false
 	}
+}
+
+// formatRetryError formats a RetryableError with reset time for user clarity.
+func formatRetryError(retryErr *providers.RetryableError) string {
+	msg := retryErr.Err.Error()
+	if retryErr.RetryAfter > 0 {
+		resetTime := retryErr.RetryAfter.Round(time.Second)
+		msg += fmt.Sprintf(" — quota reset after %s", resetTime.String())
+	}
+	return msg
 }
 
 // generateRunSummary generates a one-sentence summary of a completed run.
