@@ -57,9 +57,19 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
-				_ = loop.EmitRunEnd("budget_exceeded", "")
+				reason = "budget_exceeded"
+				_ = loop.EmitRunEnd(reason, "")
 				tui.Quit()
+				return
 			}
+			var retryErr *providers.RetryableError
+			if errors.As(err, &retryErr) {
+				reason = "error"
+				_ = loop.EmitRunEnd(reason, "")
+				tui.Quit()
+				return
+			}
+			// For non-fatal errors, continue (user can retry or exit)
 		}
 	}
 
@@ -149,8 +159,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			if errors.As(err, &budgetErr) {
 				reason = "budget_exceeded"
 			} else {
-				reason = "error"
+				var retryErr *providers.RetryableError
+				if errors.As(err, &retryErr) {
+					reason = "error"
+				} else {
+					reason = "error"
+				}
 			}
+			_ = loop.EmitRunEnd(reason, "")
 			tui.Quit()
 		}
 	} else {
@@ -173,23 +189,20 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
 
-	// Generate summary if possible
+	// Generate summary if possible using the run's own provider
 	finalSummary := ""
-	if len(loop.Messages) > 1 {
+	if len(loop.Messages) > 1 && reason != "error" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		sumProv, _ := buildProvider(cfg, "gemini")
-		if sumProv != nil {
-			sumReq := providers.CompleteRequest{
-				Model: "gemini-2.5-flash",
-				Messages: append(loop.Messages, providers.Message{
-					Role:    "user",
-					Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
-				}),
-			}
-			if resp, err := sumProv.Complete(ctx, sumReq); err == nil {
-				finalSummary = strings.TrimSpace(resp.AssistantText)
-			}
+		sumReq := providers.CompleteRequest{
+			Model:    model,
+			Messages: append(loop.Messages, providers.Message{
+				Role:    "user",
+				Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
+			}),
+		}
+		if resp, err := prov.Complete(ctx, sumReq); err == nil {
+			finalSummary = strings.TrimSpace(resp.AssistantText)
 		}
 	}
 
