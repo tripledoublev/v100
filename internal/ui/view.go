@@ -31,48 +31,22 @@ func (m *TUIModel) View() string {
 		return m.radioSelectView()
 	}
 
-	// Header bar with responsive width to avoid terminal soft-wrap.
-	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+A:copy all  Ctrl+C:quit"
-	if m.width < 130 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+A:copy all  Ctrl+C:quit"
-	}
-	if m.width < 100 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+A:copy  Ctrl+C:quit"
-	}
-	leftText := "v100" + headerHint
-	clockText := time.Now().Format("15:04:05")
-	minGap := 2
-	if m.width > len(clockText)+minGap {
-		maxLeft := m.width - len(clockText) - minGap
-		if maxLeft < 4 {
-			maxLeft = 4
-		}
-		if lipgloss.Width(leftText) > maxLeft {
-			leftText = truncateHeaderText(leftText, maxLeft)
-		}
-	}
-	header := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).Render(
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			tuiHeaderStyle.Render(leftText),
-			tuiHeaderDimStyle.Render(strings.Repeat(" ", max(0, m.width-lipgloss.Width(leftText)-len(clockText)))),
-			tuiHeaderDimStyle.Render(clockText),
-		),
-	)
-
 	// Input box
 	inputSt := tuiInputStyle
 	if m.focus == focusInput {
 		inputSt = tuiInputActiveStyle
 	}
 	inputBox := inputSt.Width(m.width - 2).Render(m.input.View())
-
 	inputHeight := lipgloss.Height(inputBox)
+	layoutPlan := computeViewLayout(m.width, m.height, inputHeight, 1, m.leftPanePct, m.tracePanePct, m.showTrace, time.Now())
+	header := renderHeader(m.width, layoutPlan.header)
 	headerHeight := lipgloss.Height(header)
-	// JoinVertical uses '\n' as a line terminator between elements, not an extra row.
-	remaining := m.height - headerHeight - inputHeight
-	layout := computePaneLayout(m.width, remaining, m.leftPanePct, m.tracePanePct)
-	remaining = layout.remainingHeight
+	if headerHeight != 1 {
+		layoutPlan = computeViewLayout(m.width, m.height, inputHeight, headerHeight, m.leftPanePct, m.tracePanePct, m.showTrace, time.Now())
+		header = renderHeader(m.width, layoutPlan.header)
+	}
+	layout := layoutPlan.panes
+	remaining := layoutPlan.remainingHeight
 
 	if m.showTrace {
 		leftSt := tuiPaneStyle
@@ -153,7 +127,7 @@ func (m *TUIModel) View() string {
 	if m.focus == focusTranscript {
 		tSt = tuiActivePaneStyle
 	}
-	m.transcript.Width = max(1, m.width-4)
+	m.transcript.Width = max(1, layoutPlan.inputWidth-2)
 	m.transcript.Height = max(1, remaining-2)
 	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
