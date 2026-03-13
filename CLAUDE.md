@@ -5,7 +5,7 @@
 v100 is a terminal-native AI agent harness written in Go. It orchestrates LLM providers (Gemini, MiniMax, Anthropic, Codex, OpenAI, Ollama) with a pluggable tool system, multi-solver architecture (ReAct, plan_execute, router), budget tracking, and trace-based observability.
 
 **Module:** `github.com/tripledoublev/v100`
-**Binary:** `./v100_binary` (gitignored; rebuild with `go build -o v100_binary ./cmd/v100/`)
+**Binary:** `./v100` (rebuild with `go build -o ./v100 ./cmd/v100/`)
 **Config:** `~/.config/v100/config.toml` (bootstrap with `v100 config init`)
 **Auth tokens:** `~/.config/v100/auth.json` (PKCE/device OAuth per provider)
 
@@ -14,7 +14,7 @@ v100 is a terminal-native AI agent harness written in Go. It orchestrates LLM pr
 ## Build
 
 ```bash
-go build -o v100_binary ./cmd/v100/
+go build -o ./v100 ./cmd/v100/
 ```
 
 Build the whole module (no binary):
@@ -149,23 +149,23 @@ Tools implement `tools.Tool`. The registry enforces an enabled allowlist and a d
 
 ```bash
 # Run with a piped prompt (exits automatically when stdin is not a TTY)
-echo "list files in the workspace" | ./v100_binary run --provider minimax --auto --unsafe
+echo "list files in the workspace" | ./v100 run --provider minimax --auto --unsafe
 
 # Interactive session
-./v100_binary run --provider gemini
+./v100 run --provider gemini
 
 # Post-run analysis (accepts run ID or full path)
-./v100_binary stats <run_id>
-./v100_binary stats runs/<run_id>/trace.jsonl   # both forms work
-./v100_binary replay <run_id>
-./v100_binary digest <run_id>
-./v100_binary metrics <run_id>
+./v100 stats <run_id>
+./v100 stats runs/<run_id>/trace.jsonl   # both forms work
+./v100 replay <run_id>
+./v100 digest <run_id>
+./v100 metrics <run_id>
 
 # Verbose output (shows all tool names at startup, full tool args)
-./v100_binary run --provider minimax --verbose
+./v100 run --provider minimax --verbose
 
 # Health check
-./v100_binary doctor
+./v100 doctor
 ```
 
 ---
