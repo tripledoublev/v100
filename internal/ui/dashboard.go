@@ -70,8 +70,19 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	} else if recentToolCalls >= 3 || recentModelCalls >= 2 {
 		tempo = "warm"
 	}
+	health := "stable"
+	switch {
+	case tokenPct >= 0.9:
+		health = "critical"
+	case recentCompresses > 0 || tokenPct >= 0.75:
+		health = "compression-pressure"
+	case tokenPct >= 0.5 || recentToolCalls >= 4:
+		health = "warming"
+	}
 	velocityLine := fmt.Sprintf("velocity: %s  model:%d/30s  tools:%d/30s  compress:%d/30s",
 		tempo, recentModelCalls, recentToolCalls, recentCompresses)
+	pressureLine := fmt.Sprintf("health: %s  token:%s  io:%s",
+		health, percentLabel(tokenPct), percentLabel(ioRatio))
 	lastStepLine := fmt.Sprintf("last step: %s  tools:%d", FormatDuration(lastStepMS), lastStepTools)
 
 	dashboard := lipgloss.JoinVertical(lipgloss.Left,
@@ -81,6 +92,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		ioBar,
 		costBar,
 		styleMuted.Render(velocityLine),
+		styleMuted.Render(pressureLine),
 		styleMuted.Render(lastStepLine),
 		fmt.Sprintf("%s %s", styleMuted.Render("HEARTBEAT:"), heartbeat),
 	)
@@ -114,4 +126,14 @@ func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) s
 		styleMuted.Render(strings.Repeat("░", empty)),
 		styleMuted.Render("]"),
 	)
+}
+
+func percentLabel(v float64) string {
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	return fmt.Sprintf("%d%%", int(v*100+0.5))
 }

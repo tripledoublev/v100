@@ -13,6 +13,7 @@ func TestLiveMetricDashboardIncludesVelocitySignals(t *testing.T) {
 		"model:4/30s",
 		"tools:7/30s",
 		"compress:1/30s",
+		"health:",
 		"last step:",
 	} {
 		if !strings.Contains(out, want) {
