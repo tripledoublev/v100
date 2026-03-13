@@ -307,6 +307,19 @@ func (m *TUIModel) wrapPlainForTranscript(text string) string {
 	return wrap.String(text, w)
 }
 
+func (m *TUIModel) wrapTranscriptBlock(text, indent string) string {
+	w := m.transcriptWrapWidth() - lipgloss.Width(indent)
+	if w < 20 {
+		w = 20
+	}
+	wrapped := wrap.String(text, w)
+	lines := strings.Split(wrapped, "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *TUIModel) transcriptWrapWidth() int {
 	if m.width <= 0 {
 		return 80

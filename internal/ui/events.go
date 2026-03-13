@@ -89,8 +89,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
 		}
 		out := SmartSummary(p.Name, p.Output, m.verbose)
-		out = m.wrapPlainForTranscript(out)
-		_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s  %s  %s\n", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)), out)
+		head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)))
+		body := m.wrapTranscriptBlock(out, "             ")
+		_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n%s\n", head, body)
 
 	case core.EventRunEnd:
 		var p core.RunEndPayload

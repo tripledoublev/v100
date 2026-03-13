@@ -1,11 +1,15 @@
 package ui
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/tripledoublev/v100/internal/core"
 )
 
 func updateKey(m *TUIModel, msg tea.KeyMsg) *TUIModel {
@@ -48,6 +52,50 @@ func TestViewKeepsClockVisibleInHeader(t *testing.T) {
 	}
 	if !matched {
 		t.Fatalf("expected visible clock in header line, got %q", first)
+	}
+}
+
+func TestToolResultRendersAsIndentedBlock(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 80
+	m.height = 24
+
+	payload, err := json.Marshal(core.ToolResultPayload{
+		Name:       "sh",
+		OK:         true,
+		DurationMS: 123,
+		Output:     "first useful line with a lot of detail that should wrap cleanly in the transcript pane rather than making one awkward overstuffed row",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.appendEvent(core.Event{
+		TS:      time.Now(),
+		Type:    core.EventToolResult,
+		Payload: payload,
+	})
+
+	out := stripANSI(m.transcriptBuf.String())
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected multi-line tool result block, got %q", out)
+	}
+	idx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "sh") && strings.Contains(line, "[123ms]") {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("expected tool metadata line in transcript, got %q", out)
+	}
+	if idx+1 >= len(lines) {
+		t.Fatalf("expected wrapped tool summary after metadata line, got %q", out)
+	}
+	if !strings.HasPrefix(lines[idx+1], "             ") {
+		t.Fatalf("expected indented wrapped tool summary, got %q", lines[idx+1])
 	}
 }
 
