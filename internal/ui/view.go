@@ -39,7 +39,26 @@ func (m *TUIModel) View() string {
 	if m.width < 100 {
 		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+A:copy  Ctrl+C:quit"
 	}
-	header := tuiHeaderStyle.Render("v100") + tuiHeaderDimStyle.Render(headerHint)
+	leftText := "v100" + headerHint
+	clockText := time.Now().Format("15:04:05")
+	minGap := 2
+	if m.width > len(clockText)+minGap {
+		maxLeft := m.width - len(clockText) - minGap
+		if maxLeft < 4 {
+			maxLeft = 4
+		}
+		if lipgloss.Width(leftText) > maxLeft {
+			leftText = truncateHeaderText(leftText, maxLeft)
+		}
+	}
+	header := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).Render(
+		lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			tuiHeaderStyle.Render(leftText),
+			tuiHeaderDimStyle.Render(strings.Repeat(" ", max(0, m.width-lipgloss.Width(leftText)-len(clockText)))),
+			tuiHeaderDimStyle.Render(clockText),
+		),
+	)
 
 	// Input box
 	inputSt := tuiInputStyle
@@ -159,6 +178,34 @@ func (m *TUIModel) View() string {
 	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
+}
+
+func truncateHeaderText(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	if maxWidth <= 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 {
+		candidate := string(runes) + "…"
+		if lipgloss.Width(candidate) <= maxWidth {
+			return candidate
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return "…"
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *TUIModel) statusView(width, height int) string {

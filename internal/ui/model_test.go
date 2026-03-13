@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -24,6 +25,29 @@ func TestViewRendersHeaderInBoundedHeight(t *testing.T) {
 	first := stripANSI(lines[0])
 	if !strings.Contains(first, "v100") {
 		t.Fatalf("expected header on first line, got first line: %q", first)
+	}
+}
+
+func TestViewKeepsClockVisibleInHeader(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 100
+	m.height = 30
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty view")
+	}
+	first := stripANSI(lines[0])
+	if !strings.Contains(first, "v100") {
+		t.Fatalf("expected header on first line, got %q", first)
+	}
+	matched, err := regexp.MatchString(`\b\d{2}:\d{2}:\d{2}\b`, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatalf("expected visible clock in header line, got %q", first)
 	}
 }
 
