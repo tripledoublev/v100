@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,6 +54,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendConfirm = nil
 
 	case radioTickMsg:
+		m.refreshDeviceStatus(time.Now())
 		if cmd := m.onRadioTick(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

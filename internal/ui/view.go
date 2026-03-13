@@ -223,6 +223,7 @@ func (m *TUIModel) statusView(width, height int) string {
 		styleMuted.Render(fmt.Sprintf("sub-agents: active=%d done=%d failed=%d",
 			len(m.activeAgents), m.agentDoneCount, m.agentFailCount)),
 		styleMuted.Render(m.subAgentStatusLine()),
+		styleMuted.Render(m.deviceStatusLine()),
 		"",
 		styleMuted.Render("radio") + " " + m.radioStateLine(),
 		styleMuted.Render(wrap.String("feed: "+m.radioURL, w)),

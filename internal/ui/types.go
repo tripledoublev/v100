@@ -45,6 +45,13 @@ type agentFrame struct {
 	Started  time.Time
 }
 
+type deviceStatus struct {
+	CheckedAt      time.Time
+	BatteryPresent bool
+	Percent        int
+	State          string
+}
+
 // TUIModel is the Bubble Tea application model for the agent harness.
 type TUIModel struct {
 	width, height int
@@ -102,6 +109,7 @@ type TUIModel struct {
 	agentDoneCount int
 	agentFailCount int
 	lastAgentNote  string
+	device         deviceStatus
 
 	// callbacks
 	SubmitFn func(string)
