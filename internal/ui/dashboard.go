@@ -8,7 +8,7 @@ import (
 )
 
 // LiveMetricDashboard renders the "Gaming Minimap" style visual inspector.
-func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, width int) string {
+func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, lastStepMS int64, lastStepTools, recentModelCalls, recentToolCalls, recentCompresses, width int) string {
 	if width < 20 {
 		return ""
 	}
@@ -64,12 +64,24 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	heartbeat := "──" + strings.Repeat("·", pulse) + "Λ" + strings.Repeat("·", (7-pulse)) + "──"
 	heartbeat = styleMuted.Render("[") + styleInfo.Render(heartbeat) + styleMuted.Render("]")
 
+	tempo := "cool"
+	if recentToolCalls >= 6 || recentModelCalls >= 4 {
+		tempo = "hot"
+	} else if recentToolCalls >= 3 || recentModelCalls >= 2 {
+		tempo = "warm"
+	}
+	velocityLine := fmt.Sprintf("velocity: %s  model:%d/30s  tools:%d/30s  compress:%d/30s",
+		tempo, recentModelCalls, recentToolCalls, recentCompresses)
+	lastStepLine := fmt.Sprintf("last step: %s  tools:%d", FormatDuration(lastStepMS), lastStepTools)
+
 	dashboard := lipgloss.JoinVertical(lipgloss.Left,
 		tuiStatusLabelStyle.Render("visual inspector"),
 		stepBar,
 		tokenBar,
 		ioBar,
 		costBar,
+		styleMuted.Render(velocityLine),
+		styleMuted.Render(lastStepLine),
 		fmt.Sprintf("%s %s", styleMuted.Render("HEARTBEAT:"), heartbeat),
 	)
 

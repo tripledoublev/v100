@@ -55,6 +55,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		m.noteModelEvent(ev.TS)
 		if sub {
 			break // suppress sub-agent model responses from transcript
 		}
@@ -74,6 +75,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		}
 
 	case core.EventToolCall:
+		m.noteToolEvent(ev.TS)
 		if sub {
 			break // suppress sub-agent tool calls from transcript
 		}
@@ -178,6 +180,8 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		m.outputTokens = p.OutputTokens
 		m.usedTokens = p.InputTokens + p.OutputTokens
 		m.usedCost = p.CostUSD
+		m.lastStepMS = p.DurationMS
+		m.lastStepTools = p.ToolCalls
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.
@@ -375,9 +379,34 @@ func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
 		m.statusLine = fmt.Sprintf("step %d done — %d tools, %dms, $%.4f",
 			p.StepNumber, p.ToolCalls, p.DurationMS, p.CostUSD)
 	case core.EventCompress:
+		m.noteCompressEvent(ev.TS)
 		m.statusMode = "thinking"
 		m.statusLine = "context compressed"
 	}
+}
+
+func (m *TUIModel) noteModelEvent(ts time.Time) {
+	m.modelEvents = trimRecentEvents(append(m.modelEvents, ts), ts, 30*time.Second)
+}
+
+func (m *TUIModel) noteToolEvent(ts time.Time) {
+	m.toolEvents = trimRecentEvents(append(m.toolEvents, ts), ts, 30*time.Second)
+}
+
+func (m *TUIModel) noteCompressEvent(ts time.Time) {
+	m.compressEvents = trimRecentEvents(append(m.compressEvents, ts), ts, 30*time.Second)
+}
+
+func trimRecentEvents(events []time.Time, now time.Time, window time.Duration) []time.Time {
+	cutoff := now.Add(-window)
+	keep := 0
+	for _, ts := range events {
+		if !ts.Before(cutoff) {
+			events[keep] = ts
+			keep++
+		}
+	}
+	return events[:keep]
 }
 
 // latencyStyle returns a style colored by latency bracket.

@@ -85,6 +85,8 @@ type TUIModel struct {
 	outputTokens int
 	usedCost     float64
 	maxCost      float64
+	lastStepMS   int64
+	lastStepTools int
 
 	radioURL      string
 	radioPlayer   string
@@ -110,6 +112,9 @@ type TUIModel struct {
 	agentFailCount int
 	lastAgentNote  string
 	device         deviceStatus
+	modelEvents    []time.Time
+	toolEvents     []time.Time
+	compressEvents []time.Time
 
 	// callbacks
 	SubmitFn func(string)

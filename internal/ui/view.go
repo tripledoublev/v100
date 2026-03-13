@@ -107,7 +107,8 @@ func (m *TUIModel) View() string {
 		// 1. Render metrics pane (fixed content, natural size)
 		metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps,
 			m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
-			m.usedCost, m.maxCost, rightW)
+			m.usedCost, m.maxCost, m.lastStepMS, m.lastStepTools,
+			len(m.modelEvents), len(m.toolEvents), len(m.compressEvents), rightW)
 		metricsPane := tuiPaneStyle.Width(rightW).Render(metricsView)
 		metricsRendered := lipgloss.Height(metricsPane)
 
