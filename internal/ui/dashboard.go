@@ -3,12 +3,13 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
 // LiveMetricDashboard renders the "Gaming Minimap" style visual inspector.
-func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, lastStepMS int64, lastStepTools, recentModelCalls, recentToolCalls, recentCompresses, width int) string {
+func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, lastStepMS int64, lastStepTools, recentModelCalls, recentToolCalls, recentCompresses int, statusMode string, idleFor time.Duration, width int) string {
 	if width < 20 {
 		return ""
 	}
@@ -83,6 +84,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		tempo, recentModelCalls, recentToolCalls, recentCompresses)
 	pressureLine := fmt.Sprintf("health: %s  token:%s  io:%s",
 		health, percentLabel(tokenPct), percentLabel(ioRatio))
+	stateLine := fmt.Sprintf("state: %s  idle:%s", inspectorState(statusMode, idleFor), FormatDuration(idleFor.Milliseconds()))
 	lastStepLine := fmt.Sprintf("last step: %s  tools:%d", FormatDuration(lastStepMS), lastStepTools)
 
 	dashboard := lipgloss.JoinVertical(lipgloss.Left,
@@ -93,6 +95,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		costBar,
 		styleMuted.Render(velocityLine),
 		styleMuted.Render(pressureLine),
+		styleMuted.Render(stateLine),
 		styleMuted.Render(lastStepLine),
 		fmt.Sprintf("%s %s", styleMuted.Render("HEARTBEAT:"), heartbeat),
 	)
@@ -136,4 +139,22 @@ func percentLabel(v float64) string {
 		v = 1
 	}
 	return fmt.Sprintf("%d%%", int(v*100+0.5))
+}
+
+func inspectorState(statusMode string, idleFor time.Duration) string {
+	switch statusMode {
+	case "tooling":
+		return "tooling"
+	case "thinking":
+		if idleFor > 10*time.Second {
+			return "stalled"
+		}
+		return "thinking"
+	case "error":
+		return "error"
+	}
+	if idleFor > 15*time.Second {
+		return "idle"
+	}
+	return "ready"
 }

@@ -105,12 +105,17 @@ func (m *TUIModel) View() string {
 		// scrollable trace pane whatever is left.
 
 		// 1. Render metrics pane (fixed content, natural size)
-		metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps,
-			m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
-			m.usedCost, m.maxCost, m.lastStepMS, m.lastStepTools,
-			len(m.modelEvents), len(m.toolEvents), len(m.compressEvents), rightW)
-		metricsPane := tuiPaneStyle.Width(rightW).Render(metricsView)
-		metricsRendered := lipgloss.Height(metricsPane)
+		var metricsPane string
+		var metricsRendered int
+		if m.showMetrics {
+			metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps,
+				m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
+				m.usedCost, m.maxCost, m.lastStepMS, m.lastStepTools,
+				len(m.modelEvents), len(m.toolEvents), len(m.compressEvents),
+				m.statusMode, time.Since(m.lastEventAt), rightW)
+			metricsPane = tuiPaneStyle.Width(rightW).Render(metricsView)
+			metricsRendered = lipgloss.Height(metricsPane)
+		}
 
 		// 2. Optionally render status pane (may wrap lines)
 		var statusPane string
@@ -158,11 +163,15 @@ func (m *TUIModel) View() string {
 		)
 
 		var rightCol string
-		if m.showStatus {
-			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane, statusPane)
-		} else {
-			rightCol = lipgloss.JoinVertical(lipgloss.Left, tracePane, metricsPane)
+		var rightPanes []string
+		rightPanes = append(rightPanes, tracePane)
+		if m.showMetrics {
+			rightPanes = append(rightPanes, metricsPane)
 		}
+		if m.showStatus {
+			rightPanes = append(rightPanes, statusPane)
+		}
+		rightCol = lipgloss.JoinVertical(lipgloss.Left, rightPanes...)
 
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", rightCol)
 		view := lipgloss.JoinVertical(lipgloss.Left, header, panes, inputBox)

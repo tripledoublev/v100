@@ -115,6 +115,7 @@ type TUIModel struct {
 	modelEvents    []time.Time
 	toolEvents     []time.Time
 	compressEvents []time.Time
+	lastEventAt    time.Time
 
 	// callbacks
 	SubmitFn func(string)
