@@ -130,6 +130,11 @@ func SmartSummary(toolName, output string, verbose bool) string {
 		return TruncateOutput(output, true)
 	}
 
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+
 	// Heuristic: summarize directory listings
 	if toolName == "fs_list" || toolName == "fs_ls" {
 		if strings.HasPrefix(output, "{") {
@@ -142,10 +147,50 @@ func SmartSummary(toolName, output string, verbose bool) string {
 		}
 	}
 
-	// Heuristic: summarize large outputs
-	if len(output) > 200 {
-		return fmt.Sprintf("(%d chars) %s", len(output), TruncateOutput(output, false))
+	// Common case: collapse long multiline tool output into a single scan-friendly line.
+	if strings.Count(output, "\n") >= 2 || len(output) > 160 {
+		return compactToolSummary(output)
 	}
 
 	return TruncateOutput(output, false)
+}
+
+func compactToolSummary(output string) string {
+	lines := nonEmptyLines(output)
+	if len(lines) == 0 {
+		return TruncateOutput(output, false)
+	}
+	head := collapseWhitespace(lines[0])
+	head = truncateRunes(head, 72)
+	if len(lines) == 1 {
+		return fmt.Sprintf("1 line, %d chars: %s", len(output), head)
+	}
+	return fmt.Sprintf("%d lines, %d chars: %s", len(lines), len(output), head)
+}
+
+func nonEmptyLines(s string) []string {
+	raw := strings.Split(s, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	return string(runes[:max-1]) + "…"
 }
