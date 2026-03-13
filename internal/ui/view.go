@@ -135,8 +135,9 @@ func (m *TUIModel) View() string {
 			statusRendered = lipgloss.Height(statusPane)
 		}
 
-		// 3. Trace gets everything left over
-		traceRendered := remaining - metricsRendered - statusRendered
+		// 3. Trace gets a percentage of remaining space (after metrics/status)
+		traceRemaining := remaining - metricsRendered - statusRendered
+		traceRendered := traceRemaining * m.tracePanePct / 100
 		if traceRendered < 4 {
 			traceRendered = 4
 		}

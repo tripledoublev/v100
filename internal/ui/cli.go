@@ -24,6 +24,7 @@ type CLIRenderer struct {
 	modelCallStop  chan struct{}
 	modelCallDone  chan struct{}
 	Verbose        bool
+	streamedText   bool // set when EventModelToken prints; skip text in EventModelResp if true
 	mu             sync.Mutex
 }
 
@@ -90,6 +91,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			break
 		}
 		r.mu.Lock()
+		r.streamedText = false // reset for new model call
 		r.modelCallStart = time.Now()
 		r.modelCallStop = make(chan struct{})
 		r.modelCallDone = make(chan struct{})
@@ -127,13 +129,18 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		if p.Text != "" {
+		// Skip printing text if it was already streamed via EventModelToken
+		if p.Text != "" && !r.streamedText {
 			indented := indentLines(p.Text, "              ")
 			fmt.Printf("\n%s  %s  %s\n",
 				ts,
 				styleAssistant.Render("v100"),
 				indented,
 			)
+		}
+		// If text was streamed and there are tool calls, print a blank line for separation
+		if r.streamedText && len(p.ToolCalls) > 0 {
+			fmt.Println()
 		}
 		for _, tc := range p.ToolCalls {
 			args := TruncateOutput(tc.ArgsJSON, r.Verbose)
@@ -150,6 +157,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		var p map[string]string
 		_ = json.Unmarshal(ev.Payload, &p)
+		r.mu.Lock()
+		r.streamedText = true
+		r.mu.Unlock()
 		fmt.Print(p["text"])
 
 	case core.EventToolCallDelta:
