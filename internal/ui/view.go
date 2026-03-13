@@ -71,24 +71,10 @@ func (m *TUIModel) View() string {
 	headerHeight := lipgloss.Height(header)
 	// JoinVertical uses '\n' as a line terminator between elements, not an extra row.
 	remaining := m.height - headerHeight - inputHeight
-	if remaining < 4 {
-		remaining = 4
-	}
+	layout := computePaneLayout(m.width, remaining, m.leftPanePct, m.tracePanePct)
+	remaining = layout.remainingHeight
 
 	if m.showTrace {
-		// Each pane has a 1-char border on each side (2 per pane) + 1-char gap = 5 overhead.
-		// leftW and rightW are inner content widths; outer = inner + 2.
-		total := m.width - 5
-		leftW := total * m.leftPanePct / 100
-		if leftW < 38 {
-			leftW = 38
-		}
-		rightW := total - leftW
-		if rightW < 24 {
-			rightW = 24
-			leftW = total - rightW
-		}
-
 		leftSt := tuiPaneStyle
 		rightSt := tuiPaneStyle
 		if m.focus == focusTranscript {
@@ -112,8 +98,8 @@ func (m *TUIModel) View() string {
 				m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
 				m.usedCost, m.maxCost, m.lastStepMS, m.lastStepTools,
 				len(m.modelEvents), len(m.toolEvents), len(m.compressEvents),
-				m.statusMode, time.Since(m.lastEventAt), rightW)
-			metricsPane = tuiPaneStyle.Width(rightW).Render(metricsView)
+				m.statusMode, time.Since(m.lastEventAt), layout.rightWidth)
+			metricsPane = tuiPaneStyle.Width(layout.rightWidth).Render(metricsView)
 			metricsRendered = lipgloss.Height(metricsPane)
 		}
 
@@ -125,41 +111,24 @@ func (m *TUIModel) View() string {
 			if m.focus == focusStatus {
 				statusSt = tuiActivePaneStyle
 			}
-			// Cap status content to ~40% of remaining
-			maxStatusCH := (remaining * 2 / 5) - 2
-			if maxStatusCH < 4 {
-				maxStatusCH = 4
-			}
-			statusPane = statusSt.Width(rightW).Render(
-				m.statusView(rightW, maxStatusCH+2))
+			statusPane = statusSt.Width(layout.rightWidth).Render(
+				m.statusView(layout.rightWidth, layout.maxStatusContentHeight+2))
 			statusRendered = lipgloss.Height(statusPane)
 		}
 
-		// 3. Trace gets a percentage of remaining space (after metrics/status)
-		traceRemaining := remaining - metricsRendered - statusRendered
-		traceRendered := traceRemaining * m.tracePanePct / 100
-		if traceRendered < 4 {
-			traceRendered = 4
-		}
-		traceCH := traceRendered - 2 // content height inside border
-		if traceCH < 1 {
-			traceCH = 1
-		}
+		layout = layout.withRightColumnHeights(metricsRendered, statusRendered, m.tracePanePct)
 
 		// Left column: content = remaining - 2 so rendered = remaining.
-		m.transcript.Width = leftW - 4
-		m.transcript.Height = remaining - 2
+		m.transcript.Width = layout.transcriptWidth
+		m.transcript.Height = layout.transcriptHeight
 
 		// Trace viewport: content height minus 1 for the label line
-		m.traceView.Width = rightW - 4
-		m.traceView.Height = traceCH - 1
-		if m.traceView.Height < 1 {
-			m.traceView.Height = 1
-		}
+		m.traceView.Width = max(1, layout.rightWidth-4)
+		m.traceView.Height = layout.traceViewportHeight
 
-		left := leftSt.Width(leftW).Height(remaining - 2).Render(m.transcript.View())
+		left := leftSt.Width(layout.leftWidth).Height(remaining - 2).Render(m.transcript.View())
 
-		tracePane := rightSt.Width(rightW).Height(traceCH).Render(
+		tracePane := rightSt.Width(layout.rightWidth).Height(layout.traceContentHeight).Render(
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
 		)
 
@@ -184,8 +153,8 @@ func (m *TUIModel) View() string {
 	if m.focus == focusTranscript {
 		tSt = tuiActivePaneStyle
 	}
-	m.transcript.Width = m.width - 4
-	m.transcript.Height = remaining - 2
+	m.transcript.Width = max(1, m.width-4)
+	m.transcript.Height = max(1, remaining-2)
 	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
