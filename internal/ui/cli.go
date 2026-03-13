@@ -384,8 +384,11 @@ func ConfirmTool(toolName, args string) bool {
 }
 
 // Prompt prints a styled prompt and reads a line from stdin.
+// Suppresses the prompt character in non-interactive (piped) mode.
 func Prompt(prompt string) (string, error) {
-	fmt.Print(stylePrimary.Render("▸") + " ")
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Print(stylePrimary.Render("▸") + " ")
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
