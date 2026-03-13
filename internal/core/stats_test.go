@@ -88,3 +88,65 @@ func TestFormatCompareIncludesMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestComputeStatsToolRetries(t *testing.T) {
+	now := time.Now()
+	mkToolCall := func(stepID, name string) Event {
+		p, _ := json.Marshal(ToolCallPayload{Name: name})
+		return Event{TS: now, StepID: stepID, Type: EventToolCall, Payload: p}
+	}
+	mkToolResult := func(stepID, name string, ok bool) Event {
+		p, _ := json.Marshal(ToolResultPayload{Name: name, OK: ok})
+		return Event{TS: now, StepID: stepID, Type: EventToolResult, Payload: p}
+	}
+	mkStepSummary := func(stepID string, n int) Event {
+		p, _ := json.Marshal(StepSummaryPayload{StepNumber: n})
+		return Event{TS: now, StepID: stepID, Type: EventStepSummary, Payload: p}
+	}
+
+	events := []Event{
+		// sh fails, then sh is retried (1 retry)
+		mkToolCall("s1", "sh"),
+		mkToolResult("s1", "sh", false),
+		mkToolCall("s1", "sh"),
+		mkToolResult("s1", "sh", true),
+		// fs_read fails, then a different tool is called (0 retries)
+		mkToolCall("s2", "fs_read"),
+		mkToolResult("s2", "fs_read", false),
+		mkToolCall("s2", "search"),
+		mkToolResult("s2", "search", true),
+		// sh fails twice, retried once each time (2 retries)
+		mkToolCall("s3", "sh"),
+		mkToolResult("s3", "sh", false),
+		mkToolCall("s3", "sh"),
+		mkToolResult("s3", "sh", false),
+		mkToolCall("s3", "sh"),
+		mkToolResult("s3", "sh", true),
+		// A later step using the same tool should not count as retry.
+		mkToolCall("s4", "sh"),
+		mkToolResult("s4", "sh", false),
+		mkStepSummary("s4", 4),
+		mkToolCall("s5", "sh"),
+		mkToolResult("s5", "sh", true),
+	}
+
+	s := ComputeStats(events)
+	if s.ToolRetries != 3 {
+		t.Fatalf("ToolRetries = %d, want 3", s.ToolRetries)
+	}
+	if s.ToolFailures != 5 {
+		t.Fatalf("ToolFailures = %d, want 5", s.ToolFailures)
+	}
+}
+
+func TestFormatStatsToolRetries(t *testing.T) {
+	out := FormatStats(RunStats{ToolRetries: 2})
+	if !strings.Contains(out, "Tool retries: 2") {
+		t.Fatalf("expected 'Tool retries: 2' in output:\n%s", out)
+	}
+
+	out = FormatStats(RunStats{ToolRetries: 0})
+	if strings.Contains(out, "Tool retries") {
+		t.Fatalf("expected no 'Tool retries' line when 0, got:\n%s", out)
+	}
+}

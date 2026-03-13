@@ -41,6 +41,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 		maxToolCallsFlag int
 		confirmToolsFlag string
 		maxReplansFlag   int
+		memoryModeFlag   string
+		memoryTokensFlag int
 		tuiFlag          bool
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
@@ -142,6 +144,12 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if maxReplansFlag > 0 {
 				cfg.Defaults.MaxReplans = maxReplansFlag
+			}
+			if memoryModeFlag != "" {
+				cfg.Defaults.MemoryMode = memoryModeFlag
+			}
+			if memoryTokensFlag > 0 {
+				cfg.Defaults.MemoryMaxTokens = memoryTokensFlag
 			}
 
 			initialPrompt, err := resolveInitialPrompt(args, promptFileFlag)
@@ -294,6 +302,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&toolTimeoutFlag, "tool-timeout", 0, "tool timeout in ms (0=config default)")
 	cmd.Flags().IntVar(&maxToolCallsFlag, "max-tool-calls-per-step", 0, "max tool calls per step")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
+	cmd.Flags().StringVar(&memoryModeFlag, "memory-mode", "", "memory injection mode: always|auto|off")
+	cmd.Flags().IntVar(&memoryTokensFlag, "memory-max-tokens", 0, "approximate token budget for injected MEMORY.md context")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable Bubble Tea TUI")
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")

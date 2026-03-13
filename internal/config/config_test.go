@@ -15,6 +15,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Defaults.BudgetSteps != 50 {
 		t.Errorf("expected 50 budget steps, got %d", cfg.Defaults.BudgetSteps)
 	}
+	if cfg.Defaults.MemoryMode != "auto" {
+		t.Errorf("expected default memory mode auto, got %q", cfg.Defaults.MemoryMode)
+	}
+	if cfg.Defaults.MemoryMaxTokens != 256 {
+		t.Errorf("expected default memory max tokens 256, got %d", cfg.Defaults.MemoryMaxTokens)
+	}
 
 	// Check that anthropic provider exists in defaults
 	if _, ok := cfg.Providers["anthropic"]; !ok {
@@ -193,6 +199,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, `cpus = 1.0`) {
 		t.Error("default TOML should contain sandbox cpu limit")
+	}
+	if !contains(toml, `memory_mode = "auto"`) {
+		t.Error("default TOML should contain memory_mode")
+	}
+	if !contains(toml, `memory_max_tokens = 256`) {
+		t.Error("default TOML should contain memory_max_tokens")
 	}
 }
 

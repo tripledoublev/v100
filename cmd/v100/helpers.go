@@ -739,6 +739,12 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	if cfg.Defaults.CompressProtectRecent > 0 {
 		p.CompressProtectRecent = cfg.Defaults.CompressProtectRecent
 	}
+	if cfg.Defaults.MemoryMode != "" {
+		p.MemoryMode = cfg.Defaults.MemoryMode
+	}
+	if cfg.Defaults.MemoryMaxTokens > 0 {
+		p.MemoryMaxTokens = cfg.Defaults.MemoryMaxTokens
+	}
 	return p
 }
 

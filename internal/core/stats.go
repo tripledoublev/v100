@@ -25,6 +25,7 @@ type RunStats struct {
 	ToolCalls      int
 	ToolUsage      map[string]int
 	ToolFailures   int
+	ToolRetries    int
 	Compressions   int
 	WatchdogFires  int
 	EndReason      string
@@ -36,6 +37,8 @@ func ComputeStats(events []Event) RunStats {
 	s := RunStats{ToolUsage: make(map[string]int)}
 
 	var firstTS, lastTS int64
+	var pendingRetryTool string
+	var pendingRetryStep string
 
 	for _, ev := range events {
 		ts := ev.TS.UnixMilli()
@@ -71,16 +74,28 @@ func ComputeStats(events []Event) RunStats {
 			_ = json.Unmarshal(ev.Payload, &p)
 			s.ToolCalls++
 			s.ToolUsage[p.Name]++
+			if pendingRetryTool != "" && ev.StepID == pendingRetryStep && p.Name == pendingRetryTool {
+				s.ToolRetries++
+			}
+			pendingRetryTool = ""
+			pendingRetryStep = ""
 
 		case EventToolResult:
 			var p ToolResultPayload
 			_ = json.Unmarshal(ev.Payload, &p)
 			if !p.OK {
 				s.ToolFailures++
+				pendingRetryTool = p.Name
+				pendingRetryStep = ev.StepID
+			} else {
+				pendingRetryTool = ""
+				pendingRetryStep = ""
 			}
 
 		case EventStepSummary:
 			s.TotalSteps++
+			pendingRetryTool = ""
+			pendingRetryStep = ""
 
 		case EventCompress:
 			s.Compressions++
@@ -151,6 +166,9 @@ func FormatStats(s RunStats) string {
 	}
 	_, _ = fmt.Fprintf(&b, "Tool calls:   %d\n", s.ToolCalls)
 	_, _ = fmt.Fprintf(&b, "Tool fails:   %d\n", s.ToolFailures)
+	if s.ToolRetries > 0 {
+		_, _ = fmt.Fprintf(&b, "Tool retries: %d\n", s.ToolRetries)
+	}
 	_, _ = fmt.Fprintf(&b, "Compressions: %d\n", s.Compressions)
 	_, _ = fmt.Fprintf(&b, "End reason:   %s\n", s.EndReason)
 	if s.Score != "" {
@@ -278,9 +296,9 @@ type DigestRetryEntry struct {
 
 // DigestStep identifies a step by number and token cost.
 type DigestStep struct {
-	StepNum    int
-	TokensIn   int
-	TokensOut  int
+	StepNum   int
+	TokensIn  int
+	TokensOut int
 }
 
 // ComputeDigest builds a RunDigest from trace events.

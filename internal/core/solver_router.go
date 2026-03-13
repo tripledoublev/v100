@@ -50,7 +50,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	smartMode := false
 
 	for {
-		msgs := l.buildMessages()
+		msgs := l.buildMessages(true)
 		toolSpecs := l.Tools.Specs()
 		toolNames := make([]string, 0, len(toolSpecs))
 		for _, ts := range toolSpecs {

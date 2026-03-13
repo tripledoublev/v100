@@ -453,7 +453,7 @@ func TestTargetedCompressionBudgetAccounted(t *testing.T) {
 
 // TestMemoryInjectedIntoProviderCall verifies that when Policy.MemoryPath points
 // to an existing MEMORY.md, its contents appear as a reference assistant message
-// instead of an extra system instruction.
+// when the current turn suggests prior-context retrieval.
 func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	dir := t.TempDir()
 	memPath := filepath.Join(dir, "MEMORY.md")
@@ -475,6 +475,7 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 
 	pol := policy.Default()
 	pol.MemoryPath = memPath
+	pol.MemoryMode = "auto"
 
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
@@ -527,6 +528,7 @@ func TestMemoryAbsentWhenFileNotFound(t *testing.T) {
 
 	pol := policy.Default()
 	pol.MemoryPath = filepath.Join(dir, "MEMORY.md") // file does not exist
+	pol.MemoryMode = "always"
 
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
@@ -576,6 +578,8 @@ func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
 
 	pol := policy.Default()
 	pol.MemoryPath = memPath
+	pol.MemoryMode = "always"
+	pol.MemoryMaxTokens = 32
 
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
@@ -601,4 +605,49 @@ func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
 		}
 	}
 	t.Fatal("expected memory reference assistant message")
+}
+
+func TestMemorySkippedInAutoModeWhenTurnLooksUnrelated(t *testing.T) {
+	dir := t.TempDir()
+	memPath := filepath.Join(dir, "MEMORY.md")
+	memContent := "- prior note that should stay out of unrelated turns"
+	if err := os.WriteFile(memPath, []byte(memContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "ok"}},
+	}
+
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	pol := policy.Default()
+	pol.MemoryPath = memPath
+	pol.MemoryMode = "auto"
+
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 100_000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+	}
+
+	if err := loop.Step(context.Background(), "list the files in this project"); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := prov.requests[0].Messages
+	for _, m := range msgs {
+		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+			t.Fatalf("unexpected memory injection for unrelated turn: %q", m.Content)
+		}
+	}
 }

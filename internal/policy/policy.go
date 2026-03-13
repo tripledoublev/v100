@@ -6,7 +6,9 @@ type Policy struct {
 	SystemPrompt          string
 	MaxToolCallsPerStep   int
 	ToolTimeoutMS         int
-	MemoryPath            string // path to MEMORY.md in workspace; injected into every buildMessages call
+	MemoryPath            string // path to MEMORY.md in workspace
+	MemoryMode            string // always | auto | off
+	MemoryMaxTokens       int    // approximate token budget for injected memory (0 = disabled)
 	ContextLimit          int    // estimated token threshold for compression (0 = disabled)
 	MaxToolResultChars    int    // hard truncation limit for tool results (0 = disabled)
 	CompressProtectRecent int    // recent messages protected from compression (default 6)

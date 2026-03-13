@@ -16,6 +16,8 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 		Name:                name,
 		MaxToolCallsPerStep: cfg.MaxToolCallsPerStep,
 		Streaming:           true, // default ON; --streaming=false to disable
+		MemoryMode:          "auto",
+		MemoryMaxTokens:     256,
 	}
 	if p.MaxToolCallsPerStep == 0 {
 		p.MaxToolCallsPerStep = 20
@@ -46,6 +48,8 @@ func Default() *Policy {
 		MaxToolCallsPerStep: 20,
 		ToolTimeoutMS:       30000,
 		Streaming:           true,
+		MemoryMode:          "auto",
+		MemoryMaxTokens:     256,
 	}
 }
 
