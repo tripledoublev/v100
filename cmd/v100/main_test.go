@@ -196,6 +196,34 @@ func TestValidateExecutionSafety(t *testing.T) {
 	}
 }
 
+func TestValidatePlanMode(t *testing.T) {
+	if err := validatePlanMode(false, true, "react"); err != nil {
+		t.Fatalf("plan disabled should not fail, got %v", err)
+	}
+	if err := validatePlanMode(true, false, "react"); err == nil {
+		t.Fatal("expected incompatible solver to fail")
+	}
+	if err := validatePlanMode(true, true, "plan_execute"); err == nil {
+		t.Fatal("expected TUI plan mode to fail")
+	}
+	if err := validatePlanMode(true, false, "plan_execute"); err != nil {
+		t.Fatalf("plan_execute in CLI should pass, got %v", err)
+	}
+}
+
+func TestIsApprovedPlanAnswer(t *testing.T) {
+	for _, answer := range []string{"y", "Y", "yes", " Yes "} {
+		if !isApprovedPlanAnswer(answer) {
+			t.Fatalf("expected approval for %q", answer)
+		}
+	}
+	for _, answer := range []string{"", "n", "no", "later"} {
+		if isApprovedPlanAnswer(answer) {
+			t.Fatalf("expected rejection for %q", answer)
+		}
+	}
+}
+
 func TestLoadConfigAddsDefaultProviders(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

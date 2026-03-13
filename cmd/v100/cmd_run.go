@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -49,6 +50,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiDebugFlag     bool
 		verboseFlag      bool
 		exitFlag         bool
+		planFlag         bool
 		nameFlag         string
 		tagFlags         []string
 		solverFlag       string
@@ -96,6 +98,12 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 			if solverFlag != "" {
 				cfg.Defaults.Solver = solverFlag
+			}
+			if err := validatePlanMode(planFlag, tuiFlag, solverFlag); err != nil {
+				return err
+			}
+			if planFlag {
+				cfg.Defaults.Solver = "plan_execute"
 			}
 
 			// Ensure the active provider exists in config so we can apply overrides
@@ -282,7 +290,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if tuiFlag {
 				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, initialPrompt, session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, genParams, solver, initialPrompt, session, mapper)
+			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
 		},
 	}
 
@@ -310,6 +318,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
 	cmd.Flags().BoolVar(&exitFlag, "exit", false, "exit after the initial prompt completes without entering interactive mode")
+	cmd.Flags().BoolVar(&planFlag, "plan", false, "preview a plan and require approval before execution (CLI only)")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
 	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
@@ -348,8 +357,21 @@ func resolveInitialPrompt(args []string, promptFile string) (string, error) {
 	return string(data), nil
 }
 
+func validatePlanMode(planMode bool, tuiMode bool, solverName string) error {
+	if !planMode {
+		return nil
+	}
+	if solverName != "" && solverName != "plan_execute" {
+		return fmt.Errorf("--plan requires --solver plan_execute (got %q)", solverName)
+	}
+	if tuiMode {
+		return fmt.Errorf("--plan is currently supported in CLI mode only")
+	}
+	return nil
+}
+
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, planMode bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	// Auto-exit when stdin is piped (not a TTY) to avoid hanging after prompt
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -420,6 +442,9 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			compressInfo += "  " + ui.Dim("compress: ") + cp
 		}
 		fmt.Println(ui.Info(compressInfo))
+		if planMode {
+			fmt.Println(ui.Info(ui.Dim("plan mode: preview + approval")))
+		}
 		if verbose {
 			fmt.Println(ui.Info(ui.Dim("entrypoint: cmd/v100  runtime: internal/core (" + solverName + " loop)")))
 		}
@@ -429,7 +454,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	reason := "user_exit"
 
 	if initialPrompt != "" {
-		if err := loop.Step(ctx, initialPrompt); err != nil {
+		if err := runCLIInput(ctx, loop, initialPrompt, planMode); err != nil {
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
 				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
@@ -459,7 +484,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			break
 		}
 
-		if err := loop.Step(ctx, input); err != nil {
+		if err := runCLIInput(ctx, loop, input, planMode); err != nil {
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
 				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
@@ -486,6 +511,47 @@ done:
 	fmt.Println(ui.Dim("run id: ") + run.ID)
 	fmt.Println(ui.Dim("  → v100 stats " + run.ID))
 	return nil
+}
+
+func runCLIInput(ctx context.Context, loop *core.Loop, input string, planMode bool) error {
+	if !planMode {
+		return loop.Step(ctx, input)
+	}
+	planSolver, ok := loop.Solver.(*core.PlanExecuteSolver)
+	if !ok {
+		return fmt.Errorf("plan mode requires plan_execute solver")
+	}
+	plan, err := planSolver.Preview(ctx, loop, input)
+	if err != nil {
+		return err
+	}
+	fmt.Println()
+	fmt.Println(ui.Info(ui.Dim("plan preview")))
+	fmt.Println(plan)
+	if !confirmPlanExecution() {
+		fmt.Println(ui.Warn("plan execution skipped"))
+		return nil
+	}
+	_, err = planSolver.ExecuteApprovedPlan(ctx, loop, input, plan, loop.Budget.Budget())
+	return err
+}
+
+func confirmPlanExecution() bool {
+	fmt.Print(ui.Warn("Execute this plan? [y/N] "))
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return false
+	}
+	return isApprovedPlanAnswer(scanner.Text())
+}
+
+func isApprovedPlanAnswer(answer string) bool {
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // generateRunSummary generates a one-sentence summary of a completed run.

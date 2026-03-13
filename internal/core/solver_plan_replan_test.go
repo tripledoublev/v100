@@ -129,3 +129,54 @@ func TestPlanExecuteSolverRestoresCheckpointOnReplan(t *testing.T) {
 		t.Fatal("expected solver.replan event with revised plan")
 	}
 }
+
+func TestPlanExecutePreviewThenExecuteApprovedPlan(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "trace.jsonl")
+
+	trace, err := OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	prov := &scriptedProvider{
+		steps: []providerStep{
+			{resp: providers.CompleteResponse{AssistantText: "1. Read config\n2. Explain changes"}},
+			{resp: providers.CompleteResponse{AssistantText: "Implemented successfully."}},
+		},
+	}
+
+	loop := &Loop{
+		Run:       &Run{ID: "plan-preview", Dir: t.TempDir(), TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    policy.Default(),
+		Trace:     trace,
+		Budget:    NewBudgetTracker(&Budget{MaxSteps: 10, MaxTokens: 10000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+		Mapper:    NewPathMapper(t.TempDir(), t.TempDir()),
+	}
+
+	solver := &PlanExecuteSolver{MaxReplans: 1}
+	plan, err := solver.Preview(context.Background(), loop, "inspect the config")
+	if err != nil {
+		t.Fatalf("Preview returned error: %v", err)
+	}
+	if plan == "" {
+		t.Fatal("expected non-empty plan")
+	}
+	if prov.idx != 1 {
+		t.Fatalf("provider calls after preview = %d, want 1", prov.idx)
+	}
+
+	res, err := solver.ExecuteApprovedPlan(context.Background(), loop, "inspect the config", plan, loop.Budget.Budget())
+	if err != nil {
+		t.Fatalf("ExecuteApprovedPlan returned error: %v", err)
+	}
+	if res.FinalText != "Implemented successfully." {
+		t.Fatalf("final text = %q, want success", res.FinalText)
+	}
+	if prov.idx != 2 {
+		t.Fatalf("provider calls after execute = %d, want 2", prov.idx)
+	}
+}

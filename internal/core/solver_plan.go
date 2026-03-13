@@ -17,14 +17,27 @@ type PlanExecuteSolver struct {
 func (s *PlanExecuteSolver) Name() string { return "plan_execute" }
 
 func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
-	stepID := newID()
 	budgetBefore := l.Budget.Budget()
 
 	// 1. Initial Planning
-	plan, err := s.plan(ctx, l, stepID, userInput)
+	plan, err := s.Preview(ctx, l, userInput)
 	if err != nil {
 		return SolveResult{}, err
 	}
+
+	return s.ExecuteApprovedPlan(ctx, l, userInput, plan, budgetBefore)
+}
+
+// Preview generates a plan, emits the planner events, and appends the plan to
+// message history so later execution can refer to it.
+func (s *PlanExecuteSolver) Preview(ctx context.Context, l *Loop, userInput string) (string, error) {
+	stepID := newID()
+	return s.plan(ctx, l, stepID, userInput)
+}
+
+// ExecuteApprovedPlan executes a previously approved plan without regenerating it.
+func (s *PlanExecuteSolver) ExecuteApprovedPlan(ctx context.Context, l *Loop, userInput, plan string, budgetBefore Budget) (SolveResult, error) {
+	stepID := newID()
 
 	// 2. Execution of the plan
 	maxReplans := s.MaxReplans
