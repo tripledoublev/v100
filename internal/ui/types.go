@@ -183,6 +183,7 @@ type RequestConfirmMsg struct {
 }
 
 type radioTickMsg struct{}
+type deviceTickMsg struct{}
 type radioNowPlayingMsg struct {
 	Artist string
 	Title  string

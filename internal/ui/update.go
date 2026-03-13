@@ -23,6 +23,7 @@ func (m *TUIModel) Init() tea.Cmd {
 		tea.WindowSize(),
 		func() tea.Msg { return tea.ClearScreen() },
 		radioTickCmd(),
+		deviceTickCmd(),
 		tea.EnableMouseCellMotion,
 	)
 }
@@ -54,11 +55,14 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendConfirm = nil
 
 	case radioTickMsg:
-		m.refreshDeviceStatus(time.Now())
 		if cmd := m.onRadioTick(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		cmds = append(cmds, radioTickCmd())
+
+	case deviceTickMsg:
+		m.refreshDeviceStatus(time.Now())
+		cmds = append(cmds, deviceTickCmd())
 
 	case radioNowPlayingMsg:
 		if msg.Err != "" {

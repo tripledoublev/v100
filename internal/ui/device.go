@@ -1,3 +1,5 @@
+// +build linux
+
 package ui
 
 import (
@@ -6,7 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Linux implementation
 
 const powerSupplyDir = "/sys/class/power_supply"
 
@@ -90,6 +96,12 @@ func (m *TUIModel) refreshDeviceStatus(now time.Time) {
 		return
 	}
 	m.device = readDeviceStatus(now)
+}
+
+// deviceTickCmd sends a deviceTickMsg every 15 seconds to refresh battery status
+// This is independent of radio playback, ensuring device status is always current
+func deviceTickCmd() tea.Cmd {
+	return tea.Tick(15*time.Second, func(time.Time) tea.Msg { return deviceTickMsg{} })
 }
 
 func (m *TUIModel) deviceStatusLine() string {
