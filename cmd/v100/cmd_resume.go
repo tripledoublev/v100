@@ -87,6 +87,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			}
 
 			reg := buildToolRegistry(cfg)
+			if err := validateToolRegistry(reg); err != nil {
+				return err
+			}
 			pol := loadPolicy(cfg, "default")
 			if cfg.Defaults.ContextLimit > 0 {
 				pol.ContextLimit = cfg.Defaults.ContextLimit

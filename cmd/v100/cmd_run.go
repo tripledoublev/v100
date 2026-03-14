@@ -246,8 +246,8 @@ func runCmd(cfgPath *string) *cobra.Command {
 
 			// Build tool registry
 			reg := buildToolRegistry(cfg)
-			if err := reg.Validate(); err != nil {
-				return fmt.Errorf("tool registry: %w", err)
+			if err := validateToolRegistry(reg); err != nil {
+				return err
 			}
 
 			// Load policy

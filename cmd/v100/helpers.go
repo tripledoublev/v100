@@ -213,6 +213,7 @@ func enabledToolSummaryVerbose(reg *tools.Registry, verbose bool) string {
 		return "0 enabled"
 	}
 	names := reg.List()
+	missing := reg.MissingEnabledNames()
 	dangerous := 0
 	for _, name := range names {
 		if reg.IsDangerous(name) {
@@ -220,12 +221,31 @@ func enabledToolSummaryVerbose(reg *tools.Registry, verbose bool) string {
 		}
 	}
 	if len(names) == 0 {
+		if len(missing) > 0 {
+			return fmt.Sprintf("0 enabled (%d invalid: %s)", len(missing), strings.Join(missing, ", "))
+		}
 		return "0 enabled"
 	}
+	base := ""
 	if verbose {
-		return fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(names, ", "))
+		base = fmt.Sprintf("%d enabled (%d dangerous): %s", len(names), dangerous, strings.Join(names, ", "))
+	} else {
+		base = fmt.Sprintf("%d enabled (%d dangerous)", len(names), dangerous)
 	}
-	return fmt.Sprintf("%d enabled (%d dangerous)", len(names), dangerous)
+	if len(missing) > 0 {
+		base += fmt.Sprintf(" [invalid enabled entries: %s]", strings.Join(missing, ", "))
+	}
+	return base
+}
+
+func validateToolRegistry(reg *tools.Registry) error {
+	if reg == nil {
+		return nil
+	}
+	if err := reg.Validate(); err != nil {
+		return fmt.Errorf("tool registry: %w", err)
+	}
+	return nil
 }
 
 func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase string) (executor.Session, *core.PathMapper, string, error) {

@@ -299,6 +299,10 @@ func benchCmd(cfgPath *string) *cobra.Command {
 					}
 
 					reg := buildToolRegistry(cfg)
+					if err := validateToolRegistry(reg); err != nil {
+						_ = trace.Close()
+						return err
+					}
 					pol := loadPolicy(cfg, "default")
 
 					// Resolve solver
@@ -648,6 +652,10 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 					}
 
 					reg := buildToolRegistry(cfg)
+					if err := validateToolRegistry(reg); err != nil {
+						_ = trace.Close()
+						return err
+					}
 					pol := loadPolicy(cfg, "default")
 					budget := core.NewBudgetTracker(&coreRun.Budget)
 

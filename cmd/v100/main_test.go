@@ -305,10 +305,22 @@ func TestEnabledToolSummary(t *testing.T) {
 	}
 }
 
+func TestEnabledToolSummaryIncludesInvalidEnabledEntries(t *testing.T) {
+	reg := tools.NewRegistry([]string{"fs_read", "missing_tool"})
+	reg.Register(tools.FSRead())
+
+	got := enabledToolSummaryVerbose(reg, true)
+	for _, want := range []string{"1 enabled", "fs_read", "invalid enabled entries: missing_tool"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("enabledToolSummary invalid summary missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestBuildToolRegistryDefaultConfigValidates(t *testing.T) {
 	cfg := config.DefaultConfig()
 	reg := buildToolRegistry(cfg)
-	if err := reg.Validate(); err != nil {
+	if err := validateToolRegistry(reg); err != nil {
 		t.Fatalf("default tool registry should validate, got %v", err)
 	}
 }
@@ -318,7 +330,9 @@ func TestBuildToolRegistryPartialConfigValidatesFails(t *testing.T) {
 	// Add a tool name that will never be registered
 	cfg.Tools.Enabled = append(cfg.Tools.Enabled, "nonexistent_tool")
 	reg := buildToolRegistry(cfg)
-	if err := reg.Validate(); err == nil {
+	if err := validateToolRegistry(reg); err == nil {
 		t.Fatal("expected Validate to fail for unregistered enabled tool, got nil")
+	} else if !strings.Contains(err.Error(), "nonexistent_tool") {
+		t.Fatalf("expected invalid tool name in error, got %v", err)
 	}
 }

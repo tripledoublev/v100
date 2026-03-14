@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/tripledoublev/v100/internal/providers"
@@ -179,12 +180,21 @@ func (r *Registry) RegisteredTools() []Tool {
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, name := range r.enabledNamesLocked() {
-		if _, ok := r.tools[name]; !ok {
-			return fmt.Errorf("tool %q is enabled but not registered", name)
+	missing := r.missingEnabledNamesLocked()
+	if len(missing) > 0 {
+		if len(missing) == 1 {
+			return fmt.Errorf("tool %q is enabled but not registered", missing[0])
 		}
+		return fmt.Errorf("enabled tools not registered: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// MissingEnabledNames returns enabled tool names that are not registered.
+func (r *Registry) MissingEnabledNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.missingEnabledNamesLocked()
 }
 
 func (r *Registry) enabledNamesLocked() []string {
@@ -193,5 +203,15 @@ func (r *Registry) enabledNamesLocked() []string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	return names
+}
+
+func (r *Registry) missingEnabledNamesLocked() []string {
+	names := make([]string, 0)
+	for _, name := range r.enabledNamesLocked() {
+		if _, ok := r.tools[name]; !ok {
+			names = append(names, name)
+		}
+	}
 	return names
 }

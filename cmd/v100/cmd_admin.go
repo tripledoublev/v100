@@ -34,6 +34,9 @@ func toolsCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 			reg := buildToolRegistry(cfg)
+			if err := validateToolRegistry(reg); err != nil {
+				return err
+			}
 			ts := reg.EnabledTools()
 			sort.Slice(ts, func(i, j int) bool { return ts[i].Name() < ts[j].Name() })
 			for _, t := range ts {
