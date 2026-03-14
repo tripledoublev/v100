@@ -173,6 +173,56 @@ func TestRegistryValidate(t *testing.T) {
 	}
 }
 
+type badTool struct {
+	name string
+	desc string
+	in   string
+}
+
+func (b *badTool) Name() string                     { return b.name }
+func (b *badTool) Description() string              { return b.desc }
+func (b *badTool) InputSchema() json.RawMessage     { return json.RawMessage(b.in) }
+func (b *badTool) OutputSchema() json.RawMessage    { return nil }
+func (b *badTool) DangerLevel() tools.DangerLevel   { return tools.Safe }
+func (b *badTool) Effects() tools.ToolEffects       { return tools.ToolEffects{} }
+func (b *badTool) Exec(context.Context, tools.ToolCallContext, json.RawMessage) (tools.ToolResult, error) {
+	return tools.ToolResult{}, nil
+}
+
+func TestRegistryValidateToolSurface(t *testing.T) {
+	t.Run("empty description", func(t *testing.T) {
+		reg := tools.NewRegistry([]string{"bad"})
+		reg.Register(&badTool{name: "bad", desc: "", in: `{"type":"object"}`})
+		if err := reg.Validate(); err == nil || !strings.Contains(err.Error(), "empty description") {
+			t.Errorf("expected empty description error, got %v", err)
+		}
+	})
+
+	t.Run("empty schema", func(t *testing.T) {
+		reg := tools.NewRegistry([]string{"bad"})
+		reg.Register(&badTool{name: "bad", desc: "desc", in: ""})
+		if err := reg.Validate(); err == nil || !strings.Contains(err.Error(), "empty or null input schema") {
+			t.Errorf("expected empty schema error, got %v", err)
+		}
+	})
+
+	t.Run("null schema", func(t *testing.T) {
+		reg := tools.NewRegistry([]string{"bad"})
+		reg.Register(&badTool{name: "bad", desc: "desc", in: "null"})
+		if err := reg.Validate(); err == nil || !strings.Contains(err.Error(), "empty or null input schema") {
+			t.Errorf("expected null schema error, got %v", err)
+		}
+	})
+
+	t.Run("valid empty object schema", func(t *testing.T) {
+		reg := tools.NewRegistry([]string{"bad"})
+		reg.Register(&badTool{name: "bad", desc: "desc", in: "{}"})
+		if err := reg.Validate(); err != nil {
+			t.Errorf("expected no error for {}, got %v", err)
+		}
+	})
+}
+
 func TestFSReadExec(t *testing.T) {
 	// Write a temp file
 	dir := t.TempDir()

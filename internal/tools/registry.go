@@ -176,7 +176,7 @@ func (r *Registry) RegisteredTools() []Tool {
 	return out
 }
 
-// Validate ensures all enabled tool names are actually registered.
+// Validate ensures all enabled tool names are actually registered and have valid surfaces.
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -187,6 +187,22 @@ func (r *Registry) Validate() error {
 		}
 		return fmt.Errorf("enabled tools not registered: %s", strings.Join(missing, ", "))
 	}
+
+	for _, name := range r.enabledNamesLocked() {
+		t := r.tools[name]
+		if strings.TrimSpace(t.Description()) == "" {
+			return fmt.Errorf("tool %q has an empty description", name)
+		}
+		schema := t.InputSchema()
+		if len(schema) == 0 || string(schema) == "null" || string(schema) == "{}" {
+			// Some tools might legitimately have no parameters ({}),
+			// but a completely empty or null schema is usually a bug.
+			if len(schema) == 0 || string(schema) == "null" {
+				return fmt.Errorf("tool %q has an empty or null input schema", name)
+			}
+		}
+	}
+
 	return nil
 }
 
