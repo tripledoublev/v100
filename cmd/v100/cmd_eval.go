@@ -135,7 +135,7 @@ func digestCmd() *cobra.Command {
 				fmt.Println(string(b))
 				return nil
 			}
-			fmt.Print(core.FormatDigest(digest))
+			fmt.Print(ui.FormatDigestStyled(digest))
 			return nil
 		},
 	}

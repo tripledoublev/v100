@@ -408,33 +408,33 @@ func ComputeDigest(events []Event) RunDigest {
 // FormatDigest returns a compact human-readable failure digest.
 func FormatDigest(d RunDigest) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Run:        %s\n", d.RunID)
-	fmt.Fprintf(&b, "End reason: %s\n", d.EndReason)
-	fmt.Fprintf(&b, "Steps:      %d   Tokens: %d\n", d.TotalSteps, d.TotalTokens)
+	_, _ = fmt.Fprintf(&b, "Run:        %s\n", d.RunID)
+	_, _ = fmt.Fprintf(&b, "End reason: %s\n", d.EndReason)
+	_, _ = fmt.Fprintf(&b, "Steps:      %d   Tokens: %d\n", d.TotalSteps, d.TotalTokens)
 
 	if len(d.RunErrors) > 0 {
 		b.WriteString("\nRun errors (last 5):\n")
 		for _, e := range d.RunErrors {
-			fmt.Fprintf(&b, "  • %s\n", e)
+			_, _ = fmt.Fprintf(&b, "  • %s\n", e)
 		}
 	}
 
 	if len(d.ToolFailures) > 0 {
 		b.WriteString("\nTool failures (last 5):\n")
 		for _, f := range d.ToolFailures {
-			fmt.Fprintf(&b, "  • %-20s %s\n", f.Name, f.Output)
+			_, _ = fmt.Fprintf(&b, "  • %-20s %s\n", f.Name, f.Output)
 		}
 	}
 
 	if len(d.RetryCluster) > 0 {
-		b.WriteString("\nRetry hotspots (≥3 calls):\n")
+		b.WriteString("\nRetry hotspots (>=3 calls):\n")
 		for _, r := range d.RetryCluster {
-			fmt.Fprintf(&b, "  • %-20s ×%d\n", r.Name, r.Count)
+			_, _ = fmt.Fprintf(&b, "  • %-20s x%d\n", r.Name, r.Count)
 		}
 	}
 
 	if d.HighTokenStep.StepNum > 0 {
-		fmt.Fprintf(&b, "\nHigh-token step: step %d  in=%d out=%d\n",
+		_, _ = fmt.Fprintf(&b, "\nHigh-token step: step %d  in=%d out=%d\n",
 			d.HighTokenStep.StepNum, d.HighTokenStep.TokensIn, d.HighTokenStep.TokensOut)
 	}
 
