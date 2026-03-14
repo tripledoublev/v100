@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.2.5 — 2026-03-14
+
+**Harness Cleanup and Watchdog Hardening**
+
+This patch release tightens CLI ergonomics, hardens watchdog and tool-surface behavior, and reduces sandbox artifact noise ahead of the next push.
+
+### UX Improvements
+
+- **CLI dangerous-tool confirmation no longer breaks interactive input** — The Escape listener now backs off while confirmation prompts are active, preventing raw-mode input races during approval flows.
+- **CLI transcript readability cleanup** — The transcript now uses plainer labels (`me`, `agent`, `tool`), separates spinner output from assistant text cleanly, and reduces decorative glyph noise.
+- **Styled `digest` output** — `v100 digest` now renders a clearer operator-facing failure digest in the CLI while preserving JSON output for machine use.
+
+### Reliability
+
+- **Tool-surface validation is enforced across commands** — Enabled tools are now validated against the registered runtime surface in `run`, `resume`, `eval`/`bench`, and `tools`, with clearer reporting for invalid enabled entries.
+- **Registry surface validation** — Enabled tools must now have non-empty descriptions and non-null input schemas, reducing prompt/runtime drift and malformed tool surfaces.
+- **Watchdog stop-tools behavior now matches policy** — Inspection/read-heavy watchdogs now force a true final no-tools synthesis turn instead of silently allowing more tool use or terminating early.
+- **System interventions no longer masquerade as user input** — Solver steering and watchdog messages are recorded as system messages, improving trace correctness and downstream analysis.
+- **Stats/digest tool-call dedupe is step-scoped** — Tool calls are no longer undercounted when call IDs repeat across different steps.
+
+### TUI and Layout
+
+- **Core-size TUI snapshots** — Added snapshot-style regression coverage for narrow, standard, and wide TUI layouts.
+- **TUI step interruption support** — Active TUI steps can now be interrupted cleanly without leaving the run in a confused state.
+
+### Sandbox and Artifact Hygiene
+
+- **Apply-back skips more runtime byproducts** — Sandbox apply-back now ignores more harness/runtime and package-manager noise, including `exports/`, `.gocache/`, `.gomodcache/`, `.npm/`, and `node_modules/`.
+
 ## v0.2.4 — 2026-03-12
 
 **UX Research Round 2: Dogfooding Fixes**
