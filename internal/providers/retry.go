@@ -14,7 +14,7 @@ import (
 
 // RetryConfig controls retry behaviour for the RetryProvider middleware.
 type RetryConfig struct {
-	MaxAttempts int           // default 3
+	MaxAttempts int           // default 5
 	BaseDelay   time.Duration // default 1s
 	MaxDelay    time.Duration // default 30s
 	JitterFrac  float64       // default 0.25
@@ -25,7 +25,7 @@ type RetryConfig struct {
 // DefaultRetryConfig returns sensible defaults.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts: 3,
+		MaxAttempts: 5,
 		BaseDelay:   1 * time.Second,
 		MaxDelay:    30 * time.Second,
 		JitterFrac:  0.25,

@@ -11,27 +11,27 @@ import (
 
 // RunStats holds computed statistics from a trace.
 type RunStats struct {
-	RunID              string
-	Provider           string
-	Model              string
-	ModelMetadata      providers.ModelMetadata
-	TotalSteps         int
-	TokensIn           int
-	TokensOut          int
-	TotalCostUSD       float64
-	WallClockMS        int64
-	ModelCalls         int
-	ModelLatencyMS     []int64
-	ToolCalls          int
-	ToolUsage          map[string]int
-	ToolFailures       int
-	ToolRetries        int
-	Compressions       int
-	CompressCostUSD    float64
+	RunID                 string
+	Provider              string
+	Model                 string
+	ModelMetadata         providers.ModelMetadata
+	TotalSteps            int
+	TokensIn              int
+	TokensOut             int
+	TotalCostUSD          float64
+	WallClockMS           int64
+	ModelCalls            int
+	ModelLatencyMS        []int64
+	ToolCalls             int
+	ToolUsage             map[string]int
+	ToolFailures          int
+	ToolRetries           int
+	Compressions          int
+	CompressCostUSD       float64
 	TokensSavedByCompress int
-	WatchdogFires      int
-	EndReason          string
-	Score              string
+	WatchdogFires         int
+	EndReason             string
+	Score                 string
 }
 
 // ComputeStats derives RunStats from a slice of trace events.
@@ -41,6 +41,7 @@ func ComputeStats(events []Event) RunStats {
 	var firstTS, lastTS int64
 	var pendingRetryTool string
 	var pendingRetryStep string
+	seenCallKeys := make(map[string]bool)
 
 	for _, ev := range events {
 		ts := ev.TS.UnixMilli()
@@ -74,6 +75,13 @@ func ComputeStats(events []Event) RunStats {
 		case EventToolCall:
 			var p ToolCallPayload
 			_ = json.Unmarshal(ev.Payload, &p)
+			callKey := ev.StepID + ":" + p.CallID
+			if p.CallID != "" && seenCallKeys[callKey] {
+				continue
+			}
+			if p.CallID != "" {
+				seenCallKeys[callKey] = true
+			}
 			s.ToolCalls++
 			s.ToolUsage[p.Name]++
 			if pendingRetryTool != "" && ev.StepID == pendingRetryStep && p.Name == pendingRetryTool {
@@ -315,6 +323,7 @@ type DigestStep struct {
 func ComputeDigest(events []Event) RunDigest {
 	d := RunDigest{}
 	toolCounts := map[string]int{}
+	seenCallKeys := make(map[string]bool)
 
 	for _, ev := range events {
 		switch ev.Type {
@@ -351,6 +360,13 @@ func ComputeDigest(events []Event) RunDigest {
 		case EventToolCall:
 			var p ToolCallPayload
 			_ = json.Unmarshal(ev.Payload, &p)
+			callKey := ev.StepID + ":" + p.CallID
+			if p.CallID != "" && seenCallKeys[callKey] {
+				continue
+			}
+			if p.CallID != "" {
+				seenCallKeys[callKey] = true
+			}
 			toolCounts[p.Name]++
 
 		case EventToolResult:

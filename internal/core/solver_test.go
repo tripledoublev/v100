@@ -10,6 +10,22 @@ import (
 	"github.com/tripledoublev/v100/internal/tools"
 )
 
+type mockDangerousDeniedTool struct{}
+
+func (t *mockDangerousDeniedTool) Name() string        { return "mock_dangerous" }
+func (t *mockDangerousDeniedTool) Description() string { return "dangerous test tool" }
+func (t *mockDangerousDeniedTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object"}`)
+}
+func (t *mockDangerousDeniedTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object"}`)
+}
+func (t *mockDangerousDeniedTool) DangerLevel() tools.DangerLevel { return tools.Dangerous }
+func (t *mockDangerousDeniedTool) Effects() tools.ToolEffects     { return tools.ToolEffects{} }
+func (t *mockDangerousDeniedTool) Exec(ctx context.Context, call tools.ToolCallContext, args json.RawMessage) (tools.ToolResult, error) {
+	return tools.ToolResult{OK: true, Output: "unexpected"}, nil
+}
+
 // MockProvider for testing solvers
 type MockProvider struct {
 	Responses []providers.CompleteResponse
@@ -139,6 +155,61 @@ func TestCheckpoint(t *testing.T) {
 	}
 	if l.stepCount != 5 {
 		t.Errorf("Expected step count 5 after restore, got %d", l.stepCount)
+	}
+}
+
+func TestReactSolverDeniedToolInjectsSystemMessage(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_1", Name: "mock_dangerous", Args: json.RawMessage(`{}`)},
+				},
+			},
+			{
+				AssistantText: "I need approval before I can do that.",
+			},
+		},
+	}
+
+	reg := tools.NewRegistry([]string{"mock_dangerous"})
+	reg.Register(&mockDangerousDeniedTool{})
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:       &Run{ID: "test-run", Dir: runDir},
+		Provider:  p,
+		Tools:     reg,
+		Trace:     trace,
+		Budget:    NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:    &ReactSolver{},
+		ConfirmFn: func(_, _ string) bool { return false },
+		Mapper:    NewPathMapper(runDir, runDir),
+	}
+
+	res, err := l.Solver.Solve(ctx, l, "use the dangerous tool")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !contains(res.FinalText, "approval") {
+		t.Fatalf("expected final text to reflect denial, got %q", res.FinalText)
+	}
+
+	foundSystemDenial := false
+	for _, msg := range l.Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, `tool "mock_dangerous" was denied`) {
+			foundSystemDenial = true
+		}
+		if msg.Role == "user" && strings.Contains(msg.Content, `tool "mock_dangerous" was denied`) {
+			t.Fatalf("denial steering should not be recorded as a user message: %+v", msg)
+		}
+	}
+	if !foundSystemDenial {
+		t.Fatal("expected denial steering to be recorded as a system message")
 	}
 }
 

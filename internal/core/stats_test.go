@@ -150,3 +150,46 @@ func TestFormatStatsToolRetries(t *testing.T) {
 		t.Fatalf("expected no 'Tool retries' line when 0, got:\n%s", out)
 	}
 }
+
+func TestComputeStatsDoesNotDeduplicateCallIDsAcrossSteps(t *testing.T) {
+	now := time.Now()
+	mkToolCall := func(stepID, callID, name string) Event {
+		p, _ := json.Marshal(ToolCallPayload{CallID: callID, Name: name})
+		return Event{TS: now, StepID: stepID, Type: EventToolCall, Payload: p}
+	}
+
+	events := []Event{
+		mkToolCall("s1", "call-1", "fs_read"),
+		mkToolCall("s2", "call-1", "fs_read"),
+	}
+
+	s := ComputeStats(events)
+	if s.ToolCalls != 2 {
+		t.Fatalf("ToolCalls = %d, want 2", s.ToolCalls)
+	}
+	if s.ToolUsage["fs_read"] != 2 {
+		t.Fatalf("ToolUsage[fs_read] = %d, want 2", s.ToolUsage["fs_read"])
+	}
+}
+
+func TestComputeDigestDoesNotDeduplicateCallIDsAcrossSteps(t *testing.T) {
+	now := time.Now()
+	mkToolCall := func(stepID, callID, name string) Event {
+		p, _ := json.Marshal(ToolCallPayload{CallID: callID, Name: name})
+		return Event{TS: now, StepID: stepID, Type: EventToolCall, Payload: p}
+	}
+
+	events := []Event{
+		mkToolCall("s1", "call-1", "fs_read"),
+		mkToolCall("s2", "call-1", "fs_read"),
+		mkToolCall("s3", "call-1", "fs_read"),
+	}
+
+	d := ComputeDigest(events)
+	if len(d.RetryCluster) != 1 {
+		t.Fatalf("RetryCluster len = %d, want 1", len(d.RetryCluster))
+	}
+	if d.RetryCluster[0].Name != "fs_read" || d.RetryCluster[0].Count != 3 {
+		t.Fatalf("RetryCluster[0] = %+v, want fs_read x3", d.RetryCluster[0])
+	}
+}

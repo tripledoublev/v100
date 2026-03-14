@@ -222,7 +222,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			switch hres.Action {
 			case HookInjectMessage:
 				l.Messages = append(l.Messages, providers.Message{
-					Role:    "user",
+					Role:    "system",
 					Content: hres.Message,
 				})
 				// Continue the loop to let the model respond to the injected message
@@ -232,7 +232,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			case HookForceReplan:
 				// React doesn't have a plan-specific state, but we could inject a "replan" instruction
 				l.Messages = append(l.Messages, providers.Message{
-					Role:    "user",
+					Role:    "system",
 					Content: "System intervention: please discard your current plan and reassess.",
 				})
 				continue
@@ -268,6 +268,16 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			if denied {
 				key := tc.Name + ":" + string(tc.Args)
 				denialCounts[key]++
+
+				// Inject a steering message on the first denial to help the model pivot.
+				if denialCounts[key] == 1 {
+					msg := fmt.Sprintf("System: tool %q was denied. This tool is dangerous and requires operator approval. If you need this action, explain why to the user; otherwise, find a safe alternative.", tc.Name)
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
+						Content: msg,
+					})
+				}
+
 				if denialCounts[key] >= 2 {
 					msg := fmt.Sprintf("System: tool %q was denied %d times with the same arguments. Do not retry this action. Please summarize what you were trying to accomplish and stop.", tc.Name, denialCounts[key])
 					_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
@@ -276,7 +286,22 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 						Reason:  "repeated_denial",
 					})
 					l.Messages = append(l.Messages, providers.Message{
-						Role:    "user",
+						Role:    "system",
+						Content: msg,
+					})
+					denialLoopBreak = true
+					break
+				}
+
+				// Also break if we see too many denials of any kind in a single step to prevent spinning.
+				totalDenials := 0
+				for _, count := range denialCounts {
+					totalDenials += count
+				}
+				if totalDenials >= 5 {
+					msg := "System: too many tool denials in this step. Stop and ask the operator for guidance."
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
 						Content: msg,
 					})
 					denialLoopBreak = true
@@ -298,7 +323,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 					Reason:  reason,
 				})
 				l.Messages = append(l.Messages, providers.Message{
-					Role:    "user",
+					Role:    "system",
 					Content: msg,
 				})
 				watchdogInjected = true

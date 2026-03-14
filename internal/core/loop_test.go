@@ -319,7 +319,7 @@ func TestLoopInspectionWatchdogInjectsSynthesisMessage(t *testing.T) {
 	lastReq := prov.requests[len(prov.requests)-1]
 	found := false
 	for _, msg := range lastReq.Messages {
-		if msg.Role == "user" && strings.Contains(msg.Content, "System watchdog:") {
+		if msg.Role == "system" && strings.Contains(msg.Content, "System watchdog:") {
 			found = true
 			break
 		}
