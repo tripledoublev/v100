@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -221,6 +222,25 @@ func TestIsApprovedPlanAnswer(t *testing.T) {
 		if isApprovedPlanAnswer(answer) {
 			t.Fatalf("expected rejection for %q", answer)
 		}
+	}
+}
+
+func TestWrapConfirmFnWithActivity(t *testing.T) {
+	var active atomic.Bool
+	insideActive := false
+	wrapped := wrapConfirmFnWithActivity(func(_, _ string) bool {
+		insideActive = active.Load()
+		return true
+	}, &active)
+
+	if !wrapped("sh", `{"cmd":"true"}`) {
+		t.Fatal("wrapped confirm should return underlying result")
+	}
+	if !insideActive {
+		t.Fatal("confirm activity flag should be set while confirmation is running")
+	}
+	if active.Load() {
+		t.Fatal("confirm activity flag should reset after confirmation returns")
 	}
 }
 

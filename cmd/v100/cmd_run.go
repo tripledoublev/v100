@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -381,7 +385,9 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	renderer := ui.NewCLIRenderer()
 	renderer.Verbose = verbose
 
-	confirmFn := buildConfirmFn(confirmMode)
+	baseConfirmFn := buildConfirmFn(confirmMode)
+	var confirmActive atomic.Bool
+	confirmFn := wrapConfirmFnWithActivity(baseConfirmFn, &confirmActive)
 
 	outputFn := core.OutputFn(renderer.RenderEvent)
 	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
@@ -417,6 +423,73 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	loop.ModelMetadata = metadata
 	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
 
+	reason := "user_exit"
+
+	// Step-level cancellation
+	var stepCancel context.CancelFunc
+	var stepMu sync.Mutex
+
+	// Signal handler
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		for range sigs {
+			stepMu.Lock()
+			if stepCancel != nil {
+				fmt.Fprintln(os.Stderr, ui.Warn("\ninterrupted by signal"))
+				stepCancel()
+				stepCancel = nil
+				stepMu.Unlock()
+				continue
+			}
+			stepMu.Unlock()
+			reason = "user_exit"
+			_ = loop.EmitRunEnd(reason, "")
+			os.Exit(0)
+		}
+	}()
+
+	// Escape key listener (only when terminal)
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		go func() {
+			// This goroutine runs for the life of the run
+			for {
+				// We only put it in raw mode briefly when we want to check for Escape
+				// but wait, we need to read it while the agent is busy.
+				// If the agent is busy, it's not reading from Stdin.
+				// So we can put it in raw mode in a loop and read bytes.
+
+				// However, if we are in a prompt, ui.Prompt is reading.
+				// So we should only do this when stepCancel != nil.
+
+				time.Sleep(100 * time.Millisecond)
+				stepMu.Lock()
+				busy := stepCancel != nil
+				stepMu.Unlock()
+
+				if busy && !confirmActive.Load() {
+					oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+					if err == nil {
+						// Read one byte
+						var b [1]byte
+						_, _ = os.Stdin.Read(b[:])
+						_ = term.Restore(int(os.Stdin.Fd()), oldState)
+
+						if b[0] == 27 { // Escape
+							stepMu.Lock()
+							if stepCancel != nil {
+								fmt.Fprintln(os.Stderr, ui.Warn("\ninterrupted by Escape"))
+								stepCancel()
+								stepCancel = nil
+							}
+							stepMu.Unlock()
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	if err := loop.EmitRunStart(core.RunStartPayload{
 		Policy:        pol.Name,
 		Provider:      prov.Name(),
@@ -451,24 +524,38 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
-	reason := "user_exit"
 	var providerErr bool
 
 	if initialPrompt != "" {
-		if err := runCLIInput(ctx, loop, initialPrompt, planMode); err != nil {
-			var budgetErr *core.ErrBudgetExceeded
-			if errors.As(err, &budgetErr) {
-				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
-				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
-				_ = loop.EmitRunEnd(reason, "")
-				return nil
-			}
-			var retryErr *providers.RetryableError
-			if errors.As(err, &retryErr) {
-				providerErr = true
-				fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+		stepMu.Lock()
+		var stepCtx context.Context
+		stepCtx, stepCancel = context.WithCancel(ctx)
+		stepMu.Unlock()
+
+		err := runCLIInput(stepCtx, loop, initialPrompt, planMode)
+
+		stepMu.Lock()
+		stepCancel = nil
+		stepMu.Unlock()
+
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				_ = loop.EmitRunError("", "interrupted by user")
 			} else {
-				fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+				var budgetErr *core.ErrBudgetExceeded
+				if errors.As(err, &budgetErr) {
+					fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
+					reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
+					_ = loop.EmitRunEnd(reason, "")
+					return nil
+				}
+				var retryErr *providers.RetryableError
+				if errors.As(err, &retryErr) {
+					providerErr = true
+					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+				} else {
+					fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+				}
 			}
 		}
 		if exitAfterPrompt {
@@ -491,19 +578,34 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			break
 		}
 
-		if err := runCLIInput(ctx, loop, input, planMode); err != nil {
-			var budgetErr *core.ErrBudgetExceeded
-			if errors.As(err, &budgetErr) {
-				fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
-				reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
-				break
-			}
-			var retryErr *providers.RetryableError
-			if errors.As(err, &retryErr) {
-				providerErr = true
-				fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+		stepMu.Lock()
+		var stepCtx context.Context
+		stepCtx, stepCancel = context.WithCancel(ctx)
+		stepMu.Unlock()
+
+		err = runCLIInput(stepCtx, loop, input, planMode)
+
+		stepMu.Lock()
+		stepCancel = nil
+		stepMu.Unlock()
+
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				_ = loop.EmitRunError("", "interrupted by user")
 			} else {
-				fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
+				var budgetErr *core.ErrBudgetExceeded
+				if errors.As(err, &budgetErr) {
+					fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
+					reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
+					break
+				}
+				var retryErr *providers.RetryableError
+				if errors.As(err, &retryErr) {
+					providerErr = true
+					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+				} else {
+					fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
+				}
 			}
 		}
 	}
@@ -526,6 +628,17 @@ done:
 	fmt.Println(ui.Dim("run id: ") + run.ID)
 	fmt.Println(ui.Dim("  → v100 stats " + run.ID))
 	return nil
+}
+
+func wrapConfirmFnWithActivity(confirmFn core.ConfirmFn, active *atomic.Bool) core.ConfirmFn {
+	if confirmFn == nil {
+		return nil
+	}
+	return func(toolName, args string) bool {
+		active.Store(true)
+		defer active.Store(false)
+		return confirmFn(toolName, args)
+	}
 }
 
 func runCLIInput(ctx context.Context, loop *core.Loop, input string, planMode bool) error {
