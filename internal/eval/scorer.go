@@ -291,13 +291,16 @@ func (FileContent) Score(_ context.Context, trace []core.Event, expected string)
 			continue
 		}
 		var p core.ToolCallPayload
-		if json.Unmarshal(ev.Payload, &p) != nil || p.Name != "fs_write" {
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			continue
+		}
+		if p.Name != "fs_write" {
 			continue
 		}
 		var args struct {
 			Content string `json:"content"`
 		}
-		if json.Unmarshal([]byte(p.Args), &args) != nil {
+		if err := json.Unmarshal([]byte(p.Args), &args); err != nil {
 			continue
 		}
 		if strings.TrimSpace(args.Content) == expected {
