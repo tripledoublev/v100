@@ -76,6 +76,12 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	denialCounts := map[string]int{} // key: "toolName:args" → denial count
 
 	for {
+		select {
+		case <-ctx.Done():
+			return SolveResult{}, ctx.Err()
+		default:
+		}
+
 		msgs := l.buildMessagesForStep(stepID)
 		toolSpecs := l.Tools.Specs()
 		toolNames := make([]string, 0, len(toolSpecs))

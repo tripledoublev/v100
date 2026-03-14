@@ -197,6 +197,12 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showRadioSelect = false
 				return m, nil
 			}
+			if m.InterruptFn != nil && (m.statusMode == "thinking" || m.statusMode == "tooling") {
+				m.InterruptFn()
+				m.focus = focusInput
+				m.input.Focus()
+				return m, nil
+			}
 		}
 	}
 

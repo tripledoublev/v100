@@ -842,6 +842,12 @@ func (l *Loop) EmitRunStart(payload RunStartPayload) error {
 	return err
 }
 
+// EmitRunError records a run error event.
+func (l *Loop) EmitRunError(stepID, message string) error {
+	_, err := l.emit(EventRunError, stepID, RunErrorPayload{Error: message})
+	return err
+}
+
 // EmitRunEnd records the run.end event.
 func (l *Loop) EmitRunEnd(reason, summary string) error {
 	l.mu.Lock()

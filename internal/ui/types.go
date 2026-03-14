@@ -118,8 +118,9 @@ type TUIModel struct {
 	lastEventAt    time.Time
 
 	// callbacks
-	SubmitFn func(string)
-	onReady  func() // called once from Init() to signal event loop is active
+	SubmitFn    func(string)
+	InterruptFn func()
+	onReady     func() // called once from Init() to signal event loop is active
 }
 
 // ── TUI styles ────────────────────────────────────────────────────────────────

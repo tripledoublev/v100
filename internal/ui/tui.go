@@ -53,6 +53,12 @@ func (t *TUI) RequestConfirm(toolName, args string) bool {
 	return <-result
 }
 
+func (t *TUI) SetInterruptFn(fn func()) {
+	if t.model != nil {
+		t.model.InterruptFn = fn
+	}
+}
+
 func (t *TUI) SetVerbose(v bool) {
 	if t.model != nil {
 		t.model.SetVerbose(v)

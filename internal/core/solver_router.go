@@ -50,6 +50,12 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	smartMode := false
 
 	for {
+		select {
+		case <-ctx.Done():
+			return SolveResult{}, ctx.Err()
+		default:
+		}
+
 		msgs := l.buildMessagesForStep(stepID)
 		toolSpecs := l.Tools.Specs()
 		toolNames := make([]string, 0, len(toolSpecs))

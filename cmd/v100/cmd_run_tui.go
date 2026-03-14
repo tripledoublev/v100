@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -40,6 +41,8 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	reason := "user_exit"
 
 	var loop *core.Loop
+	var stepCancel context.CancelFunc
+	var stepMu sync.Mutex
 
 	submitFn := func(input string) {
 		if logger != nil {
@@ -51,9 +54,28 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			tui.Quit()
 			return
 		}
-		if err := loop.Step(ctx, input); err != nil {
+
+		stepMu.Lock()
+		if stepCancel != nil {
+			stepCancel()
+		}
+		var stepCtx context.Context
+		stepCtx, stepCancel = context.WithCancel(ctx)
+		stepMu.Unlock()
+
+		defer func() {
+			stepMu.Lock()
+			stepCancel = nil
+			stepMu.Unlock()
+		}()
+
+		if err := loop.Step(stepCtx, input); err != nil {
 			if logger != nil {
 				logger.Printf("step error: %v", err)
+			}
+			if errors.Is(err, context.Canceled) {
+				_ = loop.EmitRunError("", "interrupted by user")
+				return
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
@@ -73,7 +95,20 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 	}
 
+	interruptFn := func() {
+		stepMu.Lock()
+		if stepCancel != nil {
+			if logger != nil {
+				logger.Printf("interrupting active step")
+			}
+			stepCancel()
+			stepCancel = nil
+		}
+		stepMu.Unlock()
+	}
+
 	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
+	tui.SetInterruptFn(interruptFn)
 	tui.SetVerbose(verbose)
 
 	confirmFn := func(toolName, args string) bool {
@@ -151,23 +186,39 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		if logger != nil {
 			logger.Printf("processing initial prompt: %q", initialPrompt)
 		}
-		if err := loop.Step(ctx, initialPrompt); err != nil {
+
+		stepMu.Lock()
+		var stepCtx context.Context
+		stepCtx, stepCancel = context.WithCancel(ctx)
+		stepMu.Unlock()
+
+		err := loop.Step(stepCtx, initialPrompt)
+
+		stepMu.Lock()
+		stepCancel = nil
+		stepMu.Unlock()
+
+		if err != nil {
 			if logger != nil {
 				logger.Printf("initial step error: %v", err)
 			}
-			var budgetErr *core.ErrBudgetExceeded
-			if errors.As(err, &budgetErr) {
-				reason = "budget_exceeded"
+			if errors.Is(err, context.Canceled) {
+				_ = loop.EmitRunError("", "interrupted by user")
 			} else {
-				var retryErr *providers.RetryableError
-				if errors.As(err, &retryErr) {
-					reason = "error"
+				var budgetErr *core.ErrBudgetExceeded
+				if errors.As(err, &budgetErr) {
+					reason = "budget_exceeded"
 				} else {
-					reason = "error"
+					var retryErr *providers.RetryableError
+					if errors.As(err, &retryErr) {
+						reason = "error"
+					} else {
+						reason = "error"
+					}
 				}
+				_ = loop.EmitRunEnd(reason, "")
+				tui.Quit()
 			}
-			_ = loop.EmitRunEnd(reason, "")
-			tui.Quit()
 		}
 	} else {
 		if logger != nil {
