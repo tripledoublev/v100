@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -77,4 +78,180 @@ func TestComputeViewLayoutTracksSplitAndSinglePaneModes(t *testing.T) {
 	if single.inputWidth != 98 {
 		t.Fatalf("input width = %d, want 98", single.inputWidth)
 	}
+}
+
+func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
+	cases := []struct {
+		name string
+		w, h int
+		want string
+	}{
+		{
+			name: "narrow",
+			w:    92,
+			h:    26,
+			want: `v100  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+A:copy  Ctrl+C:quit                      <clock>
+╭─────────────────────────────────────────────────────────╮ ╭──────────────────────────────╮
+│transcript line one                                      │ │trace                         │
+│transcript line two                                      │ │trace line one                │
+│                                                         │ ╰──────────────────────────────╯
+│                                                         │ ╭──────────────────────────────╮
+│                                                         │ │visual inspector              │
+│                                                         │ │STEPS [█████░░░░░░░░░░░░░░]   │
+│                                                         │ │TOKEN [██░░░░░░░░░░░░░░░░░]   │
+│                                                         │ │REAS. [███████░░░░░░░░░░░░]   │
+│                                                         │ │COST  [░░░░░░░░░░░░░░░░░░░]   │
+│                                                         │ │velocity: hot  model:4/30s    │
+│                                                         │ │tools:7/30s  compress:1/30s   │
+│                                                         │ │health: compression-pressure  │
+│                                                         │ │token:15%  io:42%             │
+│                                                         │ │state: thinking  idle:<dur>      │
+│                                                         │ │last step: 2s  tools:2        │
+│                                                         │ │HEARTBEAT: [──···Λ····──]     │
+│                                                         │ ╰──────────────────────────────╯
+│                                                         │ ╭──────────────────────────────╮
+│                                                         │ │status                        │
+│                                                         │ │Snapshot coverage for transc  │
+╰─────────────────────────────────────────────────────────╯ │ript, trace, inspector, and   │
+                                                            │status panes.                 │
+                                                            │THINKING                      │
+                                                            │Testing representative TUI s  │
+                                                            ╰──────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────╮
+│> ask v100 to inspect, patch, or debug...                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────╯`,
+		},
+		{
+			name: "standard",
+			w:    120,
+			h:    30,
+			want: `v100  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+A:copy all  Ctrl+C:quit                                <clock>
+╭───────────────────────────────────────────────────────────────────────────╮ ╭────────────────────────────────────────╮
+│transcript line one                                                        │ │trace                                   │
+│transcript line two                                                        │ │trace line one                          │
+│                                                                           │ ╰────────────────────────────────────────╯
+│                                                                           │ ╭────────────────────────────────────────╮
+│                                                                           │ │visual inspector                        │
+│                                                                           │ │STEPS [████████░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                           │ │TOKEN [████░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                           │ │REAS. [████████████░░░░░░░░░░░░░░░░░]   │
+│                                                                           │ │COST  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                           │ │velocity: hot  model:4/30s  tools:7/30s │
+│                                                                           │ │compress:1/30s                          │
+│                                                                           │ │health: compression-pressure  token:15% │
+│                                                                           │ │io:42%                                  │
+│                                                                           │ │state: thinking  idle:<dur>                │
+│                                                                           │ │last step: 2s  tools:2                  │
+│                                                                           │ │HEARTBEAT: [──···Λ····──]               │
+│                                                                           │ ╰────────────────────────────────────────╯
+│                                                                           │ ╭────────────────────────────────────────╮
+│                                                                           │ │status                                  │
+│                                                                           │ │Snapshot coverage for transcript, trac  │
+│                                                                           │ │e, inspector, and status panes.         │
+│                                                                           │ │THINKING                                │
+│                                                                           │ │Testing representative TUI sizes.       │
+│                                                                           │ │device: charging 84%                    │
+╰───────────────────────────────────────────────────────────────────────────╯ │                                        │
+                                                                              │sub-agents: active=0 done=0 failed=0    │
+                                                                              ╰────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> ask v100 to inspect, patch, or debug...                                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`,
+		},
+		{
+			name: "wide",
+			w:    160,
+			h:    36,
+			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+A:copy all  Ctrl+C:quit                    <clock>
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────╮
+│transcript line one                                                                                   │ │trace                                                │
+│transcript line two                                                                                   │ │trace line one                                       │
+│                                                                                                      │ ╰─────────────────────────────────────────────────────╯
+│                                                                                                      │ ╭─────────────────────────────────────────────────────╮
+│                                                                                                      │ │visual inspector                                     │
+│                                                                                                      │ │STEPS [████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                                                      │ │TOKEN [██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                                                      │ │REAS. [█████████████████░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                                                      │ │COST  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   │
+│                                                                                                      │ │velocity: hot  model:4/30s  tools:7/30s              │
+│                                                                                                      │ │compress:1/30s                                       │
+│                                                                                                      │ │health: compression-pressure  token:15%  io:42%      │
+│                                                                                                      │ │state: thinking  idle:<dur>                             │
+│                                                                                                      │ │last step: 2s  tools:2                               │
+│                                                                                                      │ │HEARTBEAT: [──···Λ····──]                            │
+│                                                                                                      │ ╰─────────────────────────────────────────────────────╯
+│                                                                                                      │ ╭─────────────────────────────────────────────────────╮
+│                                                                                                      │ │status                                               │
+│                                                                                                      │ │Snapshot coverage for transcript, trace, inspector,  │
+│                                                                                                      │ │and status panes.                                    │
+│                                                                                                      │ │THINKING                                             │
+│                                                                                                      │ │Testing representative TUI sizes.                    │
+│                                                                                                      │ │device: charging 84%                                 │
+│                                                                                                      │ │                                                     │
+│                                                                                                      │ │sub-agents: active=0 done=0 failed=0                 │
+│                                                                                                      │ │last: none                                           │
+│                                                                                                      │ │                                                     │
+│                                                                                                      │ ╰─────────────────────────────────────────────────────╯
+│                                                                                                      │
+│                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> ask v100 to inspect, patch, or debug...                                                                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := snapshotFixtureModel(tc.w, tc.h)
+			got := normalizeViewSnapshot(m.View())
+			if got != tc.want {
+				t.Fatalf("snapshot mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func snapshotFixtureModel(width, height int) *TUIModel {
+	m := NewTUIModel()
+	m.width = width
+	m.height = height
+	m.showTrace = true
+	m.showStatus = true
+	m.showMetrics = true
+	m.statusMode = "thinking"
+	m.lastEventAt = time.Now().Add(-3 * time.Second)
+	m.currentStep = 3
+	m.maxSteps = 10
+	m.usedTokens = 1200
+	m.maxTokens = 8000
+	m.inputTokens = 700
+	m.outputTokens = 500
+	m.usedCost = 0.01
+	m.maxCost = 1.0
+	m.lastStepMS = 2400
+	m.lastStepTools = 2
+	m.modelEvents = make([]time.Time, 4)
+	m.toolEvents = make([]time.Time, 7)
+	m.compressEvents = make([]time.Time, 1)
+	m.runSummary = "Snapshot coverage for transcript, trace, inspector, and status panes."
+	m.statusLine = "Testing representative TUI sizes."
+	m.device = deviceStatus{BatteryPresent: true, Percent: 84, State: "charging"}
+	m.radioURL = availableStations[0].URL
+	m.radioVolume = 60
+	m.radioPlaying = false
+	m.transcript.SetContent("transcript line one\ntranscript line two")
+	m.traceView.SetContent("trace line one\ntrace line two")
+	return m
+}
+
+func normalizeViewSnapshot(view string) string {
+	view = stripANSI(view)
+	view = regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`).ReplaceAllString(view, "<clock>")
+	view = regexp.MustCompile(`idle:\S+`).ReplaceAllString(view, "idle:<dur>")
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
