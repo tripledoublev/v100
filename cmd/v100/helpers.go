@@ -877,7 +877,49 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 			copy(msgs, cp.Messages)
 		}
 	}
-	return msgs, providerName, model, workspace, metadata
+	return reconcileToolHistory(msgs), providerName, model, workspace, metadata
+}
+
+// reconcileToolHistory drops orphaned tool calls/results so resumed transcripts
+// remain valid even if the original run stopped mid-tool batch.
+func reconcileToolHistory(msgs []providers.Message) []providers.Message {
+	toolResults := make(map[string]bool)
+	for _, msg := range msgs {
+		if msg.Role == "tool" && strings.TrimSpace(msg.ToolCallID) != "" {
+			toolResults[msg.ToolCallID] = true
+		}
+	}
+
+	keptToolCalls := make(map[string]bool)
+	out := make([]providers.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "assistant":
+			if len(msg.ToolCalls) == 0 {
+				out = append(out, msg)
+				continue
+			}
+			filtered := make([]providers.ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				if toolResults[tc.ID] {
+					filtered = append(filtered, tc)
+					keptToolCalls[tc.ID] = true
+				}
+			}
+			if len(filtered) == 0 && strings.TrimSpace(msg.Content) == "" {
+				continue
+			}
+			msg.ToolCalls = filtered
+			out = append(out, msg)
+		case "tool":
+			if keptToolCalls[msg.ToolCallID] {
+				out = append(out, msg)
+			}
+		default:
+			out = append(out, msg)
+		}
+	}
+	return out
 }
 
 func resolveWorkspace(workspaceFlag, runDir string) string {

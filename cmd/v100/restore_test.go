@@ -46,7 +46,13 @@ func TestReconstructHistoryResetsOnSandboxRestore(t *testing.T) {
 		CreatedAt:  time.Now().UTC(),
 		Messages: []providers.Message{
 			{Role: "user", Content: "before restore"},
-			{Role: "assistant", Content: "checkpoint state"},
+			{
+				Role:    "assistant",
+				Content: "checkpoint state",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call-1", Name: "fs_read", Args: json.RawMessage(`{"path":"README.md"}`)},
+				},
+			},
 		},
 		StepCount: 2,
 	}
@@ -87,6 +93,48 @@ func TestReconstructHistoryResetsOnSandboxRestore(t *testing.T) {
 	}
 	if msgs[2].Content != "after restore tool output" || msgs[2].Role != "tool" {
 		t.Fatalf("unexpected post-restore message: %+v", msgs[2])
+	}
+}
+
+func TestReconstructHistoryDropsIncompleteToolCallsOnResume(t *testing.T) {
+	runDir := t.TempDir()
+	events := []core.Event{
+		mustEvent(t, core.EventRunStart, core.RunStartPayload{
+			Provider:  "codex",
+			Model:     "gpt-5.4",
+			Workspace: "/workspace",
+		}),
+		mustEvent(t, core.EventUserMsg, core.UserMsgPayload{Content: "inspect latest run"}),
+		mustEvent(t, core.EventModelResp, core.ModelRespPayload{
+			Text: "I'll inspect the latest run.",
+			ToolCalls: []core.ToolCall{
+				{ID: "call-1", Name: "fs_list", ArgsJSON: `{"path":"runs"}`},
+				{ID: "call-2", Name: "project_search", ArgsJSON: `{"pattern":"gemini","path":"runs"}`},
+			},
+		}),
+		mustEvent(t, core.EventToolResult, core.ToolResultPayload{
+			CallID: "call-1",
+			Name:   "fs_list",
+			OK:     true,
+			Output: `{"entries":["run-a/"]}`,
+		}),
+	}
+
+	msgs, providerName, model, workspace, _ := reconstructHistory(runDir, events)
+	if providerName != "codex" || model != "gpt-5.4" || workspace != "/workspace" {
+		t.Fatalf("unexpected run info: provider=%q model=%q workspace=%q", providerName, model, workspace)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("message count = %d, want 3 (%+v)", len(msgs), msgs)
+	}
+	if len(msgs[1].ToolCalls) != 1 {
+		t.Fatalf("assistant tool calls = %d, want 1 (%+v)", len(msgs[1].ToolCalls), msgs[1].ToolCalls)
+	}
+	if msgs[1].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("assistant kept wrong tool call: %+v", msgs[1].ToolCalls[0])
+	}
+	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call-1" {
+		t.Fatalf("unexpected tool message after reconcile: %+v", msgs[2])
 	}
 }
 
