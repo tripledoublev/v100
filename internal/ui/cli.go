@@ -132,7 +132,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		// Skip printing text if it was already streamed via EventModelToken
 		if p.Text != "" && !r.streamedText {
 			indented := indentLines(p.Text, "              ")
-			fmt.Printf("\n%s  %s  %s\n",
+			fmt.Printf("%s  %s  %s\n",
 				ts,
 				styleAssistant.Render("v100"),
 				indented,
@@ -140,7 +140,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		// If text was streamed and there are tool calls, print a blank line for separation
 		if r.streamedText && len(p.ToolCalls) > 0 {
-			fmt.Println()
+			fmt.Print("")
 		}
 		for _, tc := range p.ToolCalls {
 			args := TruncateOutput(tc.ArgsJSON, r.Verbose)
@@ -305,7 +305,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventCompress:
 		var p core.CompressPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n%s  %s  %s\n",
+		fmt.Printf("%s  %s  %s\n",
 			ts,
 			styleInfo.Render("⊘ compress"),
 			styleMuted.Render(fmt.Sprintf("%d→%d msgs  ~%dk→%dk tok  $%.4f",
