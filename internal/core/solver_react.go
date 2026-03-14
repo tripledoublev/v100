@@ -73,6 +73,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	stepTokensUsed := 0
 	stepOutputTokens := 0
 	watchdogInjected := false
+	toolsStopped := false
 	denialCounts := map[string]int{} // key: "toolName:args" → denial count
 
 	for {
@@ -83,7 +84,10 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 
 		msgs := l.buildMessagesForStep(stepID)
-		toolSpecs := l.Tools.Specs()
+		var toolSpecs []providers.ToolSpec
+		if !toolsStopped {
+			toolSpecs = l.Tools.Specs()
+		}
 		toolNames := make([]string, 0, len(toolSpecs))
 		for _, ts := range toolSpecs {
 			toolNames = append(toolNames, ts.Name)
@@ -227,6 +231,13 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				})
 				// Continue the loop to let the model respond to the injected message
 				continue
+			case HookStopTools:
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "system",
+					Content: hres.Message,
+				})
+				toolsStopped = true
+				continue
 			case HookTerminate:
 				return SolveResult{FinalText: finalText, Steps: 1}, fmt.Errorf("hook terminated: %s", hres.Reason)
 			case HookForceReplan:
@@ -243,6 +254,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			break
 		}
 
+		if toolsStopped {
+			toolCalls = nil
+		}
 		if len(toolCalls) == 0 {
 			break
 		}
@@ -315,19 +329,33 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		if toolCallsUsed >= maxToolCalls {
 			break
 		}
+		stopToolsTriggered := false
 		if !watchdogInjected {
-			if msg, reason, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
+			if msg, reason, action, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
 				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
-					Action:  "inject_message",
+					Action:  hookActionTraceName(action),
 					Message: msg,
 					Reason:  reason,
 				})
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "system",
-					Content: msg,
-				})
-				watchdogInjected = true
+				if action == HookStopTools {
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
+						Content: msg,
+					})
+					toolsStopped = true
+					watchdogInjected = true
+					stopToolsTriggered = true
+				} else {
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
+						Content: msg,
+					})
+					watchdogInjected = true
+				}
 			}
+		}
+		if stopToolsTriggered {
+			continue
 		}
 	}
 
@@ -386,20 +414,35 @@ func isInspectionTool(name string) bool {
 	}
 }
 
-func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, bool) {
+func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
 	if inspectionOnly &&
 		toolCallsUsed >= inspectionWatchdogToolThreshold &&
 		modelCalls >= inspectionWatchdogModelThreshold {
-		return "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Stop exploring, synthesize what you already know, and answer without calling more tools unless a missing fact is absolutely required.", "inspection_watchdog", true
+		return "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Tool use is now DISABLED for the remainder of this step. Stop exploring, synthesize what you already know, and provide your final answer.", "inspection_watchdog", HookStopTools, true
 	}
 
 	if modelCalls < readHeavyWatchdogModelThreshold ||
 		stepTokensUsed < readHeavyWatchdogTokenThreshold ||
 		inspectionToolCalls < readHeavyWatchdogToolThreshold {
-		return "", "", false
+		return "", "", HookContinue, false
 	}
 	if toolCallsUsed == 0 || inspectionToolCalls*5 < toolCallsUsed*4 {
-		return "", "", false
+		return "", "", HookContinue, false
 	}
-	return "System watchdog: this step is spending too many tokens on read-heavy inspection. Stop searching and reading, synthesize the evidence you already have, and answer now unless one specific missing fact is essential.", "read_heavy_watchdog", true
+	return "System watchdog: this step is spending too many tokens on read-heavy inspection. Tool use is now DISABLED for the remainder of this step. Stop searching and reading, synthesize the evidence you already have, and answer now.", "read_heavy_watchdog", HookStopTools, true
+}
+
+func hookActionTraceName(action HookAction) string {
+	switch action {
+	case HookInjectMessage:
+		return "inject_message"
+	case HookForceReplan:
+		return "force_replan"
+	case HookStopTools:
+		return "stop_tools"
+	case HookTerminate:
+		return "terminate"
+	default:
+		return ""
+	}
 }

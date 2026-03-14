@@ -313,8 +313,13 @@ func TestLoopInspectionWatchdogInjectsSynthesisMessage(t *testing.T) {
 	if err := loop.Step(context.Background(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
-	if len(prov.requests) < 4 {
-		t.Fatalf("expected at least 4 provider calls, got %d", len(prov.requests))
+	// With the new hard-stop watchdog:
+	// Call 1: 3 tools (total 3)
+	// Call 2: 3 tools (total 6)
+	// Call 3: 2 tools (total 8) -> watchdog fires after exec, injects message, breaks loop
+	// Call 4: Synthesis response (no tools)
+	if len(prov.requests) != 4 {
+		t.Fatalf("expected exactly 4 provider calls, got %d", len(prov.requests))
 	}
 	lastReq := prov.requests[len(prov.requests)-1]
 	found := false

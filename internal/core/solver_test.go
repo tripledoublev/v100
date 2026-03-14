@@ -29,6 +29,7 @@ func (t *mockDangerousDeniedTool) Exec(ctx context.Context, call tools.ToolCallC
 // MockProvider for testing solvers
 type MockProvider struct {
 	Responses []providers.CompleteResponse
+	Requests  []providers.CompleteRequest
 	idx       int
 }
 
@@ -37,6 +38,7 @@ func (p *MockProvider) Capabilities() providers.Capabilities {
 	return providers.Capabilities{ToolCalls: true}
 }
 func (p *MockProvider) Complete(ctx context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	p.Requests = append(p.Requests, req)
 	if p.idx >= len(p.Responses) {
 		return providers.CompleteResponse{AssistantText: "done"}, nil
 	}
@@ -210,6 +212,71 @@ func TestReactSolverDeniedToolInjectsSystemMessage(t *testing.T) {
 	}
 	if !foundSystemDenial {
 		t.Fatal("expected denial steering to be recorded as a system message")
+	}
+}
+
+func TestReactSolverWatchdogStopsToolsButAllowsFinalSynthesisTurn(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-2", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-3", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-4", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-5", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-6", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{ToolCalls: []providers.ToolCall{
+				{ID: "call-7", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				{ID: "call-8", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+			}},
+			{AssistantText: "Synthesis after watchdog."},
+		},
+	}
+
+	reg := tools.NewRegistry([]string{"fs_list"})
+	reg.Register(tools.FSList())
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:      &Run{ID: "test-run", Dir: runDir},
+		Provider: p,
+		Tools:    reg,
+		Trace:    trace,
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:   &ReactSolver{},
+		Mapper:   NewPathMapper(runDir, runDir),
+	}
+
+	res, err := l.Solver.Solve(ctx, l, "inspect")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !contains(res.FinalText, "Synthesis after watchdog") {
+		t.Fatalf("unexpected final text: %q", res.FinalText)
+	}
+	if len(p.Requests) < 4 {
+		t.Fatalf("expected at least 4 provider requests, got %d", len(p.Requests))
+	}
+	lastReq := p.Requests[len(p.Requests)-1]
+	if len(lastReq.Tools) != 0 {
+		t.Fatalf("expected watchdog synthesis turn to disable tools, got %d tools", len(lastReq.Tools))
+	}
+	foundWatchdogMessage := false
+	for _, msg := range lastReq.Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "Tool use is now DISABLED for the remainder of this step") {
+			foundWatchdogMessage = true
+			break
+		}
+	}
+	if !foundWatchdogMessage {
+		t.Fatalf("expected watchdog system message in final synthesis request, got %+v", lastReq.Messages)
 	}
 }
 

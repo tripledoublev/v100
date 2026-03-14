@@ -42,6 +42,7 @@ const (
 	HookContinue      HookAction = iota
 	HookInjectMessage            // inject a user message before next model call
 	HookForceReplan              // trigger solver replan
+	HookStopTools                // prevent further tool calls in current step
 	HookTerminate                // end run with reason "hook_terminated"
 )
 

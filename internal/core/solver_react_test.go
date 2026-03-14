@@ -3,7 +3,7 @@ package core
 import "testing"
 
 func TestSynthesisWatchdogMessageReadHeavy(t *testing.T) {
-	msg, reason, ok := synthesisWatchdogMessage(
+	msg, reason, action, ok := synthesisWatchdogMessage(
 		6,
 		6,
 		2,
@@ -19,10 +19,13 @@ func TestSynthesisWatchdogMessageReadHeavy(t *testing.T) {
 	if msg == "" {
 		t.Fatal("expected non-empty watchdog message")
 	}
+	if action != HookStopTools {
+		t.Fatalf("action = %v, want HookStopTools", action)
+	}
 }
 
 func TestSynthesisWatchdogMessageDoesNotTriggerOnLowInspectionShare(t *testing.T) {
-	if _, _, ok := synthesisWatchdogMessage(
+	if _, _, _, ok := synthesisWatchdogMessage(
 		10,
 		5,
 		3,

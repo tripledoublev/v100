@@ -84,6 +84,8 @@ func (l *Loop) runHooks(stepID string) HookResult {
 				actionStr = "inject_message"
 			case HookForceReplan:
 				actionStr = "force_replan"
+			case HookStopTools:
+				actionStr = "stop_tools"
 			case HookTerminate:
 				actionStr = "terminate"
 			}
