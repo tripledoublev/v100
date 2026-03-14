@@ -215,6 +215,35 @@ func TestFinalizeSandboxWorkspaceSkipsGoTelemetry(t *testing.T) {
 	}
 }
 
+func TestFinalizeSandboxWorkspaceSkipsExhaustiveByproducts(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+
+	writeFile(t, filepath.Join(source, "main.go"), "package main\n")
+	writeFile(t, filepath.Join(sandbox, "main.go"), "package main\n")
+
+	// Noise to skip
+	writeFile(t, filepath.Join(sandbox, "runs", "abc", "trace.jsonl"), "noise")
+	writeFile(t, filepath.Join(sandbox, "exports", "run.tar.gz"), "noise")
+	writeFile(t, filepath.Join(sandbox, ".gocache", "00", "abc"), "noise")
+	writeFile(t, filepath.Join(sandbox, ".gomodcache", "pkg", "mod"), "noise")
+	writeFile(t, filepath.Join(sandbox, ".npm", "_cacache", "index"), "noise")
+	writeFile(t, filepath.Join(sandbox, "node_modules", "express", "index.js"), "noise")
+
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:             "manual",
+		Success:          true,
+		SourceWorkspace:  source,
+		SandboxWorkspace: sandbox,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Diff.Empty() {
+		t.Fatalf("expected exhaustive byproducts to be ignored, got diff: %+v", result.Diff)
+	}
+}
+
 func TestWorkspaceDiffIncludesPreviewsForSmallFiles(t *testing.T) {
 	source := t.TempDir()
 	sandbox := t.TempDir()
