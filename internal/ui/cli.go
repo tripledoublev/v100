@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/term"
 	"github.com/tripledoublev/v100/internal/core"
+	"golang.org/x/term"
 )
 
 // CLIRenderer prints events to stdout line by line with colors.
@@ -45,8 +45,11 @@ func formatTokens(tokens int) string {
 }
 
 // stopModelSpinner stops the model-call spinner and waits for it to finish.
-func (r *CLIRenderer) stopModelSpinner() {
+// It returns true when a spinner was active, so callers can add a clean line
+// break before rendering assistant output.
+func (r *CLIRenderer) stopModelSpinner() bool {
 	r.mu.Lock()
+	active := r.modelCallStop != nil
 	if r.modelCallStop != nil {
 		close(r.modelCallStop)
 		r.modelCallStop = nil
@@ -57,6 +60,7 @@ func (r *CLIRenderer) stopModelSpinner() {
 	if done != nil {
 		<-done
 	}
+	return active
 }
 
 // RenderEvent prints a human-readable, colorized representation of an event.
@@ -72,9 +76,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		label := styleUser.Render("you")
+		label := styleUser.Render("me")
 		if p.Source == "system" {
-			label = styleWarn.Render("v100")
+			label = styleWarn.Render("system")
 		}
 		fmt.Printf("\n%s  %s  %s\n",
 			ts,
@@ -123,7 +127,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}()
 
 	case core.EventModelResp:
-		r.stopModelSpinner()
+		if r.stopModelSpinner() {
+			fmt.Println()
+		}
 		if r.inSubAgent > 0 {
 			break // suppress sub-agent model responses
 		}
@@ -134,7 +140,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			indented := indentLines(p.Text, "              ")
 			fmt.Printf("%s  %s  %s\n",
 				ts,
-				styleAssistant.Render("v100"),
+				styleAssistant.Render("agent"),
 				indented,
 			)
 		}
@@ -145,7 +151,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		for _, tc := range p.ToolCalls {
 			args := TruncateOutput(tc.ArgsJSON, r.Verbose)
 			fmt.Printf("           %s %s%s\n",
-				styleTool.Render("⚙"),
+				styleTool.Render("tool"),
 				styleTool.Render(tc.Name),
 				styleMuted.Render("("+args+")"),
 			)
@@ -154,6 +160,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventModelToken:
 		if r.inSubAgent > 0 {
 			break
+		}
+		if r.stopModelSpinner() {
+			fmt.Println()
 		}
 		var p map[string]string
 		_ = json.Unmarshal(ev.Payload, &p)
@@ -193,23 +202,25 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		break
 
 	case core.EventToolResult:
-		r.stopModelSpinner()
+		if r.stopModelSpinner() {
+			fmt.Println()
+		}
 		if r.inSubAgent > 0 {
 			break // suppress sub-agent tool results
 		}
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		var icon, statusStyle string
+		var statusLabel, statusStyle string
 		if p.OK {
-			icon = styleOK.Render("✓")
+			statusLabel = styleOK.Render("ok")
 			statusStyle = styleOK.Render(p.Name)
 		} else {
-			icon = styleFail.Render("✗")
+			statusLabel = styleFail.Render("err")
 			statusStyle = styleFail.Render(p.Name)
 		}
 		out := TruncateOutput(p.Output, r.Verbose)
 		fmt.Printf("           %s %s  %s  %s\n",
-			icon,
+			statusLabel,
 			statusStyle,
 			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
 			out,
