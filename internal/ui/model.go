@@ -25,6 +25,7 @@ func NewTUIModel() *TUIModel {
 		focus:        focusInput,
 		showTrace:    true,
 		showStatus:   true,
+		showMetrics:  true,
 		statusMode:   "idle",
 		statusLine:   "ready and waiting",
 		runSummary:   "v100 run pending",

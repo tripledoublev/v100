@@ -97,12 +97,12 @@ func (p paneLayout) withRightColumnHeights(metricsRendered, statusRendered, trac
 }
 
 func computeHeaderLayout(totalWidth int, now time.Time) headerLayout {
-	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+A:copy all  Ctrl+C:quit"
+	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit"
 	if totalWidth < 130 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+A:copy all  Ctrl+C:quit"
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit"
 	}
 	if totalWidth < 100 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+A:copy  Ctrl+C:quit"
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+A:copy  Ctrl+C:quit"
 	}
 
 	leftText := "v100" + headerHint

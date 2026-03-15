@@ -34,6 +34,20 @@ func TestViewRendersHeaderInBoundedHeight(t *testing.T) {
 	}
 }
 
+func TestNewTUIModelEnablesVisualInspectorByDefault(t *testing.T) {
+	m := NewTUIModel()
+	if !m.showMetrics {
+		t.Fatal("expected visual inspector to be enabled by default")
+	}
+
+	m.width = 120
+	m.height = 30
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "visual inspector") {
+		t.Fatalf("expected default view to include visual inspector, got:\n%s", view)
+	}
+}
+
 func TestViewKeepsClockVisibleInHeader(t *testing.T) {
 	m := NewTUIModel()
 	m.width = 100
