@@ -288,7 +288,8 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
-				_ = loop.EmitRunEnd("budget_exceeded", "")
+				reason = "budget_exceeded"
+				_ = loop.EmitRunEnd(reason, "")
 				tui.Quit()
 			}
 		}
@@ -357,7 +358,9 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	if logger != nil {
 		logger.Printf("tui loop ended reason=%s", reason)
 	}
-	_ = loop.EmitRunEnd(reason, "")
+	if err := loop.EmitRunEnd(reason, ""); err != nil {
+		return err
+	}
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		if logger != nil {

@@ -80,14 +80,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
 				reason = "budget_exceeded"
-				_ = loop.EmitRunEnd(reason, "")
+				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
 				tui.Quit()
 				return
 			}
 			var retryErr *providers.RetryableError
 			if errors.As(err, &retryErr) {
 				reason = "error"
-				_ = loop.EmitRunEnd(reason, "")
+				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
 				tui.Quit()
 				return
 			}
@@ -216,7 +216,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 						reason = "error"
 					}
 				}
-				_ = loop.EmitRunEnd(reason, "")
+				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
 				tui.Quit()
 			}
 		}
@@ -246,7 +246,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		sumReq := providers.CompleteRequest{
-			Model:    model,
+			Model: model,
 			Messages: append(loop.Messages, providers.Message{
 				Role:    "user",
 				Content: "Briefly summarize the outcome of this run in one sentence (max 20 words). What was achieved?",
@@ -257,7 +257,13 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 	}
 
-	_ = loop.EmitRunEnd(reason, finalSummary)
+	if finalSummary == "" {
+		if err := emitFinalTUIRunEnd(loop, prov, model, reason); err != nil {
+			return err
+		}
+	} else if err := loop.EmitRunEnd(reason, finalSummary); err != nil {
+		return err
+	}
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		if logger != nil {

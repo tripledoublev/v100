@@ -37,7 +37,10 @@ The goal is to make agent behavior measurable and reproducible so different prom
 git clone https://github.com/tripledoublev/v100
 cd v100
 go build -ldflags "-X main.version=v0.2.5" -o v100 ./cmd/v100/
+./v100 install
 ```
+
+`./v100 install` creates `~/.local/bin/v100` as a symlink to the repo-local `./v100`, so future `go build -o v100 ./cmd/v100/` rebuilds automatically update the shell-resolved `v100`.
 
 Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, `mpv` or `ffplay` for `radio`.
 
