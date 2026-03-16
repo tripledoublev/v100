@@ -76,6 +76,54 @@ func TestCLIRendererUsesPlainToolResultStatus(t *testing.T) {
 	}
 }
 
+func TestPromptWithImagesReadsPlainCLIInput(t *testing.T) {
+	old := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+	defer func() {
+		os.Stdin = old
+		_ = r.Close()
+	}()
+
+	if _, err := w.WriteString("inspect this\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+
+	got, err := PromptWithImages("")
+	if err != nil {
+		t.Fatalf("PromptWithImages returned error: %v", err)
+	}
+	if got.Text != "inspect this" {
+		t.Fatalf("expected prompt text, got %q", got.Text)
+	}
+	if len(got.Images) != 0 {
+		t.Fatalf("expected no images for plain stdin prompt, got %d", len(got.Images))
+	}
+}
+
+func TestPromptLineIncludesImageCount(t *testing.T) {
+	line := promptLine("check this", [][]byte{{0x89, 0x50, 0x4e, 0x47}}, "attached [Image #1]")
+	if !strings.Contains(line, "check this") {
+		t.Fatalf("expected prompt text in %q", line)
+	}
+	if !strings.Contains(line, "[Image #1]") {
+		t.Fatalf("expected image marker in %q", line)
+	}
+}
+
+func TestIsPNGData(t *testing.T) {
+	if !isPNGData([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}) {
+		t.Fatal("expected valid PNG signature to be accepted")
+	}
+	if isPNGData([]byte("plain text")) {
+		t.Fatal("expected plain text to be rejected as PNG")
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout

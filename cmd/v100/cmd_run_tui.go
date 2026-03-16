@@ -44,11 +44,11 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	var stepCancel context.CancelFunc
 	var stepMu sync.Mutex
 
-	submitFn := func(input string) {
+	submitFn := func(req ui.SubmitRequest) {
 		if logger != nil {
-			logger.Printf("submit input_len=%d", len(input))
+			logger.Printf("submit input_len=%d images=%d", len(req.Text), len(req.Images))
 		}
-		inputTrim := strings.TrimSpace(input)
+		inputTrim := strings.TrimSpace(req.Text)
 		if inputTrim == "/quit" || inputTrim == "/exit" {
 			reason = "user_exit"
 			tui.Quit()
@@ -69,7 +69,12 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			stepMu.Unlock()
 		}()
 
-		if err := loop.Step(stepCtx, input); err != nil {
+		images := make([]providers.ImageAttachment, 0, len(req.Images))
+		for _, img := range req.Images {
+			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+		}
+
+		if err := loop.StepWithImages(stepCtx, req.Text, images); err != nil {
 			if logger != nil {
 				logger.Printf("step error: %v", err)
 			}

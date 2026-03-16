@@ -24,11 +24,9 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	var modelCalls int
 
 	// 1. Append user message
-	_, err := l.emit(EventUserMsg, stepID, UserMsgPayload{Content: userInput})
-	if err != nil {
+	if err := l.appendUserMessage(stepID, userInput); err != nil {
 		return SolveResult{}, err
 	}
-	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
 
 	// 2. Maybe compress history before calling the provider.
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {

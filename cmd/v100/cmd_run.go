@@ -532,7 +532,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err := runCLIInput(stepCtx, loop, initialPrompt, planMode)
+		err := runCLIInput(stepCtx, loop, initialPrompt, nil, planMode)
 
 		stepMu.Lock()
 		stepCancel = nil
@@ -565,13 +565,17 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	}
 
 	for {
-		input, err := ui.Prompt("")
+		promptResult, err := ui.PromptWithImages("")
 		if err != nil {
 			reason = "user_exit"
 			break
 		}
-		input = strings.TrimSpace(input)
-		if input == "" {
+		input := strings.TrimSpace(promptResult.Text)
+		images := make([]providers.ImageAttachment, 0, len(promptResult.Images))
+		for _, img := range promptResult.Images {
+			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+		}
+		if input == "" && len(images) == 0 {
 			continue
 		}
 		if input == "/quit" || input == "/exit" {
@@ -583,7 +587,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err = runCLIInput(stepCtx, loop, input, planMode)
+		err = runCLIInput(stepCtx, loop, input, images, planMode)
 
 		stepMu.Lock()
 		stepCancel = nil
@@ -641,9 +645,12 @@ func wrapConfirmFnWithActivity(confirmFn core.ConfirmFn, active *atomic.Bool) co
 	}
 }
 
-func runCLIInput(ctx context.Context, loop *core.Loop, input string, planMode bool) error {
+func runCLIInput(ctx context.Context, loop *core.Loop, input string, images []providers.ImageAttachment, planMode bool) error {
 	if !planMode {
-		return loop.Step(ctx, input)
+		return loop.StepWithImages(ctx, input, images)
+	}
+	if len(images) > 0 {
+		return fmt.Errorf("plan mode does not support image attachments yet")
 	}
 	planSolver, ok := loop.Solver.(*core.PlanExecuteSolver)
 	if !ok {

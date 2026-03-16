@@ -14,13 +14,20 @@ type Capabilities struct {
 	Streaming bool
 }
 
+// ImageAttachment carries a user-provided image for multimodal providers.
+type ImageAttachment struct {
+	MIMEType string
+	Data     []byte
+}
+
 // Message is a single entry in the conversation history.
 type Message struct {
 	Role       string // "system", "user", "assistant", "tool"
 	Content    string
-	ToolCallID string     // for role=tool results
-	Name       string     // for role=tool: tool name
-	ToolCalls  []ToolCall // for role=assistant tool-calling turns
+	Images     []ImageAttachment `json:"-"`
+	ToolCallID string            // for role=tool results
+	Name       string            // for role=tool: tool name
+	ToolCalls  []ToolCall        // for role=assistant tool-calling turns
 }
 
 // ToolSpec describes a tool to be sent to the provider.

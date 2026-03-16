@@ -49,11 +49,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	}
 
 	// 1. Append user message
-	_, err := l.emit(EventUserMsg, stepID, UserMsgPayload{Content: userInput})
-	if err != nil {
+	if err := l.appendUserMessage(stepID, userInput); err != nil {
 		return SolveResult{}, err
 	}
-	l.Messages = append(l.Messages, providers.Message{Role: "user", Content: userInput})
 
 	// 2. Maybe compress history before calling the provider.
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
@@ -197,7 +195,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		for i, tc := range toolCalls {
 			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
 		}
-		_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
+		if _, err := l.emit(EventModelResp, stepID, ModelRespPayload{
 			Text:      assistantText.String(),
 			ToolCalls: tcPayload,
 			Usage: Usage{
@@ -207,8 +205,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			},
 			DurationMS: durMS,
 			TTFT:       ttft,
-		})
-		if err != nil {
+		}); err != nil {
 			return SolveResult{}, err
 		}
 

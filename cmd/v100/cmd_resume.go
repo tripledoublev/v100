@@ -223,18 +223,22 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	ctx := context.Background()
 	reason := "user_exit"
 	for {
-		input, err := ui.Prompt("")
+		promptResult, err := ui.PromptWithImages("")
 		if err != nil {
 			break
 		}
-		input = strings.TrimSpace(input)
-		if input == "" {
+		input := strings.TrimSpace(promptResult.Text)
+		images := make([]providers.ImageAttachment, 0, len(promptResult.Images))
+		for _, img := range promptResult.Images {
+			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+		}
+		if input == "" && len(images) == 0 {
 			continue
 		}
 		if input == "/quit" || input == "/exit" {
 			break
 		}
-		if err := loop.Step(ctx, input); err != nil {
+		if err := loop.StepWithImages(ctx, input, images); err != nil {
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
 				reason = "budget_exceeded"
@@ -272,17 +276,21 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 
 	var loop *core.Loop
 
-	submitFn := func(input string) {
+	submitFn := func(req ui.SubmitRequest) {
 		if logger != nil {
-			logger.Printf("submit input_len=%d", len(input))
+			logger.Printf("submit input_len=%d images=%d", len(req.Text), len(req.Images))
 		}
-		inputTrim := strings.TrimSpace(input)
+		inputTrim := strings.TrimSpace(req.Text)
 		if inputTrim == "/quit" || inputTrim == "/exit" {
 			reason = "user_exit"
 			tui.Quit()
 			return
 		}
-		if err := loop.Step(ctx, input); err != nil {
+		images := make([]providers.ImageAttachment, 0, len(req.Images))
+		for _, img := range req.Images {
+			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+		}
+		if err := loop.StepWithImages(ctx, req.Text, images); err != nil {
 			if logger != nil {
 				logger.Printf("step error: %v", err)
 			}

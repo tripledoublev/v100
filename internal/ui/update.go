@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -117,6 +118,19 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusLine = "full transcript copied to clipboard"
 			}
+		case "ctrl+v":
+			if m.focus == focusInput {
+				img, err := clipboardImageReader()
+				if err != nil {
+					m.statusLine = "paste failed: " + err.Error()
+					m.statusMode = "error"
+				} else {
+					m.pastedImages = append(m.pastedImages, img)
+					m.statusLine = fmt.Sprintf("attached %s", imageCount(len(m.pastedImages)))
+					m.statusMode = "idle"
+				}
+				return m, nil
+			}
 		case "alt+r":
 			m.showRadioSelect = !m.showRadioSelect
 		case "ctrl+r":
@@ -180,18 +194,20 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == focusInput && !m.pendConfirm.isActive() {
 				val := sanitizeInputNoise(strings.TrimSpace(m.input.Value()))
-				if val != "" {
+				if val != "" || len(m.pastedImages) > 0 {
+					images := append([][]byte(nil), m.pastedImages...)
 					m.input.SetValue("")
+					m.pastedImages = nil
 					if cmd := m.handleBuiltInCommand(val); cmd != nil {
 						cmds = append(cmds, cmd)
 						break
 					}
 					if m.SubmitFn != nil {
-						go m.SubmitFn(val)
+						go m.SubmitFn(SubmitRequest{Text: val, Images: images})
 					}
 				}
 			}
-			
+
 		case "esc":
 			if m.showRadioSelect {
 				m.showRadioSelect = false

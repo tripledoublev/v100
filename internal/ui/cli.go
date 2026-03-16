@@ -2,12 +2,15 @@ package ui
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tripledoublev/v100/internal/core"
@@ -26,6 +29,11 @@ type CLIRenderer struct {
 	Verbose        bool
 	streamedText   bool // set when EventModelToken prints; skip text in EventModelResp if true
 	mu             sync.Mutex
+}
+
+type PromptResult struct {
+	Text   string
+	Images [][]byte
 }
 
 // NewCLIRenderer creates a CLI renderer.
@@ -397,17 +405,115 @@ func ConfirmTool(toolName, args string) bool {
 // Prompt prints a styled prompt and reads a line from stdin.
 // Suppresses the prompt character in non-interactive (piped) mode.
 func Prompt(prompt string) (string, error) {
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Print(stylePrimary.Render("▸") + " ")
-	}
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", err
+	res, err := PromptWithImages(prompt)
+	return res.Text, err
+}
+
+func PromptWithImages(prompt string) (PromptResult, error) {
+	_ = prompt
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return PromptResult{}, err
+			}
+			return PromptResult{}, fmt.Errorf("EOF")
 		}
-		return "", fmt.Errorf("EOF")
+		return PromptResult{Text: scanner.Text()}, nil
 	}
-	return scanner.Text(), nil
+	return promptTerminal(os.Stdin, os.Stdout, clipboardImageReader)
+}
+
+func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, error)) (PromptResult, error) {
+	oldState, err := term.MakeRaw(int(in.Fd()))
+	if err != nil {
+		return PromptResult{}, err
+	}
+	defer func() { _ = term.Restore(int(in.Fd()), oldState) }()
+
+	var (
+		text      []byte
+		images    [][]byte
+		statusMsg string
+	)
+	render := func() {
+		_, _ = fmt.Fprint(out, "\r\033[K")
+		_, _ = fmt.Fprint(out, stylePrimary.Render("▸")+" ")
+		_, _ = fmt.Fprint(out, string(text))
+		if len(images) > 0 {
+			_, _ = fmt.Fprint(out, " "+styleInfo.Render(imageCount(len(images))))
+		}
+		if statusMsg != "" {
+			_, _ = fmt.Fprint(out, " "+styleMuted.Render(statusMsg))
+		}
+	}
+	render()
+
+	var buf [1]byte
+	for {
+		if _, err := in.Read(buf[:]); err != nil {
+			if err == io.EOF {
+				_, _ = fmt.Fprintln(out)
+				return PromptResult{}, fmt.Errorf("EOF")
+			}
+			return PromptResult{}, err
+		}
+		statusMsg = ""
+		switch b := buf[0]; b {
+		case '\r', '\n':
+			_, _ = fmt.Fprintln(out)
+			return PromptResult{
+				Text:   string(text),
+				Images: append([][]byte(nil), images...),
+			}, nil
+		case 0x03:
+			_, _ = fmt.Fprintln(out)
+			return PromptResult{}, fmt.Errorf("interrupt")
+		case 0x7f, 0x08:
+			if len(text) > 0 {
+				_, size := utf8.DecodeLastRune(text)
+				if size <= 0 {
+					size = 1
+				}
+				text = text[:len(text)-size]
+			}
+		case 0x16:
+			img, err := readClipboard()
+			if err != nil {
+				statusMsg = "paste failed: " + err.Error()
+			} else {
+				images = append(images, img)
+				statusMsg = "attached " + imageCount(len(images))
+			}
+		case 0x1b:
+			var seq [2]byte
+			_, _ = in.Read(seq[:])
+		default:
+			text = append(text, b)
+			for !utf8.Valid(text) {
+				if _, err := in.Read(buf[:]); err != nil {
+					return PromptResult{}, err
+				}
+				text = append(text, buf[0])
+			}
+		}
+		render()
+	}
+}
+
+func promptLine(text string, images [][]byte, statusMsg string) string {
+	var buf bytes.Buffer
+	buf.WriteString("▸ ")
+	buf.WriteString(text)
+	if len(images) > 0 {
+		buf.WriteByte(' ')
+		buf.WriteString(imageCount(len(images)))
+	}
+	if statusMsg != "" {
+		buf.WriteByte(' ')
+		buf.WriteString(statusMsg)
+	}
+	return buf.String()
 }
 
 // PrintReplayEvent prints a styled replay view of a trace event.

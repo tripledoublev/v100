@@ -14,7 +14,7 @@ type TUI struct {
 }
 
 // NewTUI creates a new TUI instance.
-func NewTUI(submitFn func(string), useAltScreen bool, plainTTY bool) *TUI {
+func NewTUI(submitFn func(SubmitRequest), useAltScreen bool, plainTTY bool) *TUI {
 	if plainTTY {
 		EnablePlainTTY()
 	}

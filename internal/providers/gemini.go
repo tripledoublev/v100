@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -386,8 +387,14 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
+	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFuncResponse `json:"functionResponse,omitempty"`
+}
+
+type geminiInlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type geminiFunctionCall struct {
@@ -438,9 +445,31 @@ func geminiConvertMessages(msgs []Message) (*geminiContent, []geminiContent) {
 
 		case "user":
 			flushToolResponses()
+			var parts []geminiPart
+			if m.Content != "" {
+				parts = append(parts, geminiPart{Text: m.Content})
+			}
+			for _, img := range m.Images {
+				if len(img.Data) == 0 {
+					continue
+				}
+				mimeType := strings.TrimSpace(img.MIMEType)
+				if mimeType == "" {
+					mimeType = "image/png"
+				}
+				parts = append(parts, geminiPart{
+					InlineData: &geminiInlineData{
+						MIMEType: mimeType,
+						Data:     base64.StdEncoding.EncodeToString(img.Data),
+					},
+				})
+			}
+			if len(parts) == 0 {
+				parts = []geminiPart{{Text: m.Content}}
+			}
 			contents = append(contents, geminiContent{
 				Role:  "user",
-				Parts: []geminiPart{{Text: m.Content}},
+				Parts: parts,
 			})
 
 		case "assistant":

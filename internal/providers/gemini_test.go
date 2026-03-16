@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,40 @@ func TestGeminiConvertMessagesEmptyToolOutputNormalized(t *testing.T) {
 	got, _ := resp.Response["result"].(string)
 	if got != "(no output)" {
 		t.Fatalf("tool result = %q, want (no output)", got)
+	}
+}
+
+func TestGeminiConvertMessagesWithImage(t *testing.T) {
+	_, converted := geminiConvertMessages([]Message{
+		{
+			Role:    "user",
+			Content: "What is in this image?",
+			Images: []ImageAttachment{{
+				MIMEType: "image/png",
+				Data:     []byte{0x89, 0x50, 0x4e, 0x47},
+			}},
+		},
+	})
+
+	if len(converted) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(converted))
+	}
+	if converted[0].Role != "user" {
+		t.Fatalf("role = %q, want user", converted[0].Role)
+	}
+	if len(converted[0].Parts) != 2 {
+		t.Fatalf("expected text and image parts, got %d", len(converted[0].Parts))
+	}
+	if converted[0].Parts[0].Text != "What is in this image?" {
+		t.Fatalf("unexpected text part: %#v", converted[0].Parts[0])
+	}
+	if converted[0].Parts[1].InlineData == nil {
+		t.Fatalf("expected inlineData part, got %#v", converted[0].Parts[1])
+	}
+	if converted[0].Parts[1].InlineData.MIMEType != "image/png" {
+		t.Fatalf("mimeType = %q, want image/png", converted[0].Parts[1].InlineData.MIMEType)
+	}
+	if !strings.HasPrefix(converted[0].Parts[1].InlineData.Data, "iVBORw") {
+		t.Fatalf("expected base64 PNG payload, got %q", converted[0].Parts[1].InlineData.Data)
 	}
 }

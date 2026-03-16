@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,27 +54,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 	}
 
 	// Build messages
-	msgs := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
-	for _, m := range req.Messages {
-		msg := openai.ChatCompletionMessage{
-			Role:    m.Role,
-			Content: m.Content,
-			Name:    m.Name,
-		}
-		if m.Role == "tool" {
-			msg.ToolCallID = m.ToolCallID
-		}
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
-					ID:       tc.ID,
-					Type:     openai.ToolTypeFunction,
-					Function: openai.FunctionCall{Name: tc.Name, Arguments: string(tc.Args)},
-				})
-			}
-		}
-		msgs = append(msgs, msg)
-	}
+	msgs := buildOpenAIChatMessages(req.Messages)
 
 	// Build tools
 	var tools []openai.Tool
@@ -224,23 +205,7 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 		model = p.defaultModel
 	}
 
-	msgs := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
-	for _, m := range req.Messages {
-		msg := openai.ChatCompletionMessage{Role: m.Role, Content: m.Content, Name: m.Name}
-		if m.Role == "tool" {
-			msg.ToolCallID = m.ToolCallID
-		}
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
-					ID:       tc.ID,
-					Type:     openai.ToolTypeFunction,
-					Function: openai.FunctionCall{Name: tc.Name, Arguments: string(tc.Args)},
-				})
-			}
-		}
-		msgs = append(msgs, msg)
-	}
+	msgs := buildOpenAIChatMessages(req.Messages)
 
 	var tools []openai.Tool
 	for _, ts := range req.Tools {
@@ -341,6 +306,56 @@ func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest
 	}()
 
 	return ch, nil
+}
+
+func buildOpenAIChatMessages(src []Message) []openai.ChatCompletionMessage {
+	msgs := make([]openai.ChatCompletionMessage, 0, len(src))
+	for _, m := range src {
+		msg := openai.ChatCompletionMessage{
+			Role: m.Role,
+			Name: m.Name,
+		}
+		if m.Role == "user" && len(m.Images) > 0 {
+			if m.Content != "" {
+				msg.MultiContent = append(msg.MultiContent, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: m.Content,
+				})
+			}
+			for _, img := range m.Images {
+				if len(img.Data) == 0 {
+					continue
+				}
+				mimeType := strings.TrimSpace(img.MIMEType)
+				if mimeType == "" {
+					mimeType = "image/png"
+				}
+				msg.MultiContent = append(msg.MultiContent, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL:    "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(img.Data),
+						Detail: openai.ImageURLDetailAuto,
+					},
+				})
+			}
+		} else {
+			msg.Content = m.Content
+		}
+		if m.Role == "tool" {
+			msg.ToolCallID = m.ToolCallID
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+					ID:       tc.ID,
+					Type:     openai.ToolTypeFunction,
+					Function: openai.FunctionCall{Name: tc.Name, Arguments: string(tc.Args)},
+				})
+			}
+		}
+		msgs = append(msgs, msg)
+	}
+	return msgs
 }
 
 // estimateCost returns a rough USD cost estimate.

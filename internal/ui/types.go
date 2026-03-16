@@ -52,6 +52,11 @@ type deviceStatus struct {
 	State          string
 }
 
+type SubmitRequest struct {
+	Text   string
+	Images [][]byte
+}
+
 // TUIModel is the Bubble Tea application model for the agent harness.
 type TUIModel struct {
 	width, height int
@@ -77,15 +82,15 @@ type TUIModel struct {
 	showMetrics  bool
 
 	// live metrics state
-	currentStep  int
-	maxSteps     int
-	usedTokens   int
-	maxTokens    int
-	inputTokens  int
-	outputTokens int
-	usedCost     float64
-	maxCost      float64
-	lastStepMS   int64
+	currentStep   int
+	maxSteps      int
+	usedTokens    int
+	maxTokens     int
+	inputTokens   int
+	outputTokens  int
+	usedCost      float64
+	maxCost       float64
+	lastStepMS    int64
 	lastStepTools int
 
 	radioURL      string
@@ -117,8 +122,11 @@ type TUIModel struct {
 	compressEvents []time.Time
 	lastEventAt    time.Time
 
+	// clipboard images
+	pastedImages [][]byte
+
 	// callbacks
-	SubmitFn    func(string)
+	SubmitFn    func(SubmitRequest)
 	InterruptFn func()
 	onReady     func() // called once from Init() to signal event loop is active
 }

@@ -269,3 +269,48 @@ func TestFocusHalfSwitchAndRightHalfCycling(t *testing.T) {
 		t.Fatalf("expected focusTranscript after switching back, got %v", m.focus)
 	}
 }
+
+func TestEnterSubmitsAttachedImages(t *testing.T) {
+	m := NewTUIModel()
+	m.pastedImages = [][]byte{{0x89, 0x50, 0x4e, 0x47}}
+	got := make(chan SubmitRequest, 1)
+	m.SubmitFn = func(req SubmitRequest) {
+		got <- req
+	}
+
+	updateKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	select {
+	case req := <-got:
+		if req.Text != "" {
+			t.Fatalf("expected empty text, got %q", req.Text)
+		}
+		if len(req.Images) != 1 {
+			t.Fatalf("expected 1 image, got %d", len(req.Images))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for submit")
+	}
+
+	if len(m.pastedImages) != 0 {
+		t.Fatalf("expected pasted images cleared after submit, got %d", len(m.pastedImages))
+	}
+}
+
+func TestCtrlVPastesClipboardImage(t *testing.T) {
+	m := NewTUIModel()
+	prev := clipboardImageReader
+	clipboardImageReader = func() ([]byte, error) {
+		return []byte{0x89, 0x50, 0x4e, 0x47}, nil
+	}
+	defer func() { clipboardImageReader = prev }()
+
+	updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlV})
+
+	if len(m.pastedImages) != 1 {
+		t.Fatalf("expected 1 pasted image, got %d", len(m.pastedImages))
+	}
+	if !strings.Contains(m.statusLine, "Image #1") {
+		t.Fatalf("expected attachment status, got %q", m.statusLine)
+	}
+}

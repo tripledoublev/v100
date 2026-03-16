@@ -77,6 +77,40 @@ func TestAnthropicConvertMessagesMultipleTools(t *testing.T) {
 	}
 }
 
+func TestAnthropicConvertMessagesWithImage(t *testing.T) {
+	msgs := []Message{
+		{
+			Role:    "user",
+			Content: "What is in this image?",
+			Images: []ImageAttachment{{
+				MIMEType: "image/png",
+				Data:     []byte{0x89, 0x50, 0x4e, 0x47},
+			}},
+		},
+	}
+
+	_, converted := anthropicConvertMessages(msgs)
+	if len(converted) != 1 {
+		t.Fatalf("expected 1 converted message, got %d", len(converted))
+	}
+	blocks, ok := converted[0].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("expected content blocks, got %T", converted[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected text and image blocks, got %d", len(blocks))
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "What is in this image?" {
+		t.Fatalf("unexpected text block: %#v", blocks[0])
+	}
+	if blocks[1].Type != "image" || blocks[1].Source == nil {
+		t.Fatalf("unexpected image block: %#v", blocks[1])
+	}
+	if blocks[1].Source.Type != "base64" || blocks[1].Source.MediaType != "image/png" {
+		t.Fatalf("unexpected image source metadata: %#v", blocks[1].Source)
+	}
+}
+
 // TestEnsureToolResultContiguity_InterleavedUserMessage covers the MiniMax
 // error 2013 scenario: a user message appears between an assistant tool_use
 // and its tool results (e.g. from a budget-alert injection).

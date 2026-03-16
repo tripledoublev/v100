@@ -36,7 +36,11 @@ func (m *TUIModel) View() string {
 	if m.focus == focusInput {
 		inputSt = tuiInputActiveStyle
 	}
-	inputBox := inputSt.Width(m.width - 2).Render(m.input.View())
+	inputView := m.input.View()
+	if len(m.pastedImages) > 0 {
+		inputView = styleInfo.Render(imageCount(len(m.pastedImages))) + " " + inputView
+	}
+	inputBox := inputSt.Width(m.width - 2).Render(inputView)
 	inputHeight := lipgloss.Height(inputBox)
 	layoutPlan := computeViewLayout(m.width, m.height, inputHeight, 1, m.leftPanePct, m.tracePanePct, m.showTrace, time.Now())
 	header := renderHeader(m.width, layoutPlan.header)

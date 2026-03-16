@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 )
@@ -27,13 +28,20 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   string                `json:"content,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type anthropicToolDef struct {
@@ -135,7 +143,32 @@ func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
 			}
 			system += m.Content
 		case "user":
-			out = append(out, anthropicMessage{Role: "user", Content: m.Content})
+			if len(m.Images) == 0 {
+				out = append(out, anthropicMessage{Role: "user", Content: m.Content})
+				break
+			}
+			var content []anthropicContentBlock
+			if m.Content != "" {
+				content = append(content, anthropicContentBlock{Type: "text", Text: m.Content})
+			}
+			for _, img := range m.Images {
+				if len(img.Data) == 0 {
+					continue
+				}
+				mediaType := img.MIMEType
+				if mediaType == "" {
+					mediaType = "image/png"
+				}
+				content = append(content, anthropicContentBlock{
+					Type: "image",
+					Source: &anthropicImageSource{
+						Type:      "base64",
+						MediaType: mediaType,
+						Data:      base64.StdEncoding.EncodeToString(img.Data),
+					},
+				})
+			}
+			out = append(out, anthropicMessage{Role: "user", Content: content})
 		case "assistant":
 			if len(m.ToolCalls) > 0 {
 				var content []anthropicContentBlock

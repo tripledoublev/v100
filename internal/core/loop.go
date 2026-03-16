@@ -58,6 +58,7 @@ type Loop struct {
 	memoryStepMessage  string
 	memoryStepEligible bool
 	memoryStepConsumed bool
+	pendingUserImages  []providers.ImageAttachment
 }
 
 func (l *Loop) runHooks(stepID string) HookResult {
@@ -103,6 +104,11 @@ func (l *Loop) runHooks(stepID string) HookResult {
 
 // Step processes a single user input through the full model + tool execution cycle.
 func (l *Loop) Step(ctx context.Context, userInput string) error {
+	return l.StepWithImages(ctx, userInput, nil)
+}
+
+// StepWithImages processes a single user input and optional image attachments.
+func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []providers.ImageAttachment) error {
 	// Auto-discover metadata on first step if not set
 	if l.ModelMetadata.Model == "" {
 		m, err := l.Provider.Metadata(ctx, "")
@@ -110,13 +116,33 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 			l.ModelMetadata = m
 		}
 	}
+	l.pendingUserImages = append([]providers.ImageAttachment(nil), images...)
 
 	solver := l.Solver
 	if solver == nil {
 		solver = &ReactSolver{}
 	}
 	_, err := solver.Solve(ctx, l, userInput)
+	l.pendingUserImages = nil
 	return err
+}
+
+func (l *Loop) appendUserMessage(stepID, userInput string) error {
+	payload := UserMsgPayload{
+		Content:    userInput,
+		ImageCount: len(l.pendingUserImages),
+	}
+	if _, err := l.emit(EventUserMsg, stepID, payload); err != nil {
+		return err
+	}
+	msg := providers.Message{
+		Role:    "user",
+		Content: userInput,
+		Images:  append([]providers.ImageAttachment(nil), l.pendingUserImages...),
+	}
+	l.pendingUserImages = nil
+	l.Messages = append(l.Messages, msg)
+	return nil
 }
 
 // emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
