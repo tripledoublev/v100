@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,6 +136,40 @@ func TestReconstructHistoryDropsIncompleteToolCallsOnResume(t *testing.T) {
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call-1" {
 		t.Fatalf("unexpected tool message after reconcile: %+v", msgs[2])
+	}
+}
+
+func TestReconstructHistorySanitizesBinaryToolOutputOnResume(t *testing.T) {
+	runDir := t.TempDir()
+	events := []core.Event{
+		mustEvent(t, core.EventRunStart, core.RunStartPayload{
+			Provider:  "minimax",
+			Model:     "MiniMax-M2.5",
+			Workspace: "/workspace",
+		}),
+		mustEvent(t, core.EventUserMsg, core.UserMsgPayload{Content: "look at this image"}),
+		mustEvent(t, core.EventModelResp, core.ModelRespPayload{
+			ToolCalls: []core.ToolCall{
+				{ID: "call-1", Name: "curl_fetch", ArgsJSON: `{"url":"https://example.com/image.png"}`},
+			},
+		}),
+		mustEvent(t, core.EventToolResult, core.ToolResultPayload{
+			CallID: "call-1",
+			Name:   "curl_fetch",
+			OK:     true,
+			Output: "url: https://example.com/image.png\nstatus: 200\ncontent_type: image/png\n\n\x89PNG\r\n\x1a\n\x00\x00binary payload",
+		}),
+	}
+
+	msgs, _, _, _, _ := reconstructHistory(runDir, events)
+	if len(msgs) != 3 {
+		t.Fatalf("message count = %d, want 3 (%+v)", len(msgs), msgs)
+	}
+	if got := msgs[2].Content; !strings.Contains(got, "[non-text response omitted during resume: image/png]") {
+		t.Fatalf("expected sanitized resume content, got %q", got)
+	}
+	if strings.Contains(msgs[2].Content, "binary payload") {
+		t.Fatalf("expected binary payload to be removed, got %q", msgs[2].Content)
 	}
 }
 

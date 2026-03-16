@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/core/executor"
@@ -77,6 +78,37 @@ func TestParseCurlSessionOutput(t *testing.T) {
 	}
 	if body != "<body>ok</body>" {
 		t.Fatalf("body = %q, want html body", body)
+	}
+}
+
+func TestCurlFetchOmitsBinaryImageBody(t *testing.T) {
+	session := &fakeDockerSession{
+		result: executor.Result{
+			ExitCode: 0,
+			Stdout:   "200\nimage/png\n\n__V100_CURL_BODY__\n\x89PNG\r\n\x1a\n\x00\x00binary",
+		},
+	}
+
+	call := ToolCallContext{Session: session}
+	args, err := json.Marshal(map[string]any{
+		"url": "https://example.com/image.png",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CurlFetch().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("curl_fetch failed: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, "[non-text response omitted: image/png") {
+		t.Fatalf("expected non-text summary, got %q", res.Output)
+	}
+	if strings.Contains(res.Output, "binary") || strings.Contains(res.Output, "PNG\r\n") {
+		t.Fatalf("expected raw binary body to be omitted, got %q", res.Output)
 	}
 }
 

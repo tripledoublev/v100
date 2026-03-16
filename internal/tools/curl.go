@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tripledoublev/v100/internal/core/executor"
 )
@@ -100,14 +101,7 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	}
 
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	text := string(body)
-	if strings.Contains(contentType, "text/html") || looksLikeHTML(text) {
-		text = htmlToText(text)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		text = "(empty response body)"
-	}
+	text := describeHTTPBody(contentType, body)
 
 	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, resp.StatusCode, contentType, text)
 	return ToolResult{
@@ -165,13 +159,7 @@ head -c "$V100_MAX_BYTES" "$body"
 	if err != nil {
 		return failResult(start, "parse failed: "+err.Error()), nil
 	}
-	if strings.Contains(contentType, "text/html") || looksLikeHTML(text) {
-		text = htmlToText(text)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		text = "(empty response body)"
-	}
+	text = describeHTTPBody(contentType, []byte(text))
 
 	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, status, contentType, text)
 	return ToolResult{
@@ -200,6 +188,67 @@ func parseCurlSessionOutput(stdout, bodyMarker string) (int, string, string, err
 		return 0, "", "", fmt.Errorf("invalid status %q", statusLine)
 	}
 	return status, strings.ToLower(contentType), body, nil
+}
+
+func describeHTTPBody(contentType string, body []byte) string {
+	if len(body) == 0 {
+		return "(empty response body)"
+	}
+	if !isReadableHTTPContent(contentType, body) {
+		return fmt.Sprintf("[non-text response omitted: %s, %d bytes]", displayHTTPContentType(contentType, body), len(body))
+	}
+	text := string(body)
+	if strings.Contains(contentType, "text/html") || looksLikeHTML(text) {
+		text = htmlToText(text)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "(empty response body)"
+	}
+	return text
+}
+
+func isReadableHTTPContent(contentType string, body []byte) bool {
+	ct := displayHTTPContentType(contentType, body)
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	if strings.Contains(ct, "json") || strings.Contains(ct, "xml") || strings.Contains(ct, "yaml") || strings.Contains(ct, "javascript") {
+		return true
+	}
+	if strings.Contains(ct, "x-www-form-urlencoded") || strings.Contains(ct, "svg+xml") {
+		return true
+	}
+	if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") {
+		return false
+	}
+	if strings.Contains(ct, "pdf") || strings.Contains(ct, "octet-stream") || strings.Contains(ct, "zip") {
+		return false
+	}
+	if !utf8.Valid(body) {
+		return false
+	}
+	control := 0
+	for _, b := range body {
+		if b == '\n' || b == '\r' || b == '\t' {
+			continue
+		}
+		if b < 0x20 {
+			control++
+		}
+	}
+	return control*20 <= len(body)
+}
+
+func displayHTTPContentType(contentType string, body []byte) string {
+	ct := strings.TrimSpace(strings.ToLower(contentType))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	if ct != "" {
+		return ct
+	}
+	return strings.ToLower(http.DetectContentType(body))
 }
 
 var (

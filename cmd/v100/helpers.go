@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -872,9 +873,9 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 		case core.EventToolResult:
 			var p core.ToolResultPayload
 			_ = json.Unmarshal(ev.Payload, &p)
-			content := p.Output
+			content := sanitizeResumedToolOutput(p.Name, p.Output)
 			if !p.OK {
-				content = "ERROR: " + p.Output
+				content = "ERROR: " + sanitizeResumedToolOutput(p.Name, p.Output)
 			}
 			msgs = append(msgs, providers.Message{
 				Role:       "tool",
@@ -898,6 +899,78 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 		}
 	}
 	return reconcileToolHistory(msgs), providerName, model, workspace, metadata
+}
+
+func sanitizeResumedToolOutput(name, output string) string {
+	if strings.TrimSpace(output) == "" {
+		return output
+	}
+	if strings.EqualFold(strings.TrimSpace(name), "curl_fetch") {
+		return sanitizeCurlFetchResumeOutput(output)
+	}
+	if looksBinaryLikeText(output) {
+		return "[tool output omitted during resume: binary or non-text payload]"
+	}
+	return output
+}
+
+func sanitizeCurlFetchResumeOutput(output string) string {
+	const marker = "\n\n"
+	idx := strings.Index(output, marker)
+	if idx == -1 {
+		if looksBinaryLikeText(output) {
+			return "[curl_fetch output omitted during resume: binary or non-text payload]"
+		}
+		return output
+	}
+	head := output[:idx]
+	body := output[idx+len(marker):]
+	if !looksBinaryLikeText(body) {
+		return output
+	}
+	lines := strings.Split(head, "\n")
+	contentType := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "content_type:") {
+			contentType = strings.TrimSpace(line[len("content_type:"):])
+			break
+		}
+	}
+	summary := "[non-text response omitted during resume]"
+	if contentType != "" {
+		summary = fmt.Sprintf("[non-text response omitted during resume: %s]", contentType)
+	}
+	return head + marker + summary
+}
+
+func looksBinaryLikeText(s string) bool {
+	if s == "" {
+		return false
+	}
+	if !utf8.ValidString(s) {
+		return true
+	}
+	control := 0
+	repl := 0
+	total := 0
+	for _, r := range s {
+		total++
+		if r == '\uFFFD' {
+			repl++
+			continue
+		}
+		if r == '\n' || r == '\r' || r == '\t' {
+			continue
+		}
+		if r < 0x20 {
+			control++
+		}
+	}
+	if total == 0 {
+		return false
+	}
+	return control*20 > total || repl*50 > total
 }
 
 // reconcileToolHistory drops orphaned tool calls/results so resumed transcripts
