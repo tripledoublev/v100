@@ -67,8 +67,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if sub {
 			break // suppress sub-agent model responses from transcript
 		}
-		m.focus = focusTranscript
-		m.input.Blur()
 		if p.Text != "" {
 			rendered := m.renderMarkdownForPane(p.Text)
 			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)

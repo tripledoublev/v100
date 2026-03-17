@@ -233,12 +233,9 @@ func (m *TUIModel) renderMarkdownForPane(text string) string {
 		return ""
 	}
 
-	width := m.width - 8
-	if m.showTrace {
-		width = (m.width-3)*2/3 - 6
-	}
-	if width < 40 {
-		width = 40
+	width := m.transcriptWrapWidth()
+	if width < 24 {
+		width = 24
 	}
 	if width > 120 {
 		width = 120
@@ -284,10 +281,10 @@ func (m *TUIModel) transcriptWrapWidth() int {
 		return 80
 	}
 	if m.showTrace {
-		leftW := (m.width - 3) * 2 / 3
-		return leftW - 8
+		layout := computePaneLayout(m.width, max(4, m.height), m.leftPanePct, m.tracePanePct)
+		return max(1, layout.transcriptWidth)
 	}
-	return m.width - 8
+	return max(1, m.width-4)
 }
 
 func centerToWidth(s string, width int) string {

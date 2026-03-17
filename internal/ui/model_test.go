@@ -115,6 +115,49 @@ func TestToolResultRendersAsIndentedBlock(t *testing.T) {
 	}
 }
 
+func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 100
+	m.height = 30
+	m.focus = focusInput
+	m.input.Focus()
+	m.input.SetValue("draft prompt")
+
+	payload, err := json.Marshal(core.ModelRespPayload{
+		Text: "response text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.appendEvent(core.Event{
+		TS:      time.Now(),
+		Type:    core.EventModelResp,
+		Payload: payload,
+	})
+
+	if m.focus != focusInput {
+		t.Fatalf("focus = %v, want input focus preserved", m.focus)
+	}
+	if m.input.Value() != "draft prompt" {
+		t.Fatalf("input value = %q, want preserved draft", m.input.Value())
+	}
+}
+
+func TestTranscriptWrapWidthUsesComputedPaneWidth(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 120
+	m.height = 30
+	m.showTrace = true
+	m.leftPanePct = 50
+	m.tracePanePct = 50
+
+	layout := computePaneLayout(m.width, m.height, m.leftPanePct, m.tracePanePct)
+	if got, want := m.transcriptWrapWidth(), layout.transcriptWidth; got != want {
+		t.Fatalf("transcriptWrapWidth() = %d, want %d", got, want)
+	}
+}
+
 func TestViewResponsiveLayoutsPreservePanelsAndWidthBounds(t *testing.T) {
 	widths := []int{92, 120, 160}
 	for _, width := range widths {
