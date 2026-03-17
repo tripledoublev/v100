@@ -17,6 +17,12 @@ import (
 
 type curlFetchTool struct{}
 
+type fetchedHTTPBody struct {
+	status      int
+	contentType string
+	text        string
+}
+
 func CurlFetch() Tool { return &curlFetchTool{} }
 
 func (t *curlFetchTool) Name() string { return "curl_fetch" }
@@ -72,8 +78,26 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	if a.MaxBytes <= 0 || a.MaxBytes > 2*1024*1024 {
 		a.MaxBytes = 128 * 1024
 	}
+	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if fail != nil {
+		return *fail, nil
+	}
+
+	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, fetched.status, fetched.contentType, fetched.text)
+	return ToolResult{
+		OK:         fetched.status >= 200 && fetched.status < 400,
+		Output:     output,
+		Stdout:     output,
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPBody, *ToolResult, error) {
 	if call.Session != nil && call.Session.Type() == "docker" {
-		return t.execInSession(ctx, call, start, url, a.MaxBytes)
+		return fetchHTTPBodyInSession(ctx, call, start, url, maxBytes)
 	}
 
 	timeout := 20 * time.Second
@@ -85,34 +109,33 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return failResult(start, "request build failed: "+err.Error()), nil
+		res := failResult(start, "request build failed: "+err.Error())
+		return fetchedHTTPBody{}, &res, nil
 	}
 	req.Header.Set("User-Agent", "v100/1.0 (+https://github.com/tripledoublev/v100)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return failResult(start, "request failed: "+err.Error()), nil
+		res := failResult(start, "request failed: "+err.Error())
+		return fetchedHTTPBody{}, &res, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, a.MaxBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	if err != nil {
-		return failResult(start, "read body: "+err.Error()), nil
+		res := failResult(start, "read body: "+err.Error())
+		return fetchedHTTPBody{}, &res, nil
 	}
 
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	text := describeHTTPBody(contentType, body)
-
-	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, resp.StatusCode, contentType, text)
-	return ToolResult{
-		OK:         resp.StatusCode >= 200 && resp.StatusCode < 400,
-		Output:     output,
-		Stdout:     output,
-		DurationMS: time.Since(start).Milliseconds(),
-	}, nil
+	return fetchedHTTPBody{
+		status:      resp.StatusCode,
+		contentType: contentType,
+		text:        describeHTTPBody(contentType, body),
+	}, nil, nil
 }
 
-func (t *curlFetchTool) execInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (ToolResult, error) {
+func fetchHTTPBodyInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPBody, *ToolResult, error) {
 	timeout := 20 * time.Second
 	if call.TimeoutMS > 0 {
 		timeout = time.Duration(call.TimeoutMS) * time.Millisecond
@@ -145,29 +168,28 @@ head -c "$V100_MAX_BYTES" "$body"
 		},
 	})
 	if err != nil {
-		return failResult(start, "request failed: "+err.Error()), nil
+		res := failResult(start, "request failed: "+err.Error())
+		return fetchedHTTPBody{}, &res, nil
 	}
 	if res.ExitCode != 0 {
 		out := strings.TrimSpace(res.Stderr)
 		if out == "" {
 			out = strings.TrimSpace(res.Stdout)
 		}
-		return failResult(start, "request failed: "+out), nil
+		fail := failResult(start, "request failed: "+out)
+		return fetchedHTTPBody{}, &fail, nil
 	}
 
 	status, contentType, text, err := parseCurlSessionOutput(res.Stdout, bodyMarker)
 	if err != nil {
-		return failResult(start, "parse failed: "+err.Error()), nil
+		fail := failResult(start, "parse failed: "+err.Error())
+		return fetchedHTTPBody{}, &fail, nil
 	}
-	text = describeHTTPBody(contentType, []byte(text))
-
-	output := fmt.Sprintf("url: %s\nstatus: %d\ncontent_type: %s\n\n%s", url, status, contentType, text)
-	return ToolResult{
-		OK:         status >= 200 && status < 400,
-		Output:     output,
-		Stdout:     output,
-		DurationMS: time.Since(start).Milliseconds(),
-	}, nil
+	return fetchedHTTPBody{
+		status:      status,
+		contentType: contentType,
+		text:        describeHTTPBody(contentType, []byte(text)),
+	}, nil, nil
 }
 
 func parseCurlSessionOutput(stdout, bodyMarker string) (int, string, string, error) {
@@ -199,7 +221,7 @@ func describeHTTPBody(contentType string, body []byte) string {
 	}
 	text := string(body)
 	if strings.Contains(contentType, "text/html") || looksLikeHTML(text) {
-		text = htmlToText(text)
+		text = extractReadableHTML(text)
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -257,6 +279,11 @@ var (
 	reTag    = regexp.MustCompile(`(?s)<[^>]+>`)
 	reSpace  = regexp.MustCompile(`[ \t]+`)
 	reNL     = regexp.MustCompile(`\n{3,}`)
+	reTitle  = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	reH1     = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
+	reH2     = regexp.MustCompile(`(?is)<h2[^>]*>(.*?)</h2>`)
+	reP      = regexp.MustCompile(`(?is)<p[^>]*>(.*?)</p>`)
+	reLI     = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`)
 )
 
 func looksLikeHTML(s string) bool {
@@ -282,4 +309,132 @@ func htmlToText(s string) string {
 	s = reSpace.ReplaceAllString(s, " ")
 	s = reNL.ReplaceAllString(s, "\n\n")
 	return strings.TrimSpace(s)
+}
+
+func extractReadableHTML(s string) string {
+	title := firstHTMLTextMatch(reTitle, s)
+	headings := uniqueHTMLMatches(reH1, s, 3)
+	if len(headings) < 3 {
+		headings = append(headings, uniqueHTMLMatches(reH2, s, 3-len(headings))...)
+		headings = dedupeStrings(headings, 3)
+	}
+
+	paragraphs := uniqueHTMLMatches(reP, s, 4)
+	paragraphs = filterSignalLines(paragraphs, 40, 320)
+	if len(paragraphs) == 0 {
+		items := uniqueHTMLMatches(reLI, s, 6)
+		paragraphs = filterSignalLines(items, 30, 220)
+	}
+
+	var out []string
+	if title != "" {
+		out = append(out, "title: "+title)
+	}
+	for _, h := range headings {
+		out = append(out, "heading: "+h)
+	}
+	for _, p := range paragraphs {
+		out = append(out, "snippet: "+p)
+	}
+
+	if len(out) == 0 {
+		return htmlToText(s)
+	}
+	return strings.Join(out, "\n")
+}
+
+func firstHTMLTextMatch(re *regexp.Regexp, s string) string {
+	m := re.FindStringSubmatch(s)
+	if len(m) < 2 {
+		return ""
+	}
+	return cleanHTMLFragment(m[1])
+}
+
+func uniqueHTMLMatches(re *regexp.Regexp, s string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	matches := re.FindAllStringSubmatch(s, -1)
+	out := make([]string, 0, min(limit, len(matches)))
+	seen := make(map[string]struct{}, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		text := cleanHTMLFragment(m[1])
+		if text == "" {
+			continue
+		}
+		key := strings.ToLower(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, text)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func cleanHTMLFragment(s string) string {
+	s = reTag.ReplaceAllString(s, " ")
+	s = html.UnescapeString(s)
+	s = strings.ReplaceAll(s, "\r", "")
+	s = reSpace.ReplaceAllString(s, " ")
+	s = strings.TrimSpace(s)
+	return strings.Trim(s, "-| ")
+}
+
+func filterSignalLines(lines []string, minLen, maxLen int) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = collapseLineNoise(line)
+		if len(line) < minLen || len(line) > maxLen {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "javascript") || strings.Contains(lower, "cookie") || strings.Contains(lower, "privacy") {
+			continue
+		}
+		if strings.Count(line, "{")+strings.Count(line, "}") > 2 {
+			continue
+		}
+		out = append(out, line)
+	}
+	return dedupeStrings(out, 4)
+}
+
+func collapseLineNoise(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 0 {
+		s = strings.TrimSpace(s)
+	}
+	return s
+}
+
+func dedupeStrings(lines []string, limit int) []string {
+	seen := make(map[string]struct{}, len(lines))
+	out := make([]string, 0, min(limit, len(lines)))
+	for _, line := range lines {
+		key := strings.ToLower(line)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, line)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

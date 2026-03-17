@@ -22,7 +22,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
 - **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
 - **Streaming** — real-time token streaming from providers that support it
-- **Tool execution** — 26+ built-in tools: file system, shell, git, patch, curl, ripgrep search, semantic parsing, sql_search, graphviz, reflect, and multi-agent coordination
+- **Tool execution** — 26+ built-in tools: file system, shell, git, patch, curl, compact web extraction, ripgrep search, semantic parsing, sql_search, graphviz, reflect, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
@@ -375,6 +375,7 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 | `sql_search` | **dangerous** | Execute SQL against local SQLite |
 | `graphviz` | safe | Render DOT files to images |
 | `curl_fetch` | safe | Fetch URL content |
+| `web_extract` | safe | Fetch a web page and return compact extracted signal |
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
 | `dispatch` | **dangerous** | Dispatch a task to a named agent role |
 | `orchestrate` | **dangerous** | Coordinate multiple dispatches (fanout/pipeline) |

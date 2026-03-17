@@ -102,12 +102,14 @@ func TestRegistryEffects(t *testing.T) {
 		"fs_mkdir",
 		"blackboard_write",
 		"curl_fetch",
+		"web_extract",
 		"git_push",
 		"sh",
 	})
 	reg.Register(tools.FSMkdir())
 	reg.Register(tools.BlackboardWrite())
 	reg.Register(tools.CurlFetch())
+	reg.Register(tools.WebExtract())
 	reg.Register(tools.GitPush())
 	reg.Register(tools.Sh())
 
@@ -119,6 +121,9 @@ func TestRegistryEffects(t *testing.T) {
 	}
 	if eff := reg.Effects("curl_fetch"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("curl_fetch effects = %+v, want network + external side effect", eff)
+	}
+	if eff := reg.Effects("web_extract"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
+		t.Fatalf("web_extract effects = %+v, want network + external side effect", eff)
 	}
 	if eff := reg.Effects("git_push"); !eff.MutatesWorkspace || !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("git_push effects = %+v, want workspace mutation + network + external side effect", eff)

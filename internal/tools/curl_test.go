@@ -112,6 +112,88 @@ func TestCurlFetchOmitsBinaryImageBody(t *testing.T) {
 	}
 }
 
+func TestDescribeHTTPBodyExtractsSignalFromHTML(t *testing.T) {
+	body := []byte(`
+		<html>
+		  <head><title>Example News Story</title><script>console.log("noise")</script></head>
+		  <body>
+		    <h1>Transit expansion approved</h1>
+		    <p>City council approved a major transit expansion after a six-hour vote on Tuesday night.</p>
+		    <p>The first phase will start this summer and prioritize the busiest commuter corridors.</p>
+		  </body>
+		</html>
+	`)
+
+	got := describeHTTPBody("text/html; charset=utf-8", body)
+	for _, want := range []string{
+		"title: Example News Story",
+		"heading: Transit expansion approved",
+		"snippet: City council approved a major transit expansion after a six-hour vote on Tuesday night.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in extracted HTML summary, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "console.log") {
+		t.Fatalf("expected script noise to be removed, got %q", got)
+	}
+}
+
+func TestDescribeHTTPBodyAvoidsReturningScriptSludgeWhenSignalExists(t *testing.T) {
+	body := []byte(`
+		<html>
+		  <head><title>Global News | Breaking, Latest News and Video for Canada</title></head>
+		  <body>
+		    <script>var headlineSelector = ".c-posts__headlineText"; window.chartbeatFlicker = true;</script>
+		    <h2>Top Stories</h2>
+		    <li>Federal budget talks intensify ahead of deadline</li>
+		    <li>Storm warning issued for coastal communities</li>
+		  </body>
+		</html>
+	`)
+
+	got := describeHTTPBody("text/html; charset=utf-8", body)
+	if strings.Contains(got, "chartbeatFlicker") || strings.Contains(got, "headlineSelector") {
+		t.Fatalf("expected JS sludge to be removed, got %q", got)
+	}
+	if !strings.Contains(got, "title: Global News | Breaking, Latest News and Video for Canada") {
+		t.Fatalf("expected extracted title, got %q", got)
+	}
+	if !strings.Contains(got, "Federal budget talks intensify ahead of deadline") {
+		t.Fatalf("expected extracted list item signal, got %q", got)
+	}
+}
+
+func TestWebExtractUsesSharedHTTPExtraction(t *testing.T) {
+	session := &fakeDockerSession{
+		result: executor.Result{
+			ExitCode: 0,
+			Stdout:   "200\ntext/html\n\n__V100_CURL_BODY__\n<html><head><title>Signal Page</title></head><body><h1>Main heading</h1><p>This page contains a useful extracted summary for operators to read quickly.</p></body></html>",
+		},
+	}
+
+	call := ToolCallContext{Session: session}
+	args, err := json.Marshal(map[string]any{
+		"url": "https://example.com/signal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := WebExtract().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("web_extract failed: %s", res.Output)
+	}
+	for _, want := range []string{"title: Signal Page", "heading: Main heading", "snippet: This page contains a useful extracted summary for operators to read quickly."} {
+		if !strings.Contains(res.Output, want) {
+			t.Fatalf("expected %q in web_extract output, got %q", want, res.Output)
+		}
+	}
+}
+
 func envValue(env []string, key string) string {
 	prefix := key + "="
 	for _, item := range env {

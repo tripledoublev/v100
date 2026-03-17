@@ -84,6 +84,11 @@
       "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "method": { "type": "string" }, "headers": { "type": "object" } } },
       "output": { "properties": { "status": { "type": "integer" }, "body": { "type": "string" } } }
     },
+    "web_extract": {
+      "dangerous": false,
+      "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "max_bytes": { "type": "integer" } } },
+      "output": { "properties": { "status": { "type": "integer" }, "extract": { "type": "string" } } }
+    },
     "agent": {
       "dangerous": true,
       "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "budget_steps": { "type": "integer" }, "budget_tokens": { "type": "integer" } } },
