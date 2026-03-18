@@ -56,7 +56,7 @@ func rootCmd() *cobra.Command {
 		diffCmd(),
 		verifyCmd(),
 		queryCmd(),
-		runsCmd(),
+		runsCmd(&cfgPath),
 	)
 	return root
 }
