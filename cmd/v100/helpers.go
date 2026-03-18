@@ -902,6 +902,122 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 	return reconcileToolHistory(msgs), providerName, model, workspace, metadata
 }
 
+func resumeReplayEvents(events []core.Event) []core.Event {
+	filtered := make([]core.Event, 0, len(events))
+	for _, ev := range events {
+		if ev.Type == core.EventRunEnd {
+			continue
+		}
+		filtered = append(filtered, ev)
+	}
+	return filtered
+}
+
+func buildResumeSummary(runID string, events []core.Event, msgs []providers.Message) string {
+	parts := make([]string, 0, 5)
+	parts = append(parts, fmt.Sprintf("Resume summary for run %s.", runID))
+
+	if reason, summary := latestRunEndDetails(events); reason != "" {
+		line := fmt.Sprintf("Previous run ended with reason=%s.", reason)
+		if strings.TrimSpace(summary) != "" {
+			line += " Final summary: " + trimResumeSummaryLine(summary, 200)
+		}
+		parts = append(parts, line)
+	}
+
+	if goal := latestResumeMessageByRole(msgs, "user"); goal != "" {
+		parts = append(parts, "Current user goal: "+trimResumeSummaryLine(goal, 220))
+	}
+	if state := latestResumeAssistantState(msgs); state != "" {
+		parts = append(parts, "Last assistant state: "+trimResumeSummaryLine(state, 220))
+	}
+	if tools := recentResumeToolSummary(msgs, 4); tools != "" {
+		parts = append(parts, "Recent successful tool results: "+tools+".")
+	}
+
+	parts = append(parts, "Continue from this state. Avoid re-reading broad repo context unless the prior summary is insufficient or the workspace has materially changed.")
+	return strings.Join(parts, "\n")
+}
+
+func latestRunEndDetails(events []core.Event) (reason, summary string) {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type != core.EventRunEnd {
+			continue
+		}
+		var p core.RunEndPayload
+		_ = json.Unmarshal(events[i].Payload, &p)
+		return strings.TrimSpace(p.Reason), strings.TrimSpace(p.Summary)
+	}
+	return "", ""
+}
+
+func latestResumeMessageByRole(msgs []providers.Message, role string) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != role {
+			continue
+		}
+		if text := strings.TrimSpace(msgs[i].Content); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func latestResumeAssistantState(msgs []providers.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != "assistant" || len(msg.ToolCalls) > 0 {
+			continue
+		}
+		if text := strings.TrimSpace(msg.Content); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func recentResumeToolSummary(msgs []providers.Message, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	items := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for i := len(msgs) - 1; i >= 0 && len(items) < limit; i-- {
+		msg := msgs[i]
+		if msg.Role != "tool" || strings.TrimSpace(msg.Name) == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Content), "ERROR:") {
+			continue
+		}
+		label := msg.Name
+		if summary := trimResumeSummaryLine(msg.Content, 72); summary != "" {
+			label += " -> " + summary
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		items = append(items, label)
+	}
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+	return strings.Join(items, "; ")
+}
+
+func trimResumeSummaryLine(s string, max int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	s = strings.Join(strings.Fields(s), " ")
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return strings.TrimSpace(s[:max-1]) + "…"
+}
+
 func sanitizeResumedToolOutput(name, output string) string {
 	if strings.TrimSpace(output) == "" {
 		return output

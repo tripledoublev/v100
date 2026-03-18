@@ -173,6 +173,58 @@ func TestReconstructHistorySanitizesBinaryToolOutputOnResume(t *testing.T) {
 	}
 }
 
+func TestResumeReplayEventsDropsHistoricalRunEnd(t *testing.T) {
+	events := []core.Event{
+		mustEvent(t, core.EventRunStart, core.RunStartPayload{Provider: "codex", Model: "gpt-5.4"}),
+		mustEvent(t, core.EventUserMsg, core.UserMsgPayload{Content: "resume this"}),
+		mustEvent(t, core.EventRunEnd, core.RunEndPayload{Reason: "user_exit"}),
+	}
+
+	filtered := resumeReplayEvents(events)
+	if len(filtered) != 2 {
+		t.Fatalf("filtered event count = %d, want 2 (%+v)", len(filtered), filtered)
+	}
+	for _, ev := range filtered {
+		if ev.Type == core.EventRunEnd {
+			t.Fatalf("historical run.end should not be replayed: %+v", filtered)
+		}
+	}
+}
+
+func TestBuildResumeSummaryCapturesLatestGoalStateAndTools(t *testing.T) {
+	events := []core.Event{
+		mustEvent(t, core.EventRunStart, core.RunStartPayload{
+			Provider:  "codex",
+			Model:     "gpt-5.4",
+			Workspace: "/workspace",
+		}),
+		mustEvent(t, core.EventRunEnd, core.RunEndPayload{
+			Reason:  "user_exit",
+			Summary: "Paused after inspecting traces and narrowing the bug to resume handling.",
+		}),
+	}
+	msgs := []providers.Message{
+		{Role: "user", Content: "fix resume so it continues from the last state"},
+		{Role: "assistant", Content: "I isolated the issue to stale replayed run endings and weak resume context."},
+		{Role: "tool", Name: "git_status", Content: "On branch main"},
+		{Role: "tool", Name: "fs_read", Content: "cmd/v100/cmd_resume.go"},
+	}
+
+	got := buildResumeSummary("run-123", events, msgs)
+	for _, want := range []string{
+		"Resume summary for run run-123.",
+		"Previous run ended with reason=user_exit.",
+		"Current user goal: fix resume so it continues from the last state",
+		"Last assistant state: I isolated the issue to stale replayed run endings and weak resume context.",
+		"Recent successful tool results: git_status -> On branch main; fs_read -> cmd/v100/cmd_resume.go.",
+		"Avoid re-reading broad repo context unless the prior summary is insufficient",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("resume summary missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func mustEvent(t *testing.T, typ core.EventType, payload any) core.Event {
 	t.Helper()
 	b, err := json.Marshal(payload)

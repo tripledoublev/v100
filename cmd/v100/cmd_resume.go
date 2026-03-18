@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,6 +66,10 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 
 			// Reconstruct message history from trace
 			msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
+			resumeSummary := buildResumeSummary(runID, events, msgs)
+			if strings.TrimSpace(resumeSummary) != "" {
+				msgs = append([]providers.Message{{Role: "system", Content: resumeSummary}}, msgs...)
+			}
 
 			// Load meta to get original environment grounding
 			meta, _ := core.ReadMeta(runDir)
@@ -165,7 +171,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
 			if tuiFlag {
-				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata)
+				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata)
 			}
 			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, session, mapper, metadata)
 		},
@@ -257,7 +263,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 }
 
 func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, resumeSummary string, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
 
 	var logger *log.Logger
 	if debug {
@@ -348,11 +354,25 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 
 	// Feed historical events into TUI
 	go func() {
-		for _, ev := range events {
+		for _, ev := range resumeReplayEvents(events) {
 			tui.SendEvent(ev)
 		}
+		if strings.TrimSpace(resumeSummary) != "" {
+			payload := core.UserMsgPayload{
+				Source:  "system",
+				Content: resumeSummary,
+			}
+			if data, err := json.Marshal(payload); err == nil {
+				tui.SendEvent(core.Event{
+					RunID:   run.ID,
+					TS:      time.Now(),
+					Type:    core.EventUserMsg,
+					Payload: data,
+				})
+			}
+		}
 		if logger != nil {
-			logger.Printf("fed %d historical events to TUI", len(events))
+			logger.Printf("fed %d replay events to TUI", len(resumeReplayEvents(events)))
 		}
 	}()
 
