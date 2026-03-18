@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -24,14 +25,21 @@ func TestCLIRendererUsesPlainSpeakerLabels(t *testing.T) {
 	})
 
 	plain := stripANSI(out)
-	if !strings.Contains(plain, " me  hello") {
-		t.Fatalf("expected plain user label, got %q", plain)
+	if strings.Contains(plain, "hello") {
+		t.Fatalf("did not expect echoed user message, got %q", plain)
 	}
-	if strings.Contains(plain, " you ") {
-		t.Fatalf("did not expect old user label in %q", plain)
+	if strings.Contains(plain, " me ") {
+		t.Fatalf("did not expect plain user label, got %q", plain)
 	}
 	if !strings.Contains(plain, " agent  world") {
 		t.Fatalf("expected plain agent label, got %q", plain)
+	}
+	matched, err := regexp.MatchString(`\b\d{2}:\d{2}:\d{2}\b`, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatalf("expected timestamp-only user marker, got %q", plain)
 	}
 }
 

@@ -39,25 +39,24 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
-			content := p.Content
-			if p.ImageCount > 0 {
-				if content != "" {
-					content += " "
-				}
-				content += imageCount(p.ImageCount)
-			}
-			wrapped := m.wrapPlainForTranscript(content)
-			label := styleUser.Render("you")
-			plainLabel := "you"
 			if p.Source == "system" {
-				label = styleWarn.Render("v100")
-				plainLabel = "v100"
+				content := p.Content
+				if p.ImageCount > 0 {
+					if content != "" {
+						content += " "
+					}
+					content += imageCount(p.ImageCount)
+				}
+				wrapped := m.wrapPlainForTranscript(content)
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleWarn.Render("v100"), wrapped)
+				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+				m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
+				_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", content)
+				break
 			}
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, label, wrapped)
-			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
-			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", plainLabel, content)
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", ts)
+			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s\n", ev.TS.Format(time.TimeOnly))
 		}
 
 	case core.EventModelResp:

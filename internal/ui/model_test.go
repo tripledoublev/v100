@@ -144,6 +144,33 @@ func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
 	}
 }
 
+func TestUserMessageOnlyShowsTimestampInTranscript(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 100
+	m.height = 30
+
+	payload, err := json.Marshal(core.UserMsgPayload{
+		Content: "nice!",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.appendEvent(core.Event{
+		TS:      time.Date(2026, 3, 18, 18, 28, 36, 0, time.UTC),
+		Type:    core.EventUserMsg,
+		Payload: payload,
+	})
+
+	out := stripANSI(m.transcriptBuf.String())
+	if strings.Contains(out, "nice!") || strings.Contains(out, "you") {
+		t.Fatalf("expected user message content to be hidden, got %q", out)
+	}
+	if !strings.Contains(out, "18:28:36") {
+		t.Fatalf("expected timestamp to remain visible, got %q", out)
+	}
+}
+
 func TestTranscriptWrapWidthUsesComputedPaneWidth(t *testing.T) {
 	m := NewTUIModel()
 	m.width = 120

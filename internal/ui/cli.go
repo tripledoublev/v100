@@ -84,15 +84,15 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventUserMsg:
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		label := styleUser.Render("me")
 		if p.Source == "system" {
-			label = styleWarn.Render("system")
+			fmt.Printf("\n%s  %s  %s\n",
+				ts,
+				styleWarn.Render("system"),
+				p.Content,
+			)
+			break
 		}
-		fmt.Printf("\n%s  %s  %s\n",
-			ts,
-			label,
-			p.Content,
-		)
+		fmt.Printf("\n%s\n", ts)
 
 	case core.EventModelCall:
 		if r.inSubAgent > 0 {
