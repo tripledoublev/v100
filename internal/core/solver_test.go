@@ -215,6 +215,73 @@ func TestReactSolverDeniedToolInjectsSystemMessage(t *testing.T) {
 	}
 }
 
+func TestReactSolverRepeatedDeniedToolStopsRetryLoop(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_1", Name: "mock_dangerous", Args: json.RawMessage(`{}`)},
+				},
+			},
+			{
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_2", Name: "mock_dangerous", Args: json.RawMessage(`{}`)},
+				},
+			},
+			{
+				AssistantText: "I need approval before I can continue.",
+			},
+		},
+	}
+
+	reg := tools.NewRegistry([]string{"mock_dangerous"})
+	reg.Register(&mockDangerousDeniedTool{})
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:       &Run{ID: "test-run", Dir: runDir},
+		Provider:  p,
+		Tools:     reg,
+		Trace:     trace,
+		Budget:    NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:    &ReactSolver{},
+		ConfirmFn: func(_, _ string) bool { return false },
+		Mapper:    NewPathMapper(runDir, runDir),
+	}
+
+	res, err := l.Solver.Solve(ctx, l, "use the dangerous tool")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !contains(res.FinalText, "approval") {
+		t.Fatalf("expected final text to reflect denial, got %q", res.FinalText)
+	}
+	if p.idx != len(p.Responses) {
+		t.Fatalf("expected all scripted provider responses to be consumed, used=%d total=%d", p.idx, len(p.Responses))
+	}
+
+	toolResults := 0
+	foundRepeatedDenialStop := false
+	for _, msg := range l.Messages {
+		if msg.Role == "tool" && strings.Contains(msg.Content, "user denied tool execution") {
+			toolResults++
+		}
+		if msg.Role == "system" && strings.Contains(msg.Content, `was denied 2 times with the same arguments`) {
+			foundRepeatedDenialStop = true
+		}
+	}
+	if toolResults != 2 {
+		t.Fatalf("expected exactly 2 denied tool results before stop, got %d", toolResults)
+	}
+	if !foundRepeatedDenialStop {
+		t.Fatal("expected repeated-denial stop message to be recorded as a system message")
+	}
+}
+
 func TestReactSolverWatchdogStopsToolsButAllowsFinalSynthesisTurn(t *testing.T) {
 	ctx := context.Background()
 	p := &MockProvider{
