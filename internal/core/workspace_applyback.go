@@ -181,6 +181,7 @@ func writeSandboxFinalizeArtifact(path string, result SandboxFinalizeResult) err
 func scanWorkspace(root string) (map[string]workspaceEntry, error) {
 	root = filepath.Clean(root)
 	entries := make(map[string]workspaceEntry)
+	filter := newWorkspaceFilter(root)
 	if _, err := os.Stat(root); err != nil {
 		return nil, err
 	}
@@ -195,7 +196,7 @@ func scanWorkspace(root string) (map[string]workspaceEntry, error) {
 		if rel == "." {
 			return nil
 		}
-		if shouldSkipWorkspacePath(rel, info) {
+		if filter.Skip(rel, info) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -222,43 +223,6 @@ func scanWorkspace(root string) (map[string]workspaceEntry, error) {
 		return nil, err
 	}
 	return entries, nil
-}
-
-func shouldSkipWorkspacePath(rel string, info os.FileInfo) bool {
-	rel = filepath.ToSlash(rel)
-	// Harness runtime byproducts
-	if rel == "runs" || strings.HasPrefix(rel, "runs/") {
-		return true
-	}
-	if rel == "exports" || strings.HasPrefix(rel, "exports/") {
-		return true
-	}
-
-	// General caches and package manager noise
-	if rel == ".cache" || strings.HasPrefix(rel, ".cache/") {
-		return true
-	}
-	if rel == ".gocache" || strings.HasPrefix(rel, ".gocache/") {
-		return true
-	}
-	if rel == ".gomodcache" || strings.HasPrefix(rel, ".gomodcache/") {
-		return true
-	}
-	if rel == ".npm" || strings.HasPrefix(rel, ".npm/") {
-		return true
-	}
-	if rel == "node_modules" || strings.HasPrefix(rel, "node_modules/") {
-		return true
-	}
-
-	// Tool-specific noise
-	if rel == ".config" || rel == ".config/go" {
-		return true
-	}
-	if rel == ".config/go/telemetry" || strings.HasPrefix(rel, ".config/go/telemetry/") {
-		return true
-	}
-	return false
 }
 
 func fileDigest(path string) (string, error) {

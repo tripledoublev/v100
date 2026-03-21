@@ -160,6 +160,50 @@ func TestCheckpointSnapshotSkipsGoTelemetry(t *testing.T) {
 	}
 }
 
+func TestCheckpointSnapshotHonorsV100Ignore(t *testing.T) {
+	workspace := t.TempDir()
+	tracePath := filepath.Join(t.TempDir(), "trace.jsonl")
+
+	if err := os.WriteFile(filepath.Join(workspace, ".v100ignore"), []byte("tmp/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "tmp", "artifact.txt"), []byte("ignore\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "state.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	snapshotRoot := filepath.Join(filepath.Dir(workspace), "snapshots")
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "cp-run-ignore", Dir: workspace, TraceFile: tracePath},
+		Trace:     trace,
+		Snapshots: core.NewWorkspaceSnapshotManager(workspace, snapshotRoot),
+	}
+
+	cp, err := loop.CheckpointWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("CheckpointWithContext returned error: %v", err)
+	}
+
+	snapPath := filepath.Join(snapshotRoot, cp.SnapshotID)
+	if _, err := os.Stat(filepath.Join(snapPath, "tmp")); !os.IsNotExist(err) {
+		t.Fatalf("expected tmp to be excluded from snapshot by .v100ignore, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snapPath, "state.txt")); err != nil {
+		t.Fatalf("expected state.txt in snapshot: %v", err)
+	}
+}
+
 func assertRestoreEvent(t *testing.T, tracePath, snapshotID string) {
 	t.Helper()
 

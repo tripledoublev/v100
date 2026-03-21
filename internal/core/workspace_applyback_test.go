@@ -244,6 +244,32 @@ func TestFinalizeSandboxWorkspaceSkipsExhaustiveByproducts(t *testing.T) {
 	}
 }
 
+func TestFinalizeSandboxWorkspaceHonorsV100Ignore(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+
+	writeFile(t, filepath.Join(source, ".v100ignore"), "tmp/\n*.log\n")
+	writeFile(t, filepath.Join(sandbox, ".v100ignore"), "tmp/\n*.log\n")
+	writeFile(t, filepath.Join(source, "main.go"), "package main\n")
+	writeFile(t, filepath.Join(sandbox, "main.go"), "package main\n")
+	writeFile(t, filepath.Join(sandbox, "tmp", "artifact.txt"), "noise")
+	writeFile(t, filepath.Join(sandbox, "debug.log"), "noise")
+	writeFile(t, filepath.Join(sandbox, "keep.txt"), "signal")
+
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:             "manual",
+		Success:          true,
+		SourceWorkspace:  source,
+		SandboxWorkspace: sandbox,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Diff.Added) != 1 || result.Diff.Added[0] != "keep.txt" {
+		t.Fatalf("expected only keep.txt to remain after .v100ignore filtering, got %+v", result.Diff)
+	}
+}
+
 func TestWorkspaceDiffIncludesPreviewsForSmallFiles(t *testing.T) {
 	source := t.TempDir()
 	sandbox := t.TempDir()

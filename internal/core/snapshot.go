@@ -158,6 +158,7 @@ func clearDir(dir string) error {
 }
 
 func copyTree(src, dst string) error {
+	filter := newWorkspaceFilter(src)
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -169,7 +170,7 @@ func copyTree(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		if shouldSkipSnapshotPath(rel, info) {
+		if filter.Skip(rel, info) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -181,20 +182,6 @@ func copyTree(src, dst string) error {
 		}
 		return copySnapshotFile(path, target, info.Mode())
 	})
-}
-
-func shouldSkipSnapshotPath(rel string, info os.FileInfo) bool {
-	rel = filepath.ToSlash(rel)
-	if rel == "runs" || strings.HasPrefix(rel, "runs/") {
-		return true
-	}
-	if rel == ".cache" || strings.HasPrefix(rel, ".cache/") {
-		return true
-	}
-	if rel == ".config/go/telemetry" || strings.HasPrefix(rel, ".config/go/telemetry/") {
-		return true
-	}
-	return false
 }
 
 func copySnapshotFile(src, dst string, mode os.FileMode) error {
