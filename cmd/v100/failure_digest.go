@@ -31,6 +31,6 @@ func maybePrintFailureDigest(out io.Writer, tracePath, reason string) {
 	if ui.DigestCause(digest) == "" && len(digest.RunErrors) == 0 && len(digest.ToolFailures) == 0 {
 		return
 	}
-	fmt.Fprintln(out)
-	fmt.Fprint(out, ui.FormatDigestStyled(digest))
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprint(out, ui.FormatDigestStyled(digest))
 }
