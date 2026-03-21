@@ -348,9 +348,9 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if !result.OK {
 		content = "ERROR: " + result.Output
 	}
-	// Layer 0: inline truncation of oversized tool results
-	if l.Policy != nil && l.Policy.MaxToolResultChars > 0 {
-		content = TruncateToolResult(content, l.Policy.MaxToolResultChars)
+	// Layer 0: provider-aware inline truncation of oversized tool results.
+	if maxChars := l.toolResultCharLimit(stepID); maxChars > 0 {
+		content = TruncateToolResult(content, maxChars)
 	}
 	// Fix #1: Sanitize host paths in tool results to prevent double-prepend bug
 	if l.Mapper != nil {
@@ -662,6 +662,55 @@ func TruncateToolResult(content string, maxChars int) string {
 	tail := content[len(content)-keep:]
 	trimmed := len(content) - 2*keep
 	return head + fmt.Sprintf("\n\n[... truncated %d chars ...]\n\n", trimmed) + tail
+}
+
+func (l *Loop) toolResultCharLimit(stepID string) int {
+	limit := 0
+	if l.Policy != nil && l.Policy.MaxToolResultChars > 0 {
+		limit = l.Policy.MaxToolResultChars
+	}
+
+	threshold := l.providerAwareEvidenceThreshold()
+	if threshold <= 0 {
+		return limit
+	}
+
+	currentTokens := estimateTokens(l.previewMessagesForStep(stepID))
+	remaining := threshold - currentTokens
+
+	// Keep headroom for at least one more model turn plus surrounding framing.
+	reserve := threshold / 10
+	if reserve < 1024 {
+		reserve = 1024
+	}
+	if reserve > 8192 {
+		reserve = 8192
+	}
+
+	tokenBudget := remaining - reserve
+	dynamicLimit := 400 // always preserve enough signal for head+tail truncation
+	if tokenBudget > 0 {
+		// estimateTokensSingle uses ~3.3 chars/token; round down conservatively.
+		dynamicLimit = tokenBudget * 3
+		if dynamicLimit < 400 {
+			dynamicLimit = 400
+		}
+	}
+
+	if limit == 0 || dynamicLimit < limit {
+		return dynamicLimit
+	}
+	return limit
+}
+
+func (l *Loop) providerAwareEvidenceThreshold() int {
+	if l.Policy != nil && l.Policy.ContextLimit > 0 {
+		return l.Policy.ContextLimit * 3 / 4
+	}
+	if l.ModelMetadata.ContextSize > 0 {
+		return l.ModelMetadata.ContextSize * 3 / 4
+	}
+	return 0
 }
 
 // estimateTokensSingle returns the estimated token count for a single message.
