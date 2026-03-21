@@ -9,7 +9,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 ## Features
 
 - **Durable traces** — every run is logged as append-only JSONL (`runs/<id>/trace.jsonl`) with 21 structured event types
-- **Two solvers** — ReAct loop (default) and Plan-Execute with automatic replanning
+- **Three solvers** — ReAct (default), Plan-Execute with automatic replanning, and Router for cheap/smart provider escalation
 - **Sandbox execution** — Docker-based isolated containers with hardened security, snapshots, and apply-back
 - **Run metadata + scoring** — attach names/tags and score outcomes for later analysis
 - **Evaluation tooling** — per-run stats, run comparisons, experiments, and batch bench execution
@@ -22,12 +22,12 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
 - **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
 - **Streaming** — real-time token streaming from providers that support it
-- **Tool execution** — 26+ built-in tools: file system, shell, git, patch, curl, compact web extraction, ripgrep search, semantic parsing, sql_search, graphviz, reflect, and multi-agent coordination
+- **Tool execution** — built-in tools for file system access, shell, git, patching, curl/web extraction, ripgrep search, semantic analysis, blackboard memory, reflection, and multi-agent coordination
 - **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Six providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, Minimax, or local Ollama
+- **Six built-in providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, MiniMax, or local Ollama
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea "Mission Control" TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
@@ -36,13 +36,13 @@ The goal is to make agent behavior measurable and reproducible so different prom
 ```bash
 git clone https://github.com/tripledoublev/v100
 cd v100
-go build -ldflags "-X main.version=v0.2.5" -o v100 ./cmd/v100/
+go build -o v100 ./cmd/v100/
 ./v100 install
 ```
 
 `./v100 install` creates `~/.local/bin/v100` as a symlink to the repo-local `./v100`, so future `go build -o v100 ./cmd/v100/` rebuilds automatically update the shell-resolved `v100`.
 
-Requires Go 1.21+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, `mpv` or `ffplay` for `radio`.
+Requires Go 1.25.7+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, and `sem` for semantic diff/impact/blame tools.
 
 Pre-built binaries are available on the [releases page](https://github.com/tripledoublev/v100/releases).
 
@@ -61,7 +61,7 @@ v100 login
 # Verify setup
 v100 doctor
 
-# Start a run (uses ChatGPT subscription by default)
+# Start a run (uses MiniMax by default)
 v100 run
 
 # Start a non-interactive run (executes prompt then exits)
@@ -118,7 +118,7 @@ That image installs Go, `git`, `patch`, `ripgrep`, and `curl`, which avoids the 
 
 ## Providers
 
-### ChatGPT subscription (default)
+### ChatGPT subscription
 
 Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate with `v100 login` after filling `~/.config/v100/oauth_credentials.json`:
 
@@ -127,6 +127,8 @@ v100 login   # opens browser → completes OAuth → saves token
 ```
 
 Model: `gpt-5.4`
+
+This is not the built-in default provider. To use it by default, set `provider = "codex"` under `[defaults]`.
 
 ### OpenAI API
 
@@ -166,7 +168,7 @@ Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, 
 
 ### Minimax
 
-Advanced model support via MiniMax-M2.7.
+Advanced model support via MiniMax-M2.7. This is the built-in default provider in the shipped config.
 
 ```bash
 v100 login --provider minimax
@@ -203,7 +205,7 @@ OAuth client config for subscription providers lives at `~/.config/v100/oauth_cr
 
 ## Solvers
 
-v100 supports two solver strategies that control how the agent loop processes tasks.
+v100 supports three solver strategies that control how the agent loop processes tasks.
 
 ### ReactSolver (default)
 
@@ -219,6 +221,14 @@ Two-phase strategy: first generates a plan, then executes it with ReAct. If exec
 
 ```bash
 v100 run --solver plan_execute --max-replans 3
+```
+
+### RouterSolver
+
+Dual-provider strategy: use a cheaper provider for discovery and a smarter provider for harder synthesis/editing turns.
+
+```bash
+v100 run --solver router --provider minimax
 ```
 
 ## Sandbox
