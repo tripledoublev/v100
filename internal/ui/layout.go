@@ -7,6 +7,12 @@ import (
 	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
+// Border overhead constants: how many columns/rows are consumed by lipgloss borders and padding.
+const (
+	splitBorderCols  = 5  // Each pane has 2 border cols, and split adds 1-col gap: 2 + 2 + 1
+	singleBorderSize = 2  // Single pane borders consume 2 rows/cols
+)
+
 type headerLayout struct {
 	leftText  string
 	clockText string
@@ -14,11 +20,13 @@ type headerLayout struct {
 }
 
 type viewLayoutPlan struct {
-	header          headerLayout
-	inputWidth      int
-	remainingHeight int
-	showSplit       bool
-	panes           paneLayout
+	header            headerLayout
+	inputWidth        int
+	leftPaneHeight    int
+	singlePaneHeight  int
+	remainingHeight   int
+	showSplit         bool
+	panes             paneLayout
 }
 
 type paneLayout struct {
@@ -46,7 +54,7 @@ func computePaneLayout(totalWidth, totalHeight, leftPanePct, tracePanePct int) p
 	}
 
 	// Each pane has 2 border columns and the split adds a 1-column gap.
-	availableWidth := totalWidth - 5
+	availableWidth := totalWidth - splitBorderCols
 	leftWidth := availableWidth * leftPanePct / 100
 	if leftWidth < 38 {
 		leftWidth = 38
@@ -128,10 +136,12 @@ func computeHeaderLayout(totalWidth int, now time.Time) headerLayout {
 func computeViewLayout(totalWidth, totalHeight, inputHeight, headerHeight, leftPanePct, tracePanePct int, showTrace bool, now time.Time) viewLayoutPlan {
 	remainingHeight := totalHeight - headerHeight - inputHeight
 	plan := viewLayoutPlan{
-		header:          computeHeaderLayout(totalWidth, now),
-		inputWidth:      max(1, totalWidth-2),
-		remainingHeight: remainingHeight,
-		showSplit:       showTrace,
+		header:           computeHeaderLayout(totalWidth, now),
+		inputWidth:       max(1, totalWidth-singleBorderSize),
+		leftPaneHeight:   max(1, remainingHeight-singleBorderSize),
+		singlePaneHeight: max(1, remainingHeight-singleBorderSize),
+		remainingHeight:  remainingHeight,
+		showSplit:        showTrace,
 	}
 	plan.panes = computePaneLayout(totalWidth, remainingHeight, leftPanePct, tracePanePct)
 	plan.remainingHeight = plan.panes.remainingHeight

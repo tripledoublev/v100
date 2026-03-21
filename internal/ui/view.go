@@ -40,7 +40,7 @@ func (m *TUIModel) View() string {
 	if len(m.pastedImages) > 0 {
 		inputView = styleInfo.Render(imageCount(len(m.pastedImages))) + " " + inputView
 	}
-	inputBox := inputSt.Width(m.width - 2).Render(inputView)
+	inputBox := inputSt.Width(m.width - singleBorderSize).Render(inputView)
 	inputHeight := lipgloss.Height(inputBox)
 	layoutPlan := computeViewLayout(m.width, m.height, inputHeight, 1, m.leftPanePct, m.tracePanePct, m.showTrace, time.Now())
 	header := renderHeader(m.width, layoutPlan.header)
@@ -50,7 +50,6 @@ func (m *TUIModel) View() string {
 		header = renderHeader(m.width, layoutPlan.header)
 	}
 	layout := layoutPlan.panes
-	remaining := layoutPlan.remainingHeight
 
 	if m.showTrace {
 		leftSt := tuiPaneStyle
@@ -90,7 +89,7 @@ func (m *TUIModel) View() string {
 				statusSt = tuiActivePaneStyle
 			}
 			statusPane = statusSt.Width(layout.rightWidth).Render(
-				m.statusView(layout.rightWidth, layout.maxStatusContentHeight+2))
+				m.statusView(layout.rightWidth, layout.maxStatusContentHeight))
 			statusRendered = lipgloss.Height(statusPane)
 		}
 
@@ -104,7 +103,7 @@ func (m *TUIModel) View() string {
 		m.traceView.Width = max(1, layout.rightWidth-4)
 		m.traceView.Height = layout.traceViewportHeight
 
-		left := leftSt.Width(layout.leftWidth).Height(remaining - 2).Render(m.transcript.View())
+		left := leftSt.Width(layout.leftWidth).Height(layoutPlan.leftPaneHeight).Render(m.transcript.View())
 
 		tracePane := rightSt.Width(layout.rightWidth).Height(layout.traceContentHeight).Render(
 			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
@@ -131,9 +130,9 @@ func (m *TUIModel) View() string {
 	if m.focus == focusTranscript {
 		tSt = tuiActivePaneStyle
 	}
-	m.transcript.Width = max(1, layoutPlan.inputWidth-2)
-	m.transcript.Height = max(1, remaining-2)
-	pane := tSt.Width(m.width - 2).Height(remaining).Render(m.transcript.View())
+	m.transcript.Width = layoutPlan.inputWidth
+	m.transcript.Height = layoutPlan.leftPaneHeight
+	pane := tSt.Width(layoutPlan.inputWidth).Height(layoutPlan.singlePaneHeight).Render(m.transcript.View())
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
 }
@@ -166,8 +165,8 @@ func max(a, b int) int {
 	return b
 }
 
-func (m *TUIModel) statusView(width, height int) string {
-	w := width - 2 // content width inside borders
+func (m *TUIModel) statusView(width, contentHeight int) string {
+	w := width - singleBorderSize // content width inside borders
 	if w < 12 {
 		w = 12
 	}
@@ -205,12 +204,12 @@ func (m *TUIModel) statusView(width, height int) string {
 	}
 
 	// Keep content bounded to pane height to avoid stale lines after resize.
-	contentH := height - 2 // border consumes 2 lines
-	if contentH < 1 {
-		contentH = 1
+	// contentHeight is already pre-computed (without border overhead)
+	if contentHeight < 1 {
+		contentHeight = 1
 	}
-	if len(flattened) > contentH {
-		flattened = flattened[:contentH]
+	if len(flattened) > contentHeight {
+		flattened = flattened[:contentHeight]
 	}
 	return strings.Join(flattened, "\n")
 }

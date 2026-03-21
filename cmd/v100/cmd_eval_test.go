@@ -101,3 +101,89 @@ func captureStdout(fn func() error) (string, error) {
 	}
 	return string(out), runErr
 }
+
+func TestBenchCmdPreservesLegacyDirectUsage(t *testing.T) {
+	cfgPath := ""
+	cmd := benchCmd(&cfgPath)
+	if cmd.Args == nil {
+		t.Fatal("bench command should validate args")
+	}
+	if err := cmd.Args(cmd, []string{"demo.bench.toml"}); err != nil {
+		t.Fatalf("legacy bench invocation should accept a direct bench file: %v", err)
+	}
+	if cmd.RunE == nil {
+		t.Fatal("bench command should preserve direct RunE support for legacy usage")
+	}
+}
+
+func TestBenchBootstrapRefusesOverwriteWithoutForce(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		filename := "demo.bench.toml"
+		if err := os.WriteFile(filename, []byte("original"), 0o644); err != nil {
+			return err
+		}
+
+		cmd := benchBootstrapCmd()
+		err := cmd.RunE(cmd, []string{"demo"})
+		if err == nil {
+			t.Fatal("expected bootstrap overwrite to fail without --force")
+		}
+		if !strings.Contains(err.Error(), "use --force to overwrite") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, readErr := os.ReadFile(filename)
+		if readErr != nil {
+			return readErr
+		}
+		if string(data) != "original" {
+			t.Fatalf("bootstrap should not overwrite existing file without --force, got %q", string(data))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenchBootstrapForceOverwritesWithValidScaffold(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		filename := "demo.bench.toml"
+		if err := os.WriteFile(filename, []byte("original"), 0o644); err != nil {
+			return err
+		}
+
+		cmd := benchBootstrapCmd()
+		if err := cmd.Flags().Set("force", "true"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("provider", "gemini"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("solver", "react"); err != nil {
+			return err
+		}
+
+		if _, err := captureStdout(func() error {
+			return cmd.RunE(cmd, []string{"demo"})
+		}); err != nil {
+			return err
+		}
+
+		if _, err := core.LoadBenchConfig(filename); err != nil {
+			t.Fatalf("expected generated scaffold to parse, got %v", err)
+		}
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return err
+		}
+		text := string(data)
+		for _, want := range []string{`name = "demo"`, `provider = "gemini"`, `solver   = "react"`} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("scaffold missing %q in:\n%s", want, text)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
