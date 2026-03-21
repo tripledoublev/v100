@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.6 — 2026-03-21
+
+**MiniMax Default Upgrade and Docs Refresh**
+
+This patch release updates the built-in MiniMax default model to `MiniMax-M2.7` and refreshes stale operator docs so the README and memory notes match current runtime behavior.
+
+### Provider Defaults
+
+- **MiniMax default model upgraded** — Built-in config defaults, provider defaults, tests, and benchmark fixtures now use `MiniMax-M2.7`.
+- **Provider docs aligned** — README examples and provider matrix now reflect MiniMax as the built-in default provider and `MiniMax-M2.7` as the default model.
+
+### Documentation
+
+- **README cleanup** — Corrected the default provider guidance, solver count, Go version requirement, and tool-surface description.
+- **Compression notes refreshed** — Updated `MEMORY.md` to reflect the current two-pass compression flow with targeted compression before oldest-half fallback.
+
 ## v0.2.5 — 2026-03-14
 
 **Harness Cleanup and Watchdog Hardening**
