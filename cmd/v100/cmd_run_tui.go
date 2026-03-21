@@ -277,6 +277,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	} else if result != nil {
 		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
 	}
+	maybePrintFailureDigest(os.Stderr, trace.Path(), reason)
 
 	return nil
 }

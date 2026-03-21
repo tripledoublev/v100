@@ -627,6 +627,7 @@ done:
 	} else if result != nil {
 		fmt.Println(ui.Info(sandboxFinalizeMessage(*result)))
 	}
+	maybePrintFailureDigest(os.Stderr, trace.Path(), reason)
 
 	fmt.Println(ui.Dim("budget: " + budget.Summary()))
 	fmt.Println(ui.Dim("run id: ") + run.ID)
