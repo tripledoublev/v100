@@ -53,6 +53,10 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		return SolveResult{}, err
 	}
 
+	// 1b. Sanitize unresolved tool calls from live history before next provider request.
+	// This prevents MiniMax error 2013 when long-running tool calls haven't completed.
+	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
+
 	// 2. Maybe compress history before calling the provider.
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
 		_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail

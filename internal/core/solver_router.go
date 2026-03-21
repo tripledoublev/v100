@@ -28,6 +28,9 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		return SolveResult{}, err
 	}
 
+	// 1b. Sanitize unresolved tool calls from live history before next provider request.
+	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
+
 	// 2. Maybe compress history before calling the provider.
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
 		_ = l.maybeCompress(ctx, stepID)

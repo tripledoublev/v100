@@ -450,3 +450,96 @@ func TestEmitRunEndIdempotency(t *testing.T) {
 		t.Errorf("expected exactly 1 run.end event, got %d", endCount)
 	}
 }
+
+func TestSanitizeLiveMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []providers.Message
+		want     []providers.Message
+	}{
+		{
+			name: "removes unresolved tool calls",
+			messages: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "working", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+					{ID: "tc2", Name: "tool_b", Args: json.RawMessage(`{}`)},
+				}},
+				{Role: "tool", ToolCallID: "tc1", Content: "result1"},
+			},
+			want: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "working", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+				}},
+				{Role: "tool", ToolCallID: "tc1", Content: "result1"},
+			},
+		},
+		{
+			name: "keeps assistant message with text when all tool calls removed",
+			messages: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "let me try", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+				}},
+			},
+			want: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "let me try"},
+			},
+		},
+		{
+			name: "removes assistant message with no text and no resolved tool calls",
+			messages: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+				}},
+				{Role: "user", Content: "continue"},
+			},
+			want: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "user", Content: "continue"},
+			},
+		},
+		{
+			name: "preserves resolved tool calls and results",
+			messages: []providers.Message{
+				{Role: "assistant", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+				}},
+				{Role: "tool", ToolCallID: "tc1", Content: "result1"},
+			},
+			want: []providers.Message{
+				{Role: "assistant", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{}`)},
+				}},
+				{Role: "tool", ToolCallID: "tc1", Content: "result1"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := &core.Loop{Messages: tt.messages}
+			modified := l.SanitizeLiveMessages()
+			// Check if any modifications were needed
+			if len(tt.messages) != len(tt.want) && !modified {
+				t.Error("expected modified=true when message count changed")
+			}
+			if len(l.Messages) != len(tt.want) {
+				t.Fatalf("expected %d messages, got %d", len(tt.want), len(l.Messages))
+			}
+			for i, msg := range l.Messages {
+				if msg.Role != tt.want[i].Role || msg.Content != tt.want[i].Content {
+					t.Errorf("message %d: got {%s, %s}, want {%s, %s}",
+						i, msg.Role, msg.Content, tt.want[i].Role, tt.want[i].Content)
+				}
+				if len(msg.ToolCalls) != len(tt.want[i].ToolCalls) {
+					t.Errorf("message %d: expected %d tool calls, got %d",
+						i, len(tt.want[i].ToolCalls), len(msg.ToolCalls))
+				}
+			}
+		})
+	}
+}

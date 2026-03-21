@@ -19,6 +19,9 @@ func (s *PlanExecuteSolver) Name() string { return "plan_execute" }
 func (s *PlanExecuteSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
 	budgetBefore := l.Budget.Budget()
 
+	// 0. Sanitize unresolved tool calls from live history before processing.
+	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
+
 	// 1. Initial Planning
 	plan, err := s.Preview(ctx, l, userInput)
 	if err != nil {

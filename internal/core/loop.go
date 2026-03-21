@@ -148,6 +148,9 @@ func (l *Loop) appendUserMessage(stepID, userInput string) error {
 // emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
 // If that fails, it emits a local fallback response so the transcript still guides the user.
 func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause error) {
+	// Sanitize unresolved tool calls before building error assistance messages.
+	_ = l.SanitizeLiveMessages()
+
 	msgs := append([]providers.Message{}, l.buildMessages(false)...)
 	msgs = append(msgs, providers.Message{
 		Role: "user",
@@ -523,6 +526,55 @@ func (l *Loop) buildMessagesWithStepMemory(stepID string, includeMemory bool, co
 	// 3. Conversation history
 	msgs = append(msgs, l.Messages...)
 	return msgs
+}
+
+// SanitizeLiveMessages removes unresolved assistant tool calls from l.Messages
+// before the next provider request. This prevents MiniMax error 2013 when
+// a long-running tool call hasn't completed before a new step is processed.
+// Returns true if any tool calls were removed.
+func (l *Loop) SanitizeLiveMessages() bool {
+	toolResults := make(map[string]bool)
+	for _, msg := range l.Messages {
+		if msg.Role == "tool" && strings.TrimSpace(msg.ToolCallID) != "" {
+			toolResults[msg.ToolCallID] = true
+		}
+	}
+
+	modified := false
+	out := make([]providers.Message, 0, len(l.Messages))
+	for _, msg := range l.Messages {
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			out = append(out, msg)
+			continue
+		}
+		// Filter to keep only tool calls that have results
+		filtered := make([]providers.ToolCall, 0, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
+			if strings.TrimSpace(tc.ID) != "" && toolResults[tc.ID] {
+				filtered = append(filtered, tc)
+			} else {
+				modified = true
+			}
+		}
+		// If no resolved tool calls remain but there's text content, keep the message
+		if len(filtered) == 0 {
+			if strings.TrimSpace(msg.Content) == "" {
+				// No text and no resolved tool calls: skip this message
+				modified = true
+				continue
+			}
+			// Keep message but without tool calls
+			msg.ToolCalls = nil
+			out = append(out, msg)
+		} else {
+			msg.ToolCalls = filtered
+			out = append(out, msg)
+		}
+	}
+	if modified {
+		l.Messages = out
+	}
+	return modified
 }
 
 const defaultMemoryReferenceTokenBudget = 256
