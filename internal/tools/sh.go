@@ -26,7 +26,7 @@ func Sh() Tool { return &shTool{} }
 
 func (t *shTool) Name() string { return "sh" }
 func (t *shTool) Description() string {
-	return "Execute a shell command with a timeout. Use carefully."
+	return "Execute a shell command with a timeout. This may read or download external resources and save outputs into the workspace when session/network policy allows it. Use carefully."
 }
 func (t *shTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *shTool) Effects() ToolEffects {

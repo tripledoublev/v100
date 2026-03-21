@@ -3,6 +3,7 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -18,6 +19,12 @@ func TestDefault(t *testing.T) {
 	}
 	if p.MaxToolCallsPerStep != 20 {
 		t.Errorf("expected 20 max tool calls, got %d", p.MaxToolCallsPerStep)
+	}
+	if !strings.Contains(p.SystemPrompt, "shell tool can download network resources") {
+		t.Error("expected default system prompt to disclose shell download capability")
+	}
+	if !strings.Contains(p.SystemPrompt, "save files into the workspace") {
+		t.Error("expected default system prompt to disclose workspace-save constraint")
 	}
 }
 
