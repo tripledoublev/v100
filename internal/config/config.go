@@ -126,7 +126,7 @@ func DefaultConfig() *Config {
 			},
 			"minimax": {
 				Type:         "minimax",
-				DefaultModel: "MiniMax-M2.5",
+				DefaultModel: "MiniMax-M2.7",
 				BaseURL:      "https://api.minimax.chat/v1",
 				Auth:         AuthConfig{Env: "MINIMAX_API_KEY"},
 			},
@@ -229,7 +229,7 @@ env = "ANTHROPIC_API_KEY"
 
 [providers.minimax]
 type = "minimax"
-default_model = "MiniMax-M2.5"
+default_model = "MiniMax-M2.7"
 base_url = "https://api.minimax.chat/v1"
 [providers.minimax.auth]
 env = "MINIMAX_API_KEY"

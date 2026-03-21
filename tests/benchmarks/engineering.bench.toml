@@ -25,6 +25,6 @@ budget_steps = 10
 [[variants]]
 name = "minimax-react"
 provider = "minimax"
-model = "MiniMax-M2.5"
+model = "MiniMax-M2.7"
 solver = "react"
 budget_steps = 10

@@ -17,7 +17,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	mustWriteRunFixture(t, runRoot, "older-run", core.RunMeta{
 		RunID:     "older-run",
 		Provider:  "minimax",
-		Model:     "MiniMax-M2.5",
+		Model:     "MiniMax-M2.7",
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}, "older prompt", "completed")
 
@@ -32,7 +32,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	mustWriteRunFixture(t, runRoot, "child-run", core.RunMeta{
 		RunID:       "child-run",
 		Provider:    "minimax",
-		Model:       "MiniMax-M2.5",
+		Model:       "MiniMax-M2.7",
 		CreatedAt:   time.Now(),
 		ParentRunID: "older-run",
 	}, "child prompt", "completed")

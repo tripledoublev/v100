@@ -144,7 +144,7 @@ func TestReconstructHistorySanitizesBinaryToolOutputOnResume(t *testing.T) {
 	events := []core.Event{
 		mustEvent(t, core.EventRunStart, core.RunStartPayload{
 			Provider:  "minimax",
-			Model:     "MiniMax-M2.5",
+			Model:     "MiniMax-M2.7",
 			Workspace: "/workspace",
 		}),
 		mustEvent(t, core.EventUserMsg, core.UserMsgPayload{Content: "look at this image"}),

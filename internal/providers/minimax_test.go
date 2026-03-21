@@ -150,10 +150,10 @@ func TestMiniMaxUsesAnthropicFormat(t *testing.T) {
 		GenParams: GenParams{MaxTokens: 1024},
 	}
 
-	aReq := anthropicBuildRequest("MiniMax-M2.5", req)
+	aReq := anthropicBuildRequest("MiniMax-M2.7", req)
 
-	if aReq.Model != "MiniMax-M2.5" {
-		t.Errorf("expected model MiniMax-M2.5, got %s", aReq.Model)
+	if aReq.Model != "MiniMax-M2.7" {
+		t.Errorf("expected model MiniMax-M2.7, got %s", aReq.Model)
 	}
 	if aReq.System != "You are helpful." {
 		t.Errorf("expected system prompt, got %q", aReq.System)

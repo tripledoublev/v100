@@ -76,7 +76,7 @@ v100 run --provider openai
 # Use Anthropic API
 v100 run --provider anthropic
 
-# Use Minimax (MiniMax-M2.5)
+# Use Minimax (MiniMax-M2.7)
 v100 run --provider minimax
 
 # Use local Ollama
@@ -166,7 +166,7 @@ Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, 
 
 ### Minimax
 
-Advanced model support via MiniMax-M2.5.
+Advanced model support via MiniMax-M2.7.
 
 ```bash
 v100 login --provider minimax
@@ -190,7 +190,7 @@ v100 run --provider ollama --model qwen3.5:9b
 | `openai` | `OPENAI_API_KEY` | `gpt-4o` | yes | API-driven experiments |
 | `anthropic` | `ANTHROPIC_API_KEY` or `v100 login --provider anthropic` | `claude-sonnet-4-20250514` | yes | Claude API experiments |
 | `gemini` | OAuth (`v100 login --provider gemini`) | `gemini-2.5-flash` | yes | subscription-backed Gemini runs |
-| `minimax` | OAuth (`v100 login --provider minimax`) | `MiniMax-M2.5` | yes | high-fidelity research runs |
+| `minimax` | OAuth (`v100 login --provider minimax`) | `MiniMax-M2.7` | yes | high-fidelity research runs |
 | `ollama` | local daemon | `qwen3.5:2b` | yes | fully local runs |
 
 OAuth client config for subscription providers lives at `~/.config/v100/oauth_credentials.json`.
@@ -419,7 +419,7 @@ default_model = "gemini-2.5-flash"
 
 [providers.minimax]
 type = "minimax"
-default_model = "MiniMax-M2.5"
+default_model = "MiniMax-M2.7"
 
 [sandbox]
 enabled = false

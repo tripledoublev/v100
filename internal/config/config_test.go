@@ -40,8 +40,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Providers["minimax"].Type != "minimax" {
 		t.Errorf("expected type minimax, got %s", cfg.Providers["minimax"].Type)
 	}
-	if cfg.Providers["minimax"].DefaultModel != "MiniMax-M2.5" {
-		t.Errorf("expected MiniMax-M2.5, got %s", cfg.Providers["minimax"].DefaultModel)
+	if cfg.Providers["minimax"].DefaultModel != "MiniMax-M2.7" {
+		t.Errorf("expected MiniMax-M2.7, got %s", cfg.Providers["minimax"].DefaultModel)
 	}
 
 	// Verify sh tool is enabled and dangerous by default
@@ -182,8 +182,8 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, "[providers.minimax]") {
 		t.Error("default TOML should contain minimax provider section")
 	}
-	if !contains(toml, "MiniMax-M2.5") {
-		t.Error("default TOML should reference MiniMax-M2.5 model")
+	if !contains(toml, "MiniMax-M2.7") {
+		t.Error("default TOML should reference MiniMax-M2.7 model")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

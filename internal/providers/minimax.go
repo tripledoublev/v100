@@ -17,7 +17,7 @@ import (
 
 const (
 	minimaxBaseURL      = "https://api.minimax.io/anthropic/v1/messages"
-	minimaxDefaultModel = "MiniMax-M2.5"
+	minimaxDefaultModel = "MiniMax-M2.7"
 )
 
 // MiniMaxProvider implements Provider using MiniMax's Anthropic-compatible

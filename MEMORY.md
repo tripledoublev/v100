@@ -1,7 +1,7 @@
 ## March 2026 UX & Provider Hardening
 
 ### 1. Extensive Benchmarking & Research
-- Performed 30+ benchmark runs using `gemini-2.5-flash` and `MiniMax-M2.5` providers across various tasks and solver strategies.
+- Performed 30+ benchmark runs using `gemini-2.5-flash` and `MiniMax-M2.7` providers across various tasks and solver strategies.
 - Verified the effectiveness of `plan_execute` for complex architectural analysis compared to standard `react` loops.
 - Identified and prioritized several UX bottlenecks, leading to new GitHub issues (#84, #85).
 
