@@ -170,6 +170,67 @@ func TestEnsureToolResultContiguity_AlreadyOrdered(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolHistoryDropsUnresolvedAssistantToolCall(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "download"},
+		{Role: "assistant", Content: "starting", ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "sh", Args: json.RawMessage(`{"cmd":"sleep 60"}`)},
+		}},
+		{Role: "user", Content: "continue"},
+		{Role: "assistant", Content: "I can continue without that result."},
+	}
+
+	got := sanitizeToolHistory(msgs)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 messages after sanitizing unresolved tool call, got %d", len(got))
+	}
+	if len(got[1].ToolCalls) != 0 {
+		t.Fatalf("expected unresolved tool call to be dropped, got %+v", got[1].ToolCalls)
+	}
+	if got[1].Content != "starting" {
+		t.Fatalf("expected assistant text to be preserved, got %q", got[1].Content)
+	}
+}
+
+func TestSanitizeToolHistoryDropsOrphanedToolResult(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "tool", Content: "late result", ToolCallID: "tc-missing", Name: "sh"},
+		{Role: "assistant", Content: "done"},
+	}
+
+	got := sanitizeToolHistory(msgs)
+	if len(got) != 2 {
+		t.Fatalf("expected orphaned tool result to be dropped, got %d messages", len(got))
+	}
+	for _, msg := range got {
+		if msg.Role == "tool" {
+			t.Fatalf("unexpected tool message after sanitizing: %+v", msg)
+		}
+	}
+}
+
+func TestAnthropicConvertMessagesDropsUnresolvedToolUse(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "do it"},
+		{Role: "assistant", Content: "working", ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "sh", Args: json.RawMessage(`{"cmd":"sleep 60"}`)},
+		}},
+		{Role: "user", Content: "continue"},
+	}
+
+	_, converted := anthropicConvertMessages(msgs)
+	if len(converted) != 3 {
+		t.Fatalf("expected unresolved tool_use to be omitted, got %d messages", len(converted))
+	}
+	if converted[1].Role != "assistant" || converted[1].Content != "working" {
+		t.Fatalf("expected text-only assistant message, got role=%q content=%#v", converted[1].Role, converted[1].Content)
+	}
+	if converted[2].Role != "user" {
+		t.Fatalf("expected trailing user message to remain, got %q", converted[2].Role)
+	}
+}
+
 func TestAnthropicEstimateCost(t *testing.T) {
 	tests := []struct {
 		model  string

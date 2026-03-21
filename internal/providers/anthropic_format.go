@@ -76,6 +76,56 @@ type anthropicError struct {
 	} `json:"error"`
 }
 
+// sanitizeToolHistory removes unresolved assistant tool calls and orphaned tool
+// results from provider-facing history. This prevents live-run interruptions or
+// late-arriving tool results from leaking invalid tool_use state into the next
+// Anthropic-compatible request.
+func sanitizeToolHistory(msgs []Message) []Message {
+	toolResults := make(map[string]bool)
+	for _, msg := range msgs {
+		if msg.Role == "tool" && strings.TrimSpace(msg.ToolCallID) != "" {
+			toolResults[msg.ToolCallID] = true
+		}
+	}
+
+	keptToolCalls := make(map[string]bool)
+	out := make([]Message, 0, len(msgs))
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "assistant":
+			if len(msg.ToolCalls) == 0 {
+				out = append(out, msg)
+				continue
+			}
+			filtered := make([]ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				if strings.TrimSpace(tc.ID) == "" || !toolResults[tc.ID] {
+					continue
+				}
+				filtered = append(filtered, tc)
+				keptToolCalls[tc.ID] = true
+			}
+			if len(filtered) == 0 {
+				if strings.TrimSpace(msg.Content) == "" {
+					continue
+				}
+				msg.ToolCalls = nil
+				out = append(out, msg)
+				continue
+			}
+			msg.ToolCalls = filtered
+			out = append(out, msg)
+		case "tool":
+			if keptToolCalls[msg.ToolCallID] {
+				out = append(out, msg)
+			}
+		default:
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
 // ensureToolResultContiguity reorders messages so that tool results always
 // immediately follow the assistant message containing their tool calls.
 // This is required by MiniMax (error 2013) and is good practice generally.
@@ -127,6 +177,7 @@ func ensureToolResultContiguity(msgs []Message) []Message {
 // Returns (system, messages). System messages are extracted; tool results
 // are wrapped in tool_result content blocks within user turns.
 func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
+	msgs = sanitizeToolHistory(msgs)
 	msgs = ensureToolResultContiguity(msgs)
 	var system string
 	var out []anthropicMessage
