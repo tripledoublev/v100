@@ -34,6 +34,7 @@ func rootCmd() *cobra.Command {
 		restoreCmd(&cfgPath),
 		replayCmd(&cfgPath),
 		blameCmd(),
+		wakeCmd(&cfgPath),
 		toolsCmd(&cfgPath),
 		providersCmd(&cfgPath),
 		configInitCmd(),

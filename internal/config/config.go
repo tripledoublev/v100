@@ -18,6 +18,7 @@ type Config struct {
 	Agents    map[string]AgentConfig    `toml:"agents"`
 	Defaults  DefaultsConfig            `toml:"defaults"`
 	Sandbox   SandboxConfig             `toml:"sandbox"`
+	Wake      WakeConfig                `toml:"wake"`
 }
 
 // SandboxConfig defines the isolated execution environment.
@@ -29,6 +30,17 @@ type SandboxConfig struct {
 	MemoryMB    int     `toml:"memory_mb"`
 	CPUs        float64 `toml:"cpus"`
 	ApplyBack   string  `toml:"apply_back"` // manual | on_success | never
+}
+
+// WakeConfig holds configuration for the continuous wake daemon.
+type WakeConfig struct {
+	Provider        string  `toml:"provider"`         // inherits defaults.provider if empty
+	IntervalSeconds int     `toml:"interval_seconds"` // default 3600
+	MaxBackoffSecs  int     `toml:"max_backoff_secs"` // default 86400
+	MaxFailures     int     `toml:"max_failures"`     // 0 = unlimited
+	BudgetSteps     int     `toml:"budget_steps"`     // default 10
+	BudgetTokens    int     `toml:"budget_tokens"`    // default 50000
+	BudgetCostUSD   float64 `toml:"budget_cost_usd"`  // default 0
 }
 
 // ProviderConfig holds per-provider settings.
@@ -194,6 +206,13 @@ func DefaultConfig() *Config {
 			CPUs:        1.0,
 			ApplyBack:   "manual",
 		},
+		Wake: WakeConfig{
+			IntervalSeconds: 3600,
+			MaxBackoffSecs:  86400,
+			BudgetSteps:     10,
+			BudgetTokens:    50000,
+			BudgetCostUSD:   0.0,
+		},
 	}
 }
 
@@ -267,6 +286,15 @@ network_tier = "off"        # off | research | open
 memory_mb = 512
 cpus = 1.0
 apply_back = "manual"       # manual | on_success | never
+
+[wake]
+provider = ""               # empty = inherit defaults.provider
+interval_seconds = 3600
+max_backoff_secs = 86400
+max_failures = 0            # 0 = unlimited
+budget_steps = 10
+budget_tokens = 50000
+budget_cost_usd = 0.0
 `
 }
 
@@ -317,6 +345,7 @@ func Load(path string) (*Config, error) {
 		cfg.Defaults.CheapProvider = DefaultConfig().Defaults.CheapProvider
 	}
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
+	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	return &cfg, nil
 }
 
@@ -415,5 +444,29 @@ func applySandboxDefaults(dst *SandboxConfig, defaults SandboxConfig) {
 	}
 	if strings.TrimSpace(dst.ApplyBack) == "" {
 		dst.ApplyBack = defaults.ApplyBack
+	}
+}
+
+func applyWakeDefaults(dst *WakeConfig, defaults WakeConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.Provider) == "" {
+		dst.Provider = defaults.Provider
+	}
+	if dst.IntervalSeconds == 0 {
+		dst.IntervalSeconds = defaults.IntervalSeconds
+	}
+	if dst.MaxBackoffSecs == 0 {
+		dst.MaxBackoffSecs = defaults.MaxBackoffSecs
+	}
+	if dst.BudgetSteps == 0 {
+		dst.BudgetSteps = defaults.BudgetSteps
+	}
+	if dst.BudgetTokens == 0 {
+		dst.BudgetTokens = defaults.BudgetTokens
+	}
+	if dst.BudgetCostUSD == 0 {
+		dst.BudgetCostUSD = defaults.BudgetCostUSD
 	}
 }
