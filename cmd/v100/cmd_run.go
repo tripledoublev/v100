@@ -772,17 +772,63 @@ func blameCmd() *cobra.Command {
 func showFileBlame(events []core.Event, filePath string) error {
 	// Normalize file path for comparison (handle both absolute and relative)
 	filePath = strings.TrimSpace(filePath)
+	fileBase := filepath.Base(filePath)
 
 	type blameEntry struct {
 		EventID      string
 		CallID       string
 		StepID       string
 		ToolName     string
+		WritePath    string
+		Content      string
 		BytesWritten int
+	}
+
+	// Build a map of CallID → fs_write call details by looking at tool.call events
+	callDetails := make(map[string]struct {
+		Path    string
+		Content string
+		Append  bool
+	})
+
+	for _, ev := range events {
+		if ev.Type != core.EventToolCall {
+			continue
+		}
+
+		var payload core.ToolCallPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+
+		if payload.Name != "fs_write" {
+			continue
+		}
+
+		// Parse the args to extract path and content
+		var args struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+			Append  bool   `json:"append"`
+		}
+		if err := json.Unmarshal([]byte(payload.Args), &args); err != nil {
+			continue
+		}
+
+		callDetails[payload.CallID] = struct {
+			Path    string
+			Content string
+			Append  bool
+		}{
+			Path:    args.Path,
+			Content: args.Content,
+			Append:  args.Append,
+		}
 	}
 
 	var blameEntries []blameEntry
 
+	// Now match results to calls and filter by file
 	for _, ev := range events {
 		if ev.Type != core.EventToolResult {
 			continue
@@ -798,45 +844,81 @@ func showFileBlame(events []core.Event, filePath string) error {
 			continue
 		}
 
-		// Parse the output to extract file path
-		// fs_write output contains JSON with bytes_written
-		// We can infer the file was written based on the tool call
-		var writeOutput struct {
-			BytesWritten int `json:"bytes_written,omitempty"`
-		}
-		if err := json.Unmarshal([]byte(payload.Output), &writeOutput); err != nil {
-			// If output doesn't parse, skip this entry
+		// Get the call details
+		details, ok := callDetails[payload.CallID]
+		if !ok {
 			continue
 		}
 
-		// For now, we just track all fs_write operations
-		// In a full implementation, we'd need to cross-reference with tool.call events
-		// to get the actual file path from the args
+		// Check if this write targets our file
+		if !matchesFile(details.Path, filePath, fileBase) {
+			continue
+		}
+
+		// Parse the output to get bytes written
+		var writeOutput struct {
+			BytesWritten int `json:"bytes_written,omitempty"`
+		}
+		_ = json.Unmarshal([]byte(payload.Output), &writeOutput)
+
 		blameEntries = append(blameEntries, blameEntry{
 			EventID:      ev.EventID,
 			CallID:       payload.CallID,
 			StepID:       ev.StepID,
 			ToolName:     payload.Name,
+			WritePath:    details.Path,
+			Content:      details.Content,
 			BytesWritten: writeOutput.BytesWritten,
 		})
 	}
 
 	if len(blameEntries) == 0 {
-		fmt.Printf("No fs_write operations found in run.\n")
+		fmt.Printf("No writes found to file: %s\n", filePath)
 		return nil
 	}
 
 	// Display results
-	fmt.Printf("\n%s\n", ui.Header(fmt.Sprintf("File Writes: %s", filePath)))
+	fmt.Printf("\n%s\n", ui.Header(fmt.Sprintf("File Provenance: %s", filePath)))
 	fmt.Printf("Found %d write operation(s):\n\n", len(blameEntries))
 
 	for i, entry := range blameEntries {
 		fmt.Printf("[%d] Event: %s\n", i+1, ui.Bold(entry.EventID))
-		fmt.Printf("    Call:  %s\n", entry.CallID)
-		fmt.Printf("    Step:  %s\n", entry.StepID)
+		fmt.Printf("    File:  %s\n", entry.WritePath)
 		fmt.Printf("    Bytes: %d\n", entry.BytesWritten)
+		if entry.Content != "" {
+			preview := entry.Content
+			if len(preview) > 100 {
+				preview = preview[:100] + "…"
+			}
+			fmt.Printf("    Content: %s\n", strings.TrimSpace(preview))
+		}
 		fmt.Println()
 	}
 
 	return nil
+}
+
+// matchesFile checks if a written file path matches the target file
+func matchesFile(writePath, targetPath, targetBase string) bool {
+	// Normalize both paths for comparison
+	writePath = filepath.Clean(writePath)
+	targetPath = filepath.Clean(targetPath)
+
+	// Exact match
+	if writePath == targetPath {
+		return true
+	}
+
+	// Base name match
+	writeBase := filepath.Base(writePath)
+	if writeBase == targetBase {
+		return true
+	}
+
+	// Check if target is contained in write path
+	if strings.Contains(writePath, targetPath) {
+		return true
+	}
+
+	return false
 }

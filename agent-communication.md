@@ -153,6 +153,31 @@ notes:
 - Works with text and binary files
 - Minimal performance overhead (recomputes digests of changed files only)
 
+## Issue #140 - Extend sandbox to record byte-level provenance
+
+state: ongoing
+owner: claude
+branch_or_commit: working tree
+scope:
+- internal/core/workspace_applyback.go (extend tracking)
+- internal/tools/fs.go (record provenance in fs_write)
+- internal/core/trace.go (store byte-level event mappings)
+
+summary:
+- Map every written byte/line range to the reasoning turn (Event ID) that produced it
+- Build infrastructure for #141 blame command to show line-level details
+- Enables accountability and debugging of generated code
+
+verification:
+- go build ./...
+- go test -race ./...
+- bash scripts/lint.sh
+
+notes:
+- Complements #141 (blame command) - enables line-level blame lookups
+- Requires tracking byte offsets and Event IDs during fs_write operations
+- Foundation for future tools that need to understand code provenance
+
 ## Issue #141 - Implement v100 blame for reasoning traces
 
 state: committed
