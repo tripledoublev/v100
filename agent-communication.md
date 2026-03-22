@@ -258,3 +258,59 @@ notes:
 - Future enhancement: map specific lines to events (requires line-range matching)
 - TUI equivalent can be added later as separate feature
 - Foundation for #140 (byte-level provenance infrastructure)
+
+## Issue #111 - Add `v100 bench bootstrap` command skeleton
+
+state: committed
+owner: claude
+branch_or_commit: 7abfa2e
+scope:
+- cmd/v100/cmd_eval.go (benchCmd, benchBootstrapCmd)
+
+summary:
+- Converted benchCmd to group command with run and bootstrap sub-commands
+- `v100 bench run <bench.toml>` — execute benchmarks (moved from main bench command)
+- `v100 bench bootstrap <name>` — scaffolds new bench.toml with deterministic stub
+- Accepts --provider (default "gemini") and --solver (default "react") flags
+- Generates valid TOML with [[variants]] and [[prompts]] sections
+- Validates generated TOML before writing
+
+verification:
+- go build ./... ✓
+- go test -race ./... (all passed) ✓
+- bash scripts/lint.sh (0 issues) ✓
+
+notes:
+- Bootstrap creates name.bench.toml with predefined structure
+- Forces users to fill in task description and expected output
+- Validates via core.LoadBenchConfig before output
+- --force flag allows overwriting existing files
+
+## Issue #107 - Extract TUI pane sizing into dedicated layer
+
+state: committed
+owner: claude
+branch_or_commit: 7abfa2e
+scope:
+- internal/ui/layout.go (viewLayoutPlan struct, computeViewLayout)
+- internal/ui/view.go (consume pre-computed dimensions)
+- internal/ui/types.go (optional cache of viewLayoutPlan)
+
+summary:
+- Added inputWidth, leftPaneHeight, singlePaneHeight to viewLayoutPlan struct
+- Named border-overhead constants: singleBorderSize (2), splitBorderCols (5)
+- Pre-compute all pane dimensions in computeViewLayout; view.go consumes them
+- Removed inline sizing math (e.g., totalWidth-2, remaining-2) from rendering code
+- view.go now reads pre-computed plan instead of recalculating
+
+verification:
+- go build ./... ✓
+- go test -race ./... (all passed) ✓
+- bash scripts/lint.sh (0 issues) ✓
+- Layout snapshot tests pass (width: 80, 120, 200)
+
+notes:
+- Removes duplication of sizing logic across view.go
+- Pre-computation happens once per WindowSizeMsg, not on every render
+- Minimal performance improvement but significantly cleaner code structure
+- Foundation for future responsive TUI enhancements
