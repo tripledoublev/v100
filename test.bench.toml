@@ -1,0 +1,17 @@
+# Benchmark: test
+# Generated scaffold for v100 bench
+
+name = "test"
+
+# Define providers and solvers to test
+[[variants]]
+name     = "default"
+provider = "gemini"
+solver   = "react"
+# Optional: temperature, top_p, top_k, max_tokens, seed
+
+# Define tasks and evaluation criteria
+[[prompts]]
+message  = "TODO: describe the task"
+expected = "TODO: describe expected output"
+scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, model_graded

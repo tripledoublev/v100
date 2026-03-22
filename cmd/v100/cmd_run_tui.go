@@ -79,7 +79,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				logger.Printf("step error: %v", err)
 			}
 			if errors.Is(err, context.Canceled) {
-				_ = loop.EmitRunError("", "interrupted by user")
+				// User interrupted intentionally; don't emit error event
 				return
 			}
 			var budgetErr *core.ErrBudgetExceeded
@@ -208,7 +208,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				logger.Printf("initial step error: %v", err)
 			}
 			if errors.Is(err, context.Canceled) {
-				_ = loop.EmitRunError("", "interrupted by user")
+				// User interrupted intentionally; don't emit error event, keep user_exit reason
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
 				if errors.As(err, &budgetErr) {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -147,7 +148,13 @@ func (l *Loop) appendUserMessage(stepID, userInput string) error {
 
 // emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
 // If that fails, it emits a local fallback response so the transcript still guides the user.
+// Skipped for context.Canceled errors since they're intentional user interruptions.
 func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause error) {
+	// Don't emit error assistance for user cancellations
+	if errors.Is(cause, context.Canceled) {
+		return
+	}
+
 	// Sanitize unresolved tool calls before building error assistance messages.
 	_ = l.SanitizeLiveMessages()
 

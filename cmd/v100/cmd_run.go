@@ -541,7 +541,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				_ = loop.EmitRunError("", "interrupted by user")
+				// User interrupted intentionally; don't emit error event
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
 				if errors.As(err, &budgetErr) {
@@ -596,7 +596,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				_ = loop.EmitRunError("", "interrupted by user")
+				// User interrupted intentionally; don't emit error event
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
 				if errors.As(err, &budgetErr) {
@@ -617,7 +617,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 done:
 	var finalSummary string
-	if !providerErr {
+	// Only generate summary for actual errors, not user_exit
+	if !providerErr && reason != "user_exit" {
 		finalSummary = generateRunSummary(context.Background(), prov, model, loop.Messages)
 	}
 
