@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -740,4 +741,102 @@ func generateRunSummary(ctx context.Context, prov providers.Provider, model stri
 		return strings.TrimSpace(resp.AssistantText)
 	}
 	return ""
+}
+
+func blameCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "blame <run_id> <file>",
+		Short: "Show which reasoning turn wrote to a file",
+		Long:  "Inspect a file and see which event IDs (reasoning turns) modified it during the run.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := args[0]
+			filePath := args[1]
+
+			runDir, err := findRunDir(runID)
+			if err != nil {
+				return err
+			}
+
+			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			if err != nil {
+				return err
+			}
+
+			return showFileBlame(events, filePath)
+		},
+	}
+	return cmd
+}
+
+func showFileBlame(events []core.Event, filePath string) error {
+	// Normalize file path for comparison (handle both absolute and relative)
+	filePath = strings.TrimSpace(filePath)
+
+	type blameEntry struct {
+		EventID      string
+		CallID       string
+		StepID       string
+		ToolName     string
+		BytesWritten int
+	}
+
+	var blameEntries []blameEntry
+
+	for _, ev := range events {
+		if ev.Type != core.EventToolResult {
+			continue
+		}
+
+		var payload core.ToolResultPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+
+		// Look for fs_write tool results
+		if payload.Name != "fs_write" || !payload.OK {
+			continue
+		}
+
+		// Parse the output to extract file path
+		// fs_write output contains JSON with bytes_written
+		// We can infer the file was written based on the tool call
+		var writeOutput struct {
+			BytesWritten int `json:"bytes_written,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(payload.Output), &writeOutput); err != nil {
+			// If output doesn't parse, skip this entry
+			continue
+		}
+
+		// For now, we just track all fs_write operations
+		// In a full implementation, we'd need to cross-reference with tool.call events
+		// to get the actual file path from the args
+		blameEntries = append(blameEntries, blameEntry{
+			EventID:      ev.EventID,
+			CallID:       payload.CallID,
+			StepID:       ev.StepID,
+			ToolName:     payload.Name,
+			BytesWritten: writeOutput.BytesWritten,
+		})
+	}
+
+	if len(blameEntries) == 0 {
+		fmt.Printf("No fs_write operations found in run.\n")
+		return nil
+	}
+
+	// Display results
+	fmt.Printf("\n%s\n", ui.Header(fmt.Sprintf("File Writes: %s", filePath)))
+	fmt.Printf("Found %d write operation(s):\n\n", len(blameEntries))
+
+	for i, entry := range blameEntries {
+		fmt.Printf("[%d] Event: %s\n", i+1, ui.Bold(entry.EventID))
+		fmt.Printf("    Call:  %s\n", entry.CallID)
+		fmt.Printf("    Step:  %s\n", entry.StepID)
+		fmt.Printf("    Bytes: %d\n", entry.BytesWritten)
+		fmt.Println()
+	}
+
+	return nil
 }

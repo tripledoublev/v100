@@ -152,3 +152,29 @@ notes:
 - Addresses reliability issue where partial writes or corruption could go undetected
 - Works with text and binary files
 - Minimal performance overhead (recomputes digests of changed files only)
+
+## Issue #141 - Implement v100 blame for reasoning traces
+
+state: ongoing
+owner: claude
+branch_or_commit: working tree
+scope:
+- cmd/v100/cmd_run.go (add blame command)
+- internal/core/trace.go (add trace search utilities)
+- internal/ui/ (TUI equivalent)
+
+summary:
+- Create `v100 blame` command to inspect workspace lines and their reasoning traces
+- Show which reasoning turn (Event ID) generated each line
+- Relates to issue #36 (code provenance tracking)
+
+verification:
+- go build ./...
+- go test -race ./...
+- bash scripts/lint.sh
+- Test: v100 blame <file> <line> returns Event ID and reasoning context
+
+notes:
+- Requires trace inspection and line-to-event mapping
+- TUI equivalent deferred to follow-up
+- Relates to #140 (byte-level provenance infrastructure)
