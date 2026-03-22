@@ -42,7 +42,9 @@ type WakeState struct {
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	BackoffUntil        *time.Time `json:"backoff_until,omitempty"`
 
-	QueuedGoals []GeneratedGoal `json:"queued_goals,omitempty"`
+	QueuedGoals        []GeneratedGoal `json:"queued_goals,omitempty"`
+	CurrentIssueNumber int             `json:"current_issue_number,omitempty"`
+	CurrentIssueTitle  string          `json:"current_issue_title,omitempty"`
 
 	Provider string `json:"provider"`
 	Solver   string `json:"solver,omitempty"`

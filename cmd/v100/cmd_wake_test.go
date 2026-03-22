@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,12 @@ import (
 type wakeTestProvider struct {
 	response providers.CompleteResponse
 	err      error
+}
+
+type wakeExecCall struct {
+	name  string
+	args  []string
+	stdin string
 }
 
 func (p *wakeTestProvider) Name() string { return "wake-test" }
@@ -105,7 +112,7 @@ func TestBuildWakePromptIncludesWorkspaceEntries(t *testing.T) {
 		}
 	}
 
-	prompt, err := buildWakePrompt(workspace)
+	prompt, err := buildWakePrompt(workspace, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,10 +163,37 @@ func TestCollectWakeWorkspaceSummaryIncludesNestedEntries(t *testing.T) {
 	}
 }
 
+func TestBuildWakePromptUsesQueuedGoalWhenPresent(t *testing.T) {
+	workspace := t.TempDir()
+	goal := &core.GeneratedGoal{Content: "Improve wake failure summaries"}
+	prompt, err := buildWakePrompt(workspace, goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "Prior queued goal:") || !strings.Contains(prompt, goal.Content) {
+		t.Fatalf("prompt missing queued goal context: %q", prompt)
+	}
+}
+
 func TestParseWakeGoalFallsBackToFirstLine(t *testing.T) {
 	got := parseWakeGoal("- Improve wake backoff observability\nwith extra detail")
 	if got != "Improve wake backoff observability" {
 		t.Fatalf("parseWakeGoal() = %q", got)
+	}
+}
+
+func TestDedupeWakeGoalsSkipsDuplicateContent(t *testing.T) {
+	existing := []core.GeneratedGoal{{Content: "Improve wake startup reporting"}}
+	incoming := []core.GeneratedGoal{
+		{Content: "Improve wake startup reporting"},
+		{Content: "Add queued-goal execution metrics"},
+	}
+	got := dedupeWakeGoals(existing, incoming)
+	if len(got) != 1 {
+		t.Fatalf("len(dedupeWakeGoals) = %d, want 1", len(got))
+	}
+	if got[0].Content != "Add queued-goal execution metrics" {
+		t.Fatalf("deduped goal = %q", got[0].Content)
 	}
 }
 
@@ -188,7 +222,7 @@ func TestRunWakeCycleWithProviderCreatesRunArtifacts(t *testing.T) {
 		},
 	}
 
-	runID, goals, err := runWakeCycleWithProvider(context.Background(), cfg, workspace, "minimax", prov)
+	runID, goals, err := runWakeCycleWithProvider(context.Background(), cfg, workspace, "minimax", prov, nil)
 	if err != nil {
 		t.Fatalf("runWakeCycleWithProvider() error = %v", err)
 	}
@@ -229,6 +263,40 @@ func TestRunWakeCycleWithProviderCreatesRunArtifacts(t *testing.T) {
 	}
 }
 
+func TestRunWakeCycleWithQueuedGoalUsesQueuedContext(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Defaults.Provider = "minimax"
+	cfg.Providers["minimax"] = config.ProviderConfig{Type: "minimax", DefaultModel: "MiniMax-M2.7"}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &wakeTestProvider{
+		response: providers.CompleteResponse{
+			AssistantText: "GOAL: Add a focused wake-cycle failure regression test.\nWHY: The queued goal should turn into an immediate concrete next step.",
+		},
+	}
+
+	activeGoal := &core.GeneratedGoal{Content: "Harden wake failure handling"}
+	_, goals, err := runWakeCycleWithProvider(context.Background(), cfg, workspace, "minimax", prov, activeGoal)
+	if err != nil {
+		t.Fatalf("runWakeCycleWithProvider() error = %v", err)
+	}
+	if len(goals) != 1 {
+		t.Fatalf("len(goals) = %d, want 1", len(goals))
+	}
+	if goals[0].Content != "Add a focused wake-cycle failure regression test." {
+		t.Fatalf("goal content = %q", goals[0].Content)
+	}
+}
+
 func TestWaitForWakeReadyObservesRunningState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "wake.json")
 	token := "tok123"
@@ -245,5 +313,80 @@ func TestWaitForWakeReadyObservesRunningState(t *testing.T) {
 
 	if err := waitForWakeReady(statePath, pid, token, 2*time.Second); err != nil {
 		t.Fatalf("waitForWakeReady() error = %v", err)
+	}
+}
+
+func TestExtractRunIDFromOutput(t *testing.T) {
+	out := "trace: runs/abc/trace.jsonl\nrun id: 20260322T120000-deadbeef\n"
+	if got := extractRunIDFromOutput(out); got != "20260322T120000-deadbeef" {
+		t.Fatalf("extractRunIDFromOutput() = %q", got)
+	}
+}
+
+func TestBuildWakeIssuePromptIncludesIssueWorkflow(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Wake.Objective = "Close open issues overnight."
+	issue := wakeIssue{Number: 123, Title: "Fix wake daemon", Body: "Make it reliable."}
+
+	prompt := buildWakeIssuePrompt(cfg, "/repo", issue)
+	for _, want := range []string{
+		"Close open issues overnight.",
+		"Selected GitHub issue: #123 Fix wake daemon",
+		"./scripts/lint.sh",
+		"go test ./...",
+		"go build ./...",
+		"Close GitHub issue #123 only after the commit succeeds.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %q", want, prompt)
+		}
+	}
+}
+
+func TestSelectWakeIssuePrefersCurrentOpenIssue(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var calls []wakeExecCall
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		calls = append(calls, wakeExecCall{name: name, args: append([]string(nil), args...), stdin: stdin})
+		if len(args) >= 3 && args[0] == "issue" && args[1] == "view" && args[2] == "42" {
+			return `{"number":42,"title":"Current issue","body":"keep working","state":"OPEN","labels":[]}`, nil
+		}
+		return "", fmt.Errorf("unexpected call: %v", args)
+	}
+
+	cfg := config.DefaultConfig()
+	state := &core.WakeState{CurrentIssueNumber: 42, CurrentIssueTitle: "Current issue"}
+	issue, err := selectWakeIssue(context.Background(), cfg, state)
+	if err != nil {
+		t.Fatalf("selectWakeIssue() error = %v", err)
+	}
+	if issue == nil || issue.Number != 42 {
+		t.Fatalf("issue = %+v, want #42", issue)
+	}
+	if len(calls) != 1 || calls[0].args[1] != "view" {
+		t.Fatalf("calls = %+v, want single issue view", calls)
+	}
+}
+
+func TestSelectWakeIssueFallsBackToIssueList(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "list" {
+			return `[{"number":7,"title":"First open issue","body":"fix it","labels":[]}]`, nil
+		}
+		return "", fmt.Errorf("unexpected call: %v", args)
+	}
+
+	cfg := config.DefaultConfig()
+	issue, err := selectWakeIssue(context.Background(), cfg, &core.WakeState{})
+	if err != nil {
+		t.Fatalf("selectWakeIssue() error = %v", err)
+	}
+	if issue == nil || issue.Number != 7 {
+		t.Fatalf("issue = %+v, want #7", issue)
 	}
 }

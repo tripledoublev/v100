@@ -34,6 +34,10 @@ type SandboxConfig struct {
 
 // WakeConfig holds configuration for the continuous wake daemon.
 type WakeConfig struct {
+	Mode            string  `toml:"mode"`             // goal_generator | issue_worker
+	Objective       string  `toml:"objective"`        // optional explicit daemon objective
+	Repo            string  `toml:"repo"`             // optional owner/repo for gh issue operations
+	IssueLimit      int     `toml:"issue_limit"`      // open issues to consider per cycle
 	Provider        string  `toml:"provider"`         // inherits defaults.provider if empty
 	IntervalSeconds int     `toml:"interval_seconds"` // default 3600
 	MaxBackoffSecs  int     `toml:"max_backoff_secs"` // default 86400
@@ -207,6 +211,8 @@ func DefaultConfig() *Config {
 			ApplyBack:   "manual",
 		},
 		Wake: WakeConfig{
+			Mode:            "goal_generator",
+			IssueLimit:      20,
 			IntervalSeconds: 3600,
 			MaxBackoffSecs:  86400,
 			BudgetSteps:     10,
@@ -288,6 +294,10 @@ cpus = 1.0
 apply_back = "manual"       # manual | on_success | never
 
 [wake]
+mode = "goal_generator"     # goal_generator | issue_worker
+objective = ""              # optional daemon mission override
+repo = ""                   # optional GitHub repo (owner/name) for issue_worker
+issue_limit = 20
 provider = ""               # empty = inherit defaults.provider
 interval_seconds = 3600
 max_backoff_secs = 86400
@@ -453,6 +463,12 @@ func applyWakeDefaults(dst *WakeConfig, defaults WakeConfig) {
 	}
 	if strings.TrimSpace(dst.Provider) == "" {
 		dst.Provider = defaults.Provider
+	}
+	if strings.TrimSpace(dst.Mode) == "" {
+		dst.Mode = defaults.Mode
+	}
+	if dst.IssueLimit == 0 {
+		dst.IssueLimit = defaults.IssueLimit
 	}
 	if dst.IntervalSeconds == 0 {
 		dst.IntervalSeconds = defaults.IntervalSeconds

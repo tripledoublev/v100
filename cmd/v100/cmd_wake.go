@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +24,18 @@ import (
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
 )
+
+var wakeExecCommand = defaultWakeExecCommand
+
+type wakeIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	State  string `json:"state,omitempty"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels,omitempty"`
+}
 
 func wakeCmd(cfgPath *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -202,10 +216,21 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 			defer signal.Stop(sigCh)
 
 			for {
-				runID, goals, cycleErr := runWakeCycle(context.Background(), cfg, provider)
+				var activeGoal *core.GeneratedGoal
+				if len(state.QueuedGoals) > 0 {
+					activeGoal = &state.QueuedGoals[0]
+				}
+				runID, goals, issue, cycleErr := runWakeCycle(context.Background(), cfg, strings.TrimSpace(*cfgPath), provider, activeGoal, state)
 				now = time.Now()
 				state.LastRunAt = &now
 				state.LastRunID = runID
+				if issue != nil {
+					state.CurrentIssueNumber = issue.Number
+					state.CurrentIssueTitle = issue.Title
+				} else {
+					state.CurrentIssueNumber = 0
+					state.CurrentIssueTitle = ""
+				}
 				if cycleErr != nil {
 					state.ConsecutiveFailures++
 					delay := core.WakeCycleDelay(state.IntervalSeconds, cfg.Wake.MaxBackoffSecs, state.ConsecutiveFailures)
@@ -225,8 +250,11 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 					state.ConsecutiveFailures = 0
 					state.BackoffUntil = nil
 					state.Status = core.WakeStatusRunning
+					if activeGoal != nil && len(state.QueuedGoals) > 0 {
+						state.QueuedGoals = state.QueuedGoals[1:]
+					}
 					if len(goals) > 0 {
-						state.QueuedGoals = append(state.QueuedGoals, goals...)
+						state.QueuedGoals = append(state.QueuedGoals, dedupeWakeGoals(state.QueuedGoals, goals)...)
 					}
 					state.NextRunAt = now.Add(interval)
 				}
@@ -308,6 +336,13 @@ func wakeStatusCmd(cfgPath *string) *cobra.Command {
 
 			if state.ConsecutiveFailures > 0 {
 				fmt.Printf("  failures:    %d\n", state.ConsecutiveFailures)
+			}
+			if len(state.QueuedGoals) > 0 {
+				fmt.Printf("  queued:      %d\n", len(state.QueuedGoals))
+				fmt.Printf("  next goal:   %s\n", state.QueuedGoals[0].Content)
+			}
+			if state.CurrentIssueNumber > 0 {
+				fmt.Printf("  issue:       #%d %s\n", state.CurrentIssueNumber, state.CurrentIssueTitle)
 			}
 
 			if state.BackoffUntil != nil && state.BackoffUntil.After(time.Now()) {
@@ -401,20 +436,25 @@ func waitForWakeReady(statePath string, pid int, token string, timeout time.Dura
 	return fmt.Errorf("wake daemon did not initialize within %s", timeout)
 }
 
-func runWakeCycle(ctx context.Context, cfg *config.Config, providerName string) (string, []core.GeneratedGoal, error) {
+func runWakeCycle(ctx context.Context, cfg *config.Config, cfgPath string, providerName string, activeGoal *core.GeneratedGoal, state *core.WakeState) (string, []core.GeneratedGoal, *wakeIssue, error) {
 	workspace, err := os.Getwd()
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve workspace: %w", err)
+		return "", nil, nil, fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Wake.Mode), "issue_worker") {
+		return runWakeIssueCycle(ctx, cfg, cfgPath, workspace, providerName, state)
 	}
 
 	prov, err := buildProvider(cfg, providerName)
 	if err != nil {
-		return "", nil, fmt.Errorf("build provider %q: %w", providerName, err)
+		return "", nil, nil, fmt.Errorf("build provider %q: %w", providerName, err)
 	}
-	return runWakeCycleWithProvider(ctx, cfg, workspace, providerName, prov)
+	runID, goals, err := runWakeCycleWithProvider(ctx, cfg, workspace, providerName, prov, activeGoal)
+	return runID, goals, nil, err
 }
 
-func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace, providerName string, prov providers.Provider) (string, []core.GeneratedGoal, error) {
+func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace, providerName string, prov providers.Provider, activeGoal *core.GeneratedGoal) (string, []core.GeneratedGoal, error) {
 	model := ""
 	if pc, ok := cfg.Providers[providerName]; ok {
 		model = pc.DefaultModel
@@ -487,7 +527,7 @@ func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace
 		return runID, nil, fmt.Errorf("emit wake run start: %w", err)
 	}
 
-	stepPrompt, err := buildWakePrompt(workspace)
+	stepPrompt, err := buildWakePrompt(workspace, activeGoal)
 	if err != nil {
 		_ = loop.EmitRunEnd("error", "")
 		return runID, nil, err
@@ -519,6 +559,42 @@ func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace
 	return runID, goals, nil
 }
 
+func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspace, providerName string, state *core.WakeState) (string, []core.GeneratedGoal, *wakeIssue, error) {
+	if cfg == nil {
+		return "", nil, nil, errors.New("wake issue worker requires config")
+	}
+	if !cfg.Sandbox.Enabled {
+		return "", nil, nil, errors.New("wake issue worker requires sandbox.enabled=true")
+	}
+	issue, err := selectWakeIssue(ctx, cfg, state)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if issue == nil {
+		return "", nil, nil, nil
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return "", nil, issue, fmt.Errorf("resolve current executable: %w", err)
+	}
+	exe, _ = filepath.EvalSymlinks(exe)
+	prompt := buildWakeIssuePrompt(cfg, workspace, *issue)
+	runID, err := runHeadlessIssueWorker(ctx, exe, cfgPath, prompt, providerName)
+	if err != nil {
+		return runID, nil, issue, err
+	}
+
+	closed, err := wakeIssueClosed(ctx, cfg, issue.Number)
+	if err != nil {
+		return runID, nil, issue, err
+	}
+	if !closed {
+		return runID, nil, issue, fmt.Errorf("issue #%d remains open after autonomous run", issue.Number)
+	}
+	return runID, nil, nil, nil
+}
+
 func providersModelMetadata(ctx context.Context, prov providers.Provider, model string) providers.ModelMetadata {
 	if prov == nil {
 		return providers.ModelMetadata{}
@@ -530,10 +606,176 @@ func providersModelMetadata(ctx context.Context, prov providers.Provider, model 
 	return meta
 }
 
-func buildWakePrompt(workspace string) (string, error) {
+func defaultWakeExecCommand(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+func selectWakeIssue(ctx context.Context, cfg *config.Config, state *core.WakeState) (*wakeIssue, error) {
+	if state != nil && state.CurrentIssueNumber > 0 {
+		issue, err := wakeIssueView(ctx, cfg, state.CurrentIssueNumber)
+		if err == nil && issue != nil && strings.EqualFold(issue.State, "OPEN") {
+			return issue, nil
+		}
+	}
+
+	issues, err := wakeIssueList(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) == 0 {
+		return nil, nil
+	}
+	return &issues[0], nil
+}
+
+func wakeIssueList(ctx context.Context, cfg *config.Config) ([]wakeIssue, error) {
+	limit := 20
+	if cfg != nil && cfg.Wake.IssueLimit > 0 {
+		limit = cfg.Wake.IssueLimit
+	}
+	args := []string{"issue", "list", "--state", "open", "--limit", strconv.Itoa(limit), "--json", "number,title,body,labels"}
+	if repo := strings.TrimSpace(cfg.Wake.Repo); repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	out, err := wakeExecCommand(ctx, "", "gh", args...)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue list: %w\n%s", err, strings.TrimSpace(out))
+	}
+	var issues []wakeIssue
+	if err := json.Unmarshal([]byte(out), &issues); err != nil {
+		return nil, fmt.Errorf("parse gh issue list: %w", err)
+	}
+	return issues, nil
+}
+
+func wakeIssueView(ctx context.Context, cfg *config.Config, number int) (*wakeIssue, error) {
+	args := []string{"issue", "view", strconv.Itoa(number), "--json", "number,title,body,state,labels"}
+	if repo := strings.TrimSpace(cfg.Wake.Repo); repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	out, err := wakeExecCommand(ctx, "", "gh", args...)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view #%d: %w\n%s", number, err, strings.TrimSpace(out))
+	}
+	var issue wakeIssue
+	if err := json.Unmarshal([]byte(out), &issue); err != nil {
+		return nil, fmt.Errorf("parse gh issue view: %w", err)
+	}
+	return &issue, nil
+}
+
+func wakeIssueClosed(ctx context.Context, cfg *config.Config, number int) (bool, error) {
+	issue, err := wakeIssueView(ctx, cfg, number)
+	if err != nil {
+		return false, err
+	}
+	return issue != nil && strings.EqualFold(issue.State, "CLOSED"), nil
+}
+
+func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue) string {
+	objective := strings.TrimSpace(cfg.Wake.Objective)
+	if objective == "" {
+		objective = "Look at GitHub open issues, pick one, implement it, test, lint, build, verify, review, commit, close the issue, and move on."
+	}
+	var labels []string
+	for _, label := range issue.Labels {
+		if name := strings.TrimSpace(label.Name); name != "" {
+			labels = append(labels, name)
+		}
+	}
+
+	return fmt.Sprintf(
+		"Autonomous daemon objective:\n%s\n\n"+
+			"Repository workspace: %s\n"+
+			"Selected GitHub issue: #%d %s\n"+
+			"Labels: %s\n\n"+
+			"Issue body:\n%s\n\n"+
+			"Required workflow:\n"+
+			"1. Inspect the code and choose the minimal correct implementation.\n"+
+			"2. Make the code changes.\n"+
+			"3. Run exactly these verification commands if relevant:\n"+
+			"   - ./scripts/lint.sh\n"+
+			"   - env GOCACHE=%s/.gocache go test ./...\n"+
+			"   - env GOCACHE=%s/.gocache go build ./...\n"+
+			"4. Review your own diff for regressions and incomplete edge cases.\n"+
+			"5. Commit with a focused message only if verification passes.\n"+
+			"6. Close GitHub issue #%d only after the commit succeeds.\n"+
+			"7. If blocked or verification fails, do not commit and do not close the issue.\n"+
+			"8. Work end-to-end in this run; do not stop after analysis.\n",
+		objective,
+		workspace,
+		issue.Number,
+		issue.Title,
+		strings.Join(labels, ", "),
+		strings.TrimSpace(issue.Body),
+		workspace,
+		workspace,
+		issue.Number,
+	)
+}
+
+func runHeadlessIssueWorker(ctx context.Context, exe, cfgPath, prompt, providerName string) (string, error) {
+	args := []string{}
+	if cfgPath != "" {
+		args = append(args, "--config", cfgPath)
+	}
+	args = append(args, "run", "--auto", "--unsafe", "--exit", "--sandbox", "--provider", providerName, "--prompt-file", "-")
+	out, err := wakeExecCommand(ctx, prompt, exe, args...)
+	runID := extractRunIDFromOutput(out)
+	if err != nil {
+		if runID == "" {
+			return "", fmt.Errorf("wake issue worker run: %w\n%s", err, strings.TrimSpace(out))
+		}
+		return runID, fmt.Errorf("wake issue worker run: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return runID, nil
+}
+
+func extractRunIDFromOutput(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "run id:") {
+			continue
+		}
+		return strings.TrimSpace(strings.TrimPrefix(line, "run id:"))
+	}
+	return ""
+}
+
+func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, error) {
 	summary, err := collectWakeWorkspaceSummary(workspace, 2, 40)
 	if err != nil {
 		return "", fmt.Errorf("scan workspace: %w", err)
+	}
+	if activeGoal != nil && strings.TrimSpace(activeGoal.Content) != "" {
+		return fmt.Sprintf(
+			"You are running an autonomous wake cycle for this workspace.\n"+
+				"Workspace: %s\n"+
+				"Observed workspace summary:\n%s\n\n"+
+				"Prior queued goal:\n%s\n\n"+
+				"Refine that queued goal into the single best immediate next-step engineering goal.\n"+
+				"Constraints:\n"+
+				"- Do not use tools.\n"+
+				"- Keep continuity with the queued goal, but make the result more concrete and immediately actionable.\n"+
+				"- Respond using exactly this format:\n"+
+				"  GOAL: <one sentence>\n"+
+				"  WHY: <one sentence>\n"+
+				"- If the queued goal is no longer useful, replace it with a better one.\n"+
+				"- If no meaningful goal is evident, respond exactly:\n"+
+				"  GOAL: No actionable wake goal.\n"+
+				"  WHY: Workspace signals are currently too weak.\n",
+			workspace,
+			summary,
+			activeGoal.Content,
+		), nil
 	}
 
 	return fmt.Sprintf(
@@ -674,4 +916,28 @@ func emitWakeGeneratedGoals(trace *core.TraceWriter, runID, stepID string, goals
 		}
 	}
 	return nil
+}
+
+func dedupeWakeGoals(existing, incoming []core.GeneratedGoal) []core.GeneratedGoal {
+	seen := make(map[string]struct{}, len(existing))
+	for _, goal := range existing {
+		key := strings.ToLower(strings.TrimSpace(goal.Content))
+		if key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	out := make([]core.GeneratedGoal, 0, len(incoming))
+	for _, goal := range incoming {
+		key := strings.ToLower(strings.TrimSpace(goal.Content))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, goal)
+	}
+	return out
 }
