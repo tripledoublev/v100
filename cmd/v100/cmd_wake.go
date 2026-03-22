@@ -579,15 +579,45 @@ func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspa
 		return "", nil, issue, fmt.Errorf("resolve current executable: %w", err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
+	headBefore, err := wakeGitHead(ctx)
+	if err != nil {
+		return "", nil, issue, err
+	}
 	prompt := buildWakeIssuePrompt(cfg, workspace, *issue)
 	runID, err := runHeadlessIssueWorker(ctx, exe, cfgPath, prompt, providerName)
 	if err != nil {
+		return runID, nil, issue, err
+	}
+	headAfter, err := wakeGitHead(ctx)
+	if err != nil {
+		return runID, nil, issue, err
+	}
+	if headAfter == "" || headAfter == headBefore {
+		return runID, nil, issue, fmt.Errorf("issue #%d run completed without creating a new commit", issue.Number)
+	}
+	clean, err := wakeGitClean(ctx)
+	if err != nil {
+		return runID, nil, issue, err
+	}
+	if !clean {
+		return runID, nil, issue, fmt.Errorf("issue #%d run left a dirty working tree", issue.Number)
+	}
+	if err := wakeGitPush(ctx); err != nil {
 		return runID, nil, issue, err
 	}
 
 	closed, err := wakeIssueClosed(ctx, cfg, issue.Number)
 	if err != nil {
 		return runID, nil, issue, err
+	}
+	if !closed {
+		if err := wakeIssueClose(ctx, cfg, issue.Number, headAfter); err != nil {
+			return runID, nil, issue, err
+		}
+		closed, err = wakeIssueClosed(ctx, cfg, issue.Number)
+		if err != nil {
+			return runID, nil, issue, err
+		}
 	}
 	if !closed {
 		return runID, nil, issue, fmt.Errorf("issue #%d remains open after autonomous run", issue.Number)
@@ -680,6 +710,18 @@ func wakeIssueClosed(ctx context.Context, cfg *config.Config, number int) (bool,
 	return issue != nil && strings.EqualFold(issue.State, "CLOSED"), nil
 }
 
+func wakeIssueClose(ctx context.Context, cfg *config.Config, number int, commit string) error {
+	args := []string{"issue", "close", strconv.Itoa(number), "--comment", fmt.Sprintf("Fixed in %s", commit)}
+	if repo := strings.TrimSpace(cfg.Wake.Repo); repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	out, err := wakeExecCommand(ctx, "", "gh", args...)
+	if err != nil {
+		return fmt.Errorf("gh issue close #%d: %w\n%s", number, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue) string {
 	objective := strings.TrimSpace(cfg.Wake.Objective)
 	if objective == "" {
@@ -707,8 +749,8 @@ func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue)
 			"   - env GOCACHE=%s/.gocache go build ./...\n"+
 			"4. Review your own diff for regressions and incomplete edge cases.\n"+
 			"5. Commit with a focused message only if verification passes.\n"+
-			"6. Close GitHub issue #%d only after the commit succeeds.\n"+
-			"7. If blocked or verification fails, do not commit and do not close the issue.\n"+
+			"6. Do not push and do not close the GitHub issue yourself; the daemon will handle that after verifying your commit.\n"+
+			"7. If blocked or verification fails, do not commit.\n"+
 			"8. Work end-to-end in this run; do not stop after analysis.\n",
 		objective,
 		workspace,
@@ -718,7 +760,6 @@ func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue)
 		strings.TrimSpace(issue.Body),
 		workspace,
 		workspace,
-		issue.Number,
 	)
 }
 
@@ -737,6 +778,30 @@ func runHeadlessIssueWorker(ctx context.Context, exe, cfgPath, prompt, providerN
 		return runID, fmt.Errorf("wake issue worker run: %w\n%s", err, strings.TrimSpace(out))
 	}
 	return runID, nil
+}
+
+func wakeGitHead(ctx context.Context) (string, error) {
+	out, err := wakeExecCommand(ctx, "", "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func wakeGitClean(ctx context.Context) (bool, error) {
+	out, err := wakeExecCommand(ctx, "", "git", "status", "--short")
+	if err != nil {
+		return false, fmt.Errorf("git status --short: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
+func wakeGitPush(ctx context.Context) error {
+	out, err := wakeExecCommand(ctx, "", "git", "push", "origin", "HEAD")
+	if err != nil {
+		return fmt.Errorf("git push origin HEAD: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return nil
 }
 
 func extractRunIDFromOutput(out string) string {

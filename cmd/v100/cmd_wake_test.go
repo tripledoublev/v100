@@ -335,7 +335,7 @@ func TestBuildWakeIssuePromptIncludesIssueWorkflow(t *testing.T) {
 		"./scripts/lint.sh",
 		"go test ./...",
 		"go build ./...",
-		"Close GitHub issue #123 only after the commit succeeds.",
+		"Do not push and do not close the GitHub issue yourself; the daemon will handle that after verifying your commit.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %q", want, prompt)
@@ -388,5 +388,46 @@ func TestSelectWakeIssueFallsBackToIssueList(t *testing.T) {
 	}
 	if issue == nil || issue.Number != 7 {
 		t.Fatalf("issue = %+v, want #7", issue)
+	}
+}
+
+func TestWakeIssueCloseUsesCommitComment(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var gotArgs []string
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "closed", nil
+	}
+
+	cfg := config.DefaultConfig()
+	if err := wakeIssueClose(context.Background(), cfg, 12, "abc123"); err != nil {
+		t.Fatalf("wakeIssueClose() error = %v", err)
+	}
+	joined := strings.Join(gotArgs, " ")
+	if !strings.Contains(joined, "issue close 12") || !strings.Contains(joined, "Fixed in abc123") {
+		t.Fatalf("args = %q", joined)
+	}
+}
+
+func TestWakeGitCleanParsesDirtyAndCleanTrees(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		return "", nil
+	}
+	clean, err := wakeGitClean(context.Background())
+	if err != nil || !clean {
+		t.Fatalf("wakeGitClean() clean = %v err=%v, want true nil", clean, err)
+	}
+
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		return " M cmd/v100/cmd_wake.go\n", nil
+	}
+	clean, err = wakeGitClean(context.Background())
+	if err != nil || clean {
+		t.Fatalf("wakeGitClean() clean = %v err=%v, want false nil", clean, err)
 	}
 }
