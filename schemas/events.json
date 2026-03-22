@@ -32,7 +32,9 @@
         "context.compress",
         "step.summary",
         "solver.plan",
-        "solver.replan"
+        "solver.replan",
+        "generated.goal",
+        "hook.intervention"
       ]
     },
     "payload": {
@@ -61,6 +63,8 @@
     "context.compress":  { "properties": { "before_tokens": { "type": "integer" }, "after_tokens": { "type": "integer" } } },
     "step.summary":      { "properties": { "step": { "type": "integer" }, "tokens": { "type": "integer" }, "tool_calls": { "type": "integer" } } },
     "solver.plan":       { "properties": { "plan": { "type": "string" } } },
-    "solver.replan":     { "properties": { "attempt": { "type": "integer" }, "reason": { "type": "string" }, "plan": { "type": "string" } } }
+    "solver.replan":     { "properties": { "attempt": { "type": "integer" }, "reason": { "type": "string" }, "plan": { "type": "string" } } },
+    "generated.goal":    { "properties": { "content": { "type": "string" }, "step_id": { "type": "string" } } },
+    "hook.intervention": { "properties": { "action": { "type": "string" }, "message": { "type": "string" }, "reason": { "type": "string" } } }
   }
 }

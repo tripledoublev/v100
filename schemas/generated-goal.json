@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Generated Goal",
+  "description": "Schema for goals generated during a run, persisted in meta.json",
+  "type": "object",
+  "required": ["id", "content", "created_at"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the generated goal"
+    },
+    "content": {
+      "type": "string",
+      "description": "The goal content/description"
+    },
+    "step_id": {
+      "type": "string",
+      "description": "The step ID where this goal was generated (optional)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the goal was created"
+    }
+  }
+}

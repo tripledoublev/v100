@@ -11,6 +11,14 @@ import (
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
+// GeneratedGoal represents a goal generated during a run.
+type GeneratedGoal struct {
+	ID        string    `json:"id"`
+	Content   string    `json:"content"`
+	StepID    string    `json:"step_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // RunMeta holds metadata for a run, persisted as meta.json in the run directory.
 type RunMeta struct {
 	RunID             string                  `json:"run_id"`
@@ -26,6 +34,7 @@ type RunMeta struct {
 	ParentRunID       string                  `json:"parent_run_id,omitempty"`
 	Score             string                  `json:"score,omitempty"` // pass|fail|partial
 	ScoreNotes        string                  `json:"score_notes,omitempty"`
+	GeneratedGoals    []GeneratedGoal         `json:"generated_goals,omitempty"`
 }
 
 // WriteMeta writes meta.json to the given directory.
