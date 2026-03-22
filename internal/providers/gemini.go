@@ -772,8 +772,78 @@ func geminiStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 }
 
 func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
-	// Subscription-backed Gemini embeddings endpoint is not currently known/supported in this harness.
-	return EmbedResponse{}, fmt.Errorf("gemini: embeddings not yet supported for subscription provider")
+	// Gemini uses Google's embedding models via the generative AI API.
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = "text-embedding-004"
+	}
+
+	token, err := p.accessToken(ctx)
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+
+	// Construct the embedding request for Google's generative AI API
+	// API: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent?key=%s", model, token)
+
+	payload := map[string]any{
+		"model": "models/" + model,
+		"content": map[string]any{
+			"parts": []map[string]string{
+				{"text": req.Text},
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return EmbedResponse{}, fmt.Errorf("gemini: embed request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		return EmbedResponse{}, fmt.Errorf("gemini: embed HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var result struct {
+		Embedding struct {
+			Values []float32 `json:"values"`
+		} `json:"embedding"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return EmbedResponse{}, fmt.Errorf("gemini: parse embed response: %w", err)
+	}
+
+	if len(result.Embedding.Values) == 0 {
+		return EmbedResponse{}, fmt.Errorf("gemini: no embedding data in response")
+	}
+
+	// Estimate token count (rough approximation: 4 chars per token for English)
+	estimatedTokens := len(req.Text) / 4
+	if estimatedTokens < 1 {
+		estimatedTokens = 1
+	}
+
+	return EmbedResponse{
+		Embedding: result.Embedding.Values,
+		Usage: Usage{
+			InputTokens: estimatedTokens,
+			CostUSD:     0, // Gemini embeddings are included with subscription
+		},
+	}, nil
 }
 
 func (p *GeminiProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {

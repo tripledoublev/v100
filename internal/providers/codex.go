@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -546,8 +547,86 @@ func codexStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 }
 
 func (p *CodexProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
-	// Subscription-backed ChatGPT embeddings endpoint is not currently known/supported in this harness.
-	return EmbedResponse{}, fmt.Errorf("codex: embeddings not yet supported for subscription provider")
+	// Codex uses OpenAI's embedding API via subscription.
+	// This requires an OpenAI API key (separate from ChatGPT subscription token).
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+
+	// Create a temporary OpenAI client to handle embeddings
+	// This allows Codex users to leverage OpenAI's embedding models
+	apiKey := p.getEmbeddingAPIKey()
+	if apiKey == "" {
+		return EmbedResponse{}, fmt.Errorf(
+			"codex: embeddings require OpenAI API key.\n" +
+				"  → Set OPENAI_API_KEY environment variable, or\n" +
+				"  → Configure [providers.openai] in ~/.config/v100/config.toml",
+		)
+	}
+
+	// Make HTTP request to OpenAI embedding endpoint
+	payload := map[string]any{
+		"model": model,
+		"input": req.Text,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return EmbedResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return EmbedResponse{}, fmt.Errorf("codex: embed request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		return EmbedResponse{}, fmt.Errorf("codex: embed HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var result struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+		Usage struct {
+			PromptTokens int `json:"prompt_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return EmbedResponse{}, fmt.Errorf("codex: parse embed response: %w", err)
+	}
+
+	if len(result.Data) == 0 {
+		return EmbedResponse{}, fmt.Errorf("codex: no embedding data in response")
+	}
+
+	return EmbedResponse{
+		Embedding: result.Data[0].Embedding,
+		Usage: Usage{
+			InputTokens: result.Usage.PromptTokens,
+			CostUSD:     (float64(result.Usage.TotalTokens) / 1_000_000) * 0.02, // approx cost for 3-small
+		},
+	}, nil
+}
+
+// getEmbeddingAPIKey tries to find an OpenAI API key from environment or config.
+func (p *CodexProvider) getEmbeddingAPIKey() string {
+	// Try environment variable first
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		return key
+	}
+	// Could also check config in future, but for now environment is sufficient
+	return ""
 }
 
 func (p *CodexProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {

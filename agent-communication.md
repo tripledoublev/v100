@@ -153,6 +153,30 @@ notes:
 - Works with text and binary files
 - Minimal performance overhead (recomputes digests of changed files only)
 
+## Next Issue - Add embedding support to Codex and Gemini providers
+
+state: ongoing
+owner: claude
+branch_or_commit: working tree
+scope:
+- internal/providers/codex.go (implement Embed method)
+- internal/providers/gemini.go (implement Embed method)
+
+summary:
+- Both providers currently return "embeddings not yet supported" error
+- Implement Embed() method using provider APIs
+- Enable vector embedding capabilities
+
+verification:
+- go build ./...
+- go test -race ./...
+- bash scripts/lint.sh
+
+notes:
+- Codex uses OpenAI-compatible API
+- Gemini has native embedding support
+- Will enable semantic search and similarity operations
+
 ## Issue #140 - Extend sandbox to record byte-level provenance
 
 state: committed
