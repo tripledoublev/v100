@@ -153,6 +153,31 @@ notes:
 - Works with text and binary files
 - Minimal performance overhead (recomputes digests of changed files only)
 
+## Next - Finalize sandbox review on user exit
+
+state: ready_for_review
+owner: claude
+branch_or_commit: working tree
+scope:
+- cmd/v100/cmd_run.go (user exit path - no changes required)
+- cmd/v100/helpers.go (finalizeSandboxRun and runReasonAllowsApplyBack - already implements user_exit)
+
+summary:
+- sandbox_apply_back.json artifact creation on user_exit already implemented
+- user_exit reason properly flows through finalizeSandboxRun → runReasonAllowsApplyBack
+- Enables operators to review/apply changes even after early termination (user Ctrl+C)
+
+verification:
+- go build ./... ✓
+- go test -race ./... ✓ (all passed)
+- bash scripts/lint.sh ✓ (0 issues)
+
+notes:
+- Implementation was already in place from sandbox finalization work (#72, #124)
+- When user presses Ctrl+C: reason="user_exit" → finalizeSandboxRun() → Success=true → artifact created
+- No code changes needed; issue was already resolved by prior commits
+- Small change with high value for usability
+
 ## Issue - Add embedding support to Codex and Gemini providers
 
 state: committed
