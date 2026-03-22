@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -772,20 +773,21 @@ func geminiStreamSSE(httpResp *http.Response, ch chan<- StreamEvent) {
 }
 
 func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
-	// Gemini uses Google's embedding models via the generative AI API.
+	// Gemini embeddings use the public Gemini API, which requires an API key.
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
 		model = "text-embedding-004"
 	}
 
-	token, err := p.accessToken(ctx)
-	if err != nil {
-		return EmbedResponse{}, err
+	apiKey := resolveGeminiEmbeddingAPIKey()
+	if apiKey == "" {
+		return EmbedResponse{}, fmt.Errorf(
+			"gemini: embeddings require a Gemini API key.\n" +
+				"  → Set GEMINI_API_KEY or GOOGLE_API_KEY for embedding requests",
+		)
 	}
 
-	// Construct the embedding request for Google's generative AI API
-	// API: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent?key=%s", model, token)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent", model)
 
 	payload := map[string]any{
 		"model": "models/" + model,
@@ -806,6 +808,7 @@ func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 		return EmbedResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -841,9 +844,19 @@ func (p *GeminiProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResp
 		Embedding: result.Embedding.Values,
 		Usage: Usage{
 			InputTokens: estimatedTokens,
-			CostUSD:     0, // Gemini embeddings are included with subscription
+			CostUSD:     0, // API-key cost tracking is not modeled here yet.
 		},
 	}, nil
+}
+
+func resolveGeminiEmbeddingAPIKey() string {
+	if key := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
+		return key
+	}
+	return ""
 }
 
 func (p *GeminiProvider) Metadata(ctx context.Context, model string) (ModelMetadata, error) {

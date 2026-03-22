@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -102,5 +103,55 @@ func TestGeminiConvertMessagesWithImage(t *testing.T) {
 	}
 	if !strings.HasPrefix(converted[0].Parts[1].InlineData.Data, "iVBORw") {
 		t.Fatalf("expected base64 PNG payload, got %q", converted[0].Parts[1].InlineData.Data)
+	}
+}
+
+func TestResolveGeminiEmbeddingAPIKeyPrefersGeminiSpecificVar(t *testing.T) {
+	t.Setenv("GOOGLE_API_KEY", "google-key")
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+
+	if got := resolveGeminiEmbeddingAPIKey(); got != "gemini-key" {
+		t.Fatalf("resolveGeminiEmbeddingAPIKey() = %q, want gemini-key", got)
+	}
+}
+
+func TestResolveGeminiEmbeddingAPIKeyFallsBackToGoogleAPIKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "google-key")
+
+	if got := resolveGeminiEmbeddingAPIKey(); got != "google-key" {
+		t.Fatalf("resolveGeminiEmbeddingAPIKey() = %q, want google-key", got)
+	}
+}
+
+func TestGeminiEmbedRequiresAPIKey(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+
+	p := &GeminiProvider{}
+	_, err := p.Embed(t.Context(), EmbedRequest{Text: "hello"})
+	if err == nil {
+		t.Fatal("expected embed to require API key")
+	}
+	if !strings.Contains(err.Error(), "GEMINI_API_KEY") {
+		t.Fatalf("error = %q, want API key guidance", err)
+	}
+}
+
+func TestResolveGeminiEmbeddingAPIKeyIgnoresWhitespace(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "   ")
+	t.Setenv("GOOGLE_API_KEY", "\tgoogle-key\n")
+
+	if got := resolveGeminiEmbeddingAPIKey(); got != "google-key" {
+		t.Fatalf("resolveGeminiEmbeddingAPIKey() = %q, want google-key", got)
+	}
+}
+
+func TestResolveGeminiEmbeddingAPIKeyEmpty(t *testing.T) {
+	_ = os.Unsetenv("GEMINI_API_KEY")
+	_ = os.Unsetenv("GOOGLE_API_KEY")
+
+	if got := resolveGeminiEmbeddingAPIKey(); got != "" {
+		t.Fatalf("resolveGeminiEmbeddingAPIKey() = %q, want empty", got)
 	}
 }

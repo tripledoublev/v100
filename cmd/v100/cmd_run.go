@@ -901,23 +901,18 @@ func showFileBlame(events []core.Event, filePath string) error {
 
 // matchesFile checks if a written file path matches the target file
 func matchesFile(writePath, targetPath, targetBase string) bool {
-	// Normalize both paths for comparison
-	writePath = filepath.Clean(writePath)
-	targetPath = filepath.Clean(targetPath)
+	writePath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(writePath)))
+	targetPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetPath)))
 
-	// Exact match
 	if writePath == targetPath {
 		return true
 	}
 
-	// Base name match
-	writeBase := filepath.Base(writePath)
-	if writeBase == targetBase {
-		return true
+	if !strings.Contains(targetPath, "/") {
+		return filepath.Base(writePath) == targetBase
 	}
 
-	// Check if target is contained in write path
-	if strings.Contains(writePath, targetPath) {
+	if strings.HasSuffix(writePath, "/"+targetPath) {
 		return true
 	}
 

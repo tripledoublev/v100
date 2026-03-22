@@ -211,7 +211,7 @@ func TestLoopAllowsShellToolInDockerWhenNetworkTierOff(t *testing.T) {
 	}
 }
 
-func TestLoopAllowsShellToolInHostWhenNetworkTierOff(t *testing.T) {
+func TestLoopBlocksShellToolInHostWhenNetworkTierOff(t *testing.T) {
 	prov := &mockProvider{
 		responses: []providers.CompleteResponse{
 			{
@@ -251,7 +251,35 @@ func TestLoopAllowsShellToolInHostWhenNetworkTierOff(t *testing.T) {
 	if err := loop.Step(context.Background(), "run local shell"); err != nil {
 		t.Fatal(err)
 	}
-	if session.runCalls != 1 {
-		t.Fatalf("shell tool run calls = %d, want 1", session.runCalls)
+	if session.runCalls != 0 {
+		t.Fatalf("shell tool run calls = %d, want 0", session.runCalls)
+	}
+
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Type != core.EventToolResult {
+			continue
+		}
+		var payload core.ToolResultPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Name != "sh" {
+			continue
+		}
+		found = true
+		if payload.OK {
+			t.Fatal("expected blocked host shell tool result to be !OK")
+		}
+		if !strings.Contains(payload.Output, "network access is disabled by sandbox policy") {
+			t.Fatalf("unexpected tool result output: %q", payload.Output)
+		}
+	}
+	if !found {
+		t.Fatal("expected tool.result event for blocked host shell tool")
 	}
 }
