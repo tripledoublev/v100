@@ -210,3 +210,48 @@ func TestLoopAllowsShellToolInDockerWhenNetworkTierOff(t *testing.T) {
 		t.Fatalf("shell tool run calls = %d, want 1", session.runCalls)
 	}
 }
+
+func TestLoopAllowsShellToolInHostWhenNetworkTierOff(t *testing.T) {
+	prov := &mockProvider{
+		responses: []providers.CompleteResponse{
+			{
+				ToolCalls: []providers.ToolCall{
+					{ID: "call-1", Name: "sh", Args: json.RawMessage(`{"cmd":"printf ok"}`)},
+				},
+			},
+			{AssistantText: "done"},
+		},
+	}
+
+	dir := t.TempDir()
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	session := &mockSession{sessionType: "host"}
+	reg := tools.NewRegistry([]string{"sh"})
+	reg.Register(tools.Sh())
+
+	loop := &core.Loop{
+		Run:         &core.Run{ID: "host-shell-off", Dir: dir, TraceFile: tracePath},
+		Provider:    prov,
+		Tools:       reg,
+		Policy:      policy.Default(),
+		Trace:       trace,
+		Budget:      core.NewBudgetTracker(&core.Budget{MaxSteps: 10}),
+		ConfirmFn:   func(_, _ string) bool { return true },
+		Mapper:      core.NewPathMapper(dir, dir),
+		NetworkTier: "off",
+		Session:     session,
+	}
+
+	if err := loop.Step(context.Background(), "run local shell"); err != nil {
+		t.Fatal(err)
+	}
+	if session.runCalls != 1 {
+		t.Fatalf("shell tool run calls = %d, want 1", session.runCalls)
+	}
+}

@@ -390,10 +390,11 @@ func toolRequiresNetworkGate(tool tools.Tool, session executor.Session) bool {
 	if !tool.Effects().NeedsNetwork {
 		return false
 	}
-	// Docker network mode already enforces shell command connectivity. Blocking all
+	// Docker network mode already enforces shell command connectivity. Host-mode
+	// sandbox also relies on local command execution for build/test. Blocking all
 	// shell commands here turns "network_tier=off" into "no subprocesses", which is
 	// too blunt for local build/test loops.
-	if tool.Name() == "sh" && session != nil && session.Type() == "docker" {
+	if tool.Name() == "sh" && session != nil && (session.Type() == "docker" || session.Type() == "host") {
 		return false
 	}
 	return true
