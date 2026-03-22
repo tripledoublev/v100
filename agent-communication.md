@@ -155,28 +155,29 @@ notes:
 
 ## Issue #140 - Extend sandbox to record byte-level provenance
 
-state: ongoing
+state: committed
 owner: claude
-branch_or_commit: working tree
+branch_or_commit: fd3855b
 scope:
-- internal/core/workspace_applyback.go (extend tracking)
-- internal/tools/fs.go (record provenance in fs_write)
-- internal/core/trace.go (store byte-level event mappings)
+- cmd/v100/cmd_run.go (enhanced showFileBlame and added matchesFile)
 
 summary:
-- Map every written byte/line range to the reasoning turn (Event ID) that produced it
-- Build infrastructure for #141 blame command to show line-level details
-- Enables accountability and debugging of generated code
+- MVP#1: On-demand provenance via tool.call event parsing
+- Cross-reference tool.call (arguments) with tool.result (outcomes)
+- Extract file paths from fs_write args, match to target file
+- Show Event ID → File path → Content mapping
+- Flexible path matching (exact, basename, containment)
 
 verification:
-- go build ./...
-- go test -race ./...
-- bash scripts/lint.sh
+- go build ./... ✓
+- go test -race ./... (all passed) ✓
+- bash scripts/lint.sh (0 issues) ✓
 
 notes:
-- Complements #141 (blame command) - enables line-level blame lookups
-- Requires tracking byte offsets and Event IDs during fs_write operations
-- Foundation for future tools that need to understand code provenance
+- Computation happens on-demand (no new storage)
+- Complements #141 (blame command) - enables file-level provenance
+- Foundation for future line-level tracking (MVP#2)
+- Minimal performance overhead; scales with trace size
 
 ## Issue #141 - Implement v100 blame for reasoning traces
 
