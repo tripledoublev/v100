@@ -346,3 +346,135 @@ func assertFileContent(t *testing.T, path, want string) {
 		t.Fatalf("%s = %q, want %q", path, string(b), want)
 	}
 }
+
+func TestVerifyAppliedFilesDetectsContentMismatch(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+	artifactDir := t.TempDir()
+
+	// Create initial files
+	writeFile(t, filepath.Join(source, "file.txt"), "original\n")
+	writeFile(t, filepath.Join(sandbox, "file.txt"), "modified\n")
+
+	baseline, err := WorkspaceFingerprint(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply changes and verify they work
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:                "on_success",
+		Success:             true,
+		SourceWorkspace:     source,
+		SandboxWorkspace:    sandbox,
+		BaselineFingerprint: baseline,
+		ArtifactDir:         artifactDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied {
+		t.Fatal("expected on_success mode to apply changes back")
+	}
+
+	// Verify the file was correctly written
+	assertFileContent(t, filepath.Join(source, "file.txt"), "modified\n")
+}
+
+func TestVerifyAppliedFilesMultipleFiles(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+	artifactDir := t.TempDir()
+
+	// Create initial files
+	writeFile(t, filepath.Join(source, "a.txt"), "a\n")
+	writeFile(t, filepath.Join(source, "b.txt"), "b\n")
+	writeFile(t, filepath.Join(source, "c.txt"), "c\n")
+
+	// Modify some files
+	writeFile(t, filepath.Join(sandbox, "a.txt"), "a-modified\n")
+	writeFile(t, filepath.Join(sandbox, "b.txt"), "b\n")
+	writeFile(t, filepath.Join(sandbox, "c.txt"), "c-modified\n")
+
+	baseline, err := WorkspaceFingerprint(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply changes
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:                "on_success",
+		Success:             true,
+		SourceWorkspace:     source,
+		SandboxWorkspace:    sandbox,
+		BaselineFingerprint: baseline,
+		ArtifactDir:         artifactDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied {
+		t.Fatal("expected on_success mode to apply changes back")
+	}
+
+	// Verify all files have correct content
+	assertFileContent(t, filepath.Join(source, "a.txt"), "a-modified\n")
+	assertFileContent(t, filepath.Join(source, "b.txt"), "b\n")
+	assertFileContent(t, filepath.Join(source, "c.txt"), "c-modified\n")
+}
+
+func TestVerifyAppliedFilesWithLargeBinaryContent(t *testing.T) {
+	source := t.TempDir()
+	sandbox := t.TempDir()
+	artifactDir := t.TempDir()
+
+	// Create initial file with some content
+	writeFile(t, filepath.Join(source, "data.bin"), string(make([]byte, 1000)))
+
+	// Write binary content to sandbox (simulating a tool that writes binary files)
+	binaryContent := make([]byte, 2000)
+	for i := range binaryContent {
+		binaryContent[i] = byte(i % 256)
+	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(sandbox, "data.bin")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sandbox, "data.bin"), binaryContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	baseline, err := WorkspaceFingerprint(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply changes
+	result, err := FinalizeSandboxWorkspace(SandboxFinalizeOptions{
+		Mode:                "on_success",
+		Success:             true,
+		SourceWorkspace:     source,
+		SandboxWorkspace:    sandbox,
+		BaselineFingerprint: baseline,
+		ArtifactDir:         artifactDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied {
+		t.Fatal("expected on_success mode to apply changes back")
+	}
+
+	// Verify binary content was preserved exactly
+	readBack, err := os.ReadFile(filepath.Join(source, "data.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readBack) != len(binaryContent) {
+		t.Fatalf("file size mismatch: got %d, want %d", len(readBack), len(binaryContent))
+	}
+	for i, b := range readBack {
+		if b != binaryContent[i] {
+			t.Fatalf("binary content mismatch at byte %d: got %d, want %d", i, b, binaryContent[i])
+		}
+	}
+}

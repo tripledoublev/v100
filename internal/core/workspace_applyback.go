@@ -339,6 +339,12 @@ func applyWorkspaceChanges(sourceRoot string, sourceEntries, sandboxEntries map[
 			return err
 		}
 	}
+
+	// Verify that all copied files have correct content (addresses issue #124).
+	if err := verifyAppliedFiles(sourceRoot, files); err != nil {
+		return fmt.Errorf("apply verify: %w", err)
+	}
+
 	return nil
 }
 
@@ -427,4 +433,18 @@ func pathDepth(rel string) int {
 		return 0
 	}
 	return strings.Count(rel, "/") + 1
+}
+
+func verifyAppliedFiles(sourceRoot string, files []workspaceEntry) error {
+	for _, file := range files {
+		target := filepath.Join(sourceRoot, filepath.FromSlash(file.Rel))
+		digest, err := fileDigest(target)
+		if err != nil {
+			return fmt.Errorf("verify %s: compute digest: %w", file.Rel, err)
+		}
+		if digest != file.Digest {
+			return fmt.Errorf("verify %s: digest mismatch (got %s, want %s)", file.Rel, digest, file.Digest)
+		}
+	}
+	return nil
 }
