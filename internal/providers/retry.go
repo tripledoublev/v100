@@ -108,7 +108,7 @@ func retryCall[T any](ctx context.Context, cfg RetryConfig, fn func() (T, error)
 		if cfg.OnRetry != nil {
 			cfg.OnRetry(attempt, delay, re.StatusCode)
 		} else {
-			fmt.Fprintf(os.Stderr, "⏳ rate limited (HTTP %d) — retrying in %s (attempt %d/%d)...\n",
+			fmt.Fprintf(os.Stderr, "⏳ api rate limited (HTTP %d); tools executed successfully — retrying response generation in %s (attempt %d/%d)...\n",
 				re.StatusCode, delay.Round(time.Second), attempt+1, cfg.MaxAttempts-1)
 		}
 		if err := waitForRetry(ctx, delay); err != nil {
