@@ -14,27 +14,27 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "runs")
 
-	mustWriteRunFixture(t, runRoot, "older-run", core.RunMeta{
-		RunID:     "older-run",
+	mustWriteRunFixture(t, runRoot, "20260323T010101-deadbeef", core.RunMeta{
+		RunID:     "20260323T010101-deadbeef",
 		Provider:  "minimax",
 		Model:     "MiniMax-M2.7",
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}, "older prompt", "completed")
 
-	mustWriteRunFixture(t, runRoot, "newer-run", core.RunMeta{
-		RunID:     "newer-run",
+	mustWriteRunFixture(t, runRoot, "20260323T020202-feedbeef", core.RunMeta{
+		RunID:     "20260323T020202-feedbeef",
 		Provider:  "gemini",
 		Model:     "gemini-2.5-flash",
 		CreatedAt: time.Now().Add(-1 * time.Hour),
 		Score:     "fail",
 	}, "newer prompt", "error")
 
-	mustWriteRunFixture(t, runRoot, "child-run", core.RunMeta{
-		RunID:       "child-run",
+	mustWriteRunFixture(t, runRoot, "20260323T030303-cafebabe", core.RunMeta{
+		RunID:       "20260323T030303-cafebabe",
 		Provider:    "minimax",
 		Model:       "MiniMax-M2.7",
 		CreatedAt:   time.Now(),
-		ParentRunID: "older-run",
+		ParentRunID: "20260323T010101-deadbeef",
 	}, "child prompt", "completed")
 
 	runs, err := collectRuns(runRoot, false, "", false)
@@ -44,7 +44,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	if len(runs) != 2 {
 		t.Fatalf("len(runs) = %d, want 2", len(runs))
 	}
-	if runs[0].ID != "newer-run" || runs[1].ID != "older-run" {
+	if runs[0].ID != "20260323T020202-feedbeef" || runs[1].ID != "20260323T010101-deadbeef" {
 		t.Fatalf("unexpected run order: %+v", runs)
 	}
 	if runs[0].Prompt != "newer prompt" {
@@ -55,8 +55,8 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(failedRuns) != 1 || failedRuns[0].ID != "newer-run" {
-		t.Fatalf("failed filter returned %+v, want newer-run only", failedRuns)
+	if len(failedRuns) != 1 || failedRuns[0].ID != "20260323T020202-feedbeef" {
+		t.Fatalf("failed filter returned %+v, want newer canonical run only", failedRuns)
 	}
 
 	providerRuns, err := collectRuns(runRoot, true, "minimax", false)
@@ -65,6 +65,45 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 	}
 	if len(providerRuns) != 2 {
 		t.Fatalf("provider filter len = %d, want 2", len(providerRuns))
+	}
+}
+
+func TestCollectRunsSkipsNonCanonicalDirectoriesByDefault(t *testing.T) {
+	root := t.TempDir()
+	runRoot := filepath.Join(root, "runs")
+
+	mustWriteRunFixture(t, runRoot, "20260323T040404-0badf00d", core.RunMeta{
+		RunID:     "20260323T040404-0badf00d",
+		Provider:  "codex",
+		Model:     "gpt-5.4",
+		CreatedAt: time.Now(),
+	}, "canonical prompt", "completed")
+
+	noiseDir := filepath.Join(runRoot, "agent-call_demo")
+	if err := os.MkdirAll(noiseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(noiseDir, "trace.jsonl"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(noiseDir, "meta.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := collectRuns(runRoot, false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != "20260323T040404-0badf00d" {
+		t.Fatalf("default runs filter returned %+v, want canonical run only", runs)
+	}
+
+	allRuns, err := collectRuns(runRoot, true, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allRuns) != 2 {
+		t.Fatalf("--all should include non-canonical directories, got %+v", allRuns)
 	}
 }
 

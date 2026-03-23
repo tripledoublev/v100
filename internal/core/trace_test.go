@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +102,26 @@ func TestOpenTraceCreatesParentDir(t *testing.T) {
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("expected trace file to exist: %v", err)
+	}
+}
+
+func TestReadAllReportsTrueOneBasedLineNumber(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trace.jsonl")
+	content := strings.Join([]string{
+		`{"ts":"2026-03-23T00:00:00Z","type":"user.msg","payload":{"content":"ok"}}`,
+		`{"ts":"2026-03-23T00:00:01Z","type":"run.end","payload":{"reason":"completed"}}`,
+		`CORRUPTED`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := core.ReadAll(path)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "parse line 3") {
+		t.Fatalf("expected true 1-based line number in error, got %v", err)
 	}
 }

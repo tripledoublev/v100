@@ -67,16 +67,16 @@ func ReadAll(path string) ([]Event, error) {
 	var events []Event
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB max line
-	line := 0
+	lineNum := 0
 	for scanner.Scan() {
-		line++
+		lineNum++
 		raw := scanner.Bytes()
 		if len(raw) == 0 {
 			continue
 		}
 		var ev Event
 		if err := json.Unmarshal(raw, &ev); err != nil {
-			return nil, fmt.Errorf("trace: parse line %d: %w", line, err)
+			return nil, fmt.Errorf("trace: parse line %d: %w", lineNum, err)
 		}
 		events = append(events, ev)
 	}

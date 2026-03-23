@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ type listedRun struct {
 }
 
 var execResumeRun = defaultExecResumeRun
+
+var canonicalRunDirPattern = regexp.MustCompile(`^\d{8}T\d{6}-[0-9a-f]{8}$`)
 
 func runsCmd(cfgPath *string) *cobra.Command {
 	var limit int
@@ -141,6 +144,9 @@ func collectRuns(runDir string, allFlag bool, providerFilter string, failedFlag 
 	runs := make([]listedRun, 0, len(dirs))
 	for _, d := range dirs {
 		dir := filepath.Join(runDir, d.name)
+		if !allFlag && !isPrimaryRunDir(dir, d.name) {
+			continue
+		}
 		meta, _ := core.ReadMeta(dir)
 
 		if !allFlag && meta.ParentRunID != "" {
@@ -168,6 +174,19 @@ func collectRuns(runDir string, allFlag bool, providerFilter string, failedFlag 
 		})
 	}
 	return runs, nil
+}
+
+func isPrimaryRunDir(dir, name string) bool {
+	if !canonicalRunDirPattern.MatchString(name) {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trace.jsonl")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "meta.json")); err != nil {
+		return false
+	}
+	return true
 }
 
 func formatRun(run listedRun) string {
