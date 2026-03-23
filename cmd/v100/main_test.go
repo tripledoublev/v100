@@ -212,6 +212,17 @@ func TestValidatePlanMode(t *testing.T) {
 	}
 }
 
+func TestBuildSolverSuggestsPlanExecuteForPlanAlias(t *testing.T) {
+	cfg := config.DefaultConfig()
+	_, err := buildSolver(cfg, "plan")
+	if err == nil {
+		t.Fatal("expected unknown solver error")
+	}
+	if !strings.Contains(err.Error(), `did you mean "plan_execute"?`) {
+		t.Fatalf("expected plan_execute suggestion, got %v", err)
+	}
+}
+
 func TestIsApprovedPlanAnswer(t *testing.T) {
 	for _, answer := range []string{"y", "Y", "yes", " Yes "} {
 		if !isApprovedPlanAnswer(answer) {

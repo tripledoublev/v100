@@ -160,6 +160,9 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 	case "react", "":
 		return &core.ReactSolver{}, nil
 	default:
+		if solverName == "plan" {
+			return nil, fmt.Errorf("unknown solver %q; did you mean %q?", solverName, "plan_execute")
+		}
 		return nil, fmt.Errorf("unknown solver %q", solverName)
 	}
 }
