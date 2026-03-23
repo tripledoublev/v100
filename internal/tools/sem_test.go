@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,6 +129,41 @@ func TestSemGracefulFailure(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "not installed") {
 		t.Errorf("expected 'not installed' error message, got: %s", res.Output)
+	}
+}
+
+func TestSemImpactFailsLoudlyOnEmptyOutput(t *testing.T) {
+	dir := t.TempDir()
+	semPath := filepath.Join(dir, "sem")
+	script := `#!/bin/sh
+if [ "$1" = "--help" ]; then
+  echo "Semantic version control"
+  echo "Show semantic diff of changes"
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(semPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tool := tools.SemImpact()
+	ctx := context.Background()
+	call := tools.ToolCallContext{
+		WorkspaceDir: t.TempDir(),
+		Mapper:       &tools.MockMapper{Dir: t.TempDir()},
+	}
+	args, _ := json.Marshal(map[string]string{"entity": "main"})
+	res, err := tool.Exec(ctx, call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("expected sem_impact to fail loudly on empty output, got OK with %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "semantic index may be unavailable") {
+		t.Fatalf("expected descriptive empty-output failure, got %q", res.Output)
 	}
 }
 

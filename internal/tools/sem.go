@@ -181,6 +181,15 @@ func runSem(ctx context.Context, call ToolCallContext, semArgs ...string) (ToolR
 		combined := output + stderr.String()
 		return ToolResult{OK: false, Output: combined, Stdout: output, Stderr: stderr.String(), DurationMS: dur}, nil
 	}
+	if strings.TrimSpace(output) == "" && strings.TrimSpace(stderr.String()) == "" {
+		return ToolResult{
+			OK:         false,
+			Output:     "semantic analysis returned no output; the semantic index may be unavailable, stale, or the tool may not support this repository state",
+			Stdout:     output,
+			Stderr:     stderr.String(),
+			DurationMS: dur,
+		}, nil
+	}
 
 	return ToolResult{OK: true, Output: output, Stdout: output, Stderr: stderr.String(), DurationMS: dur}, nil
 }
