@@ -842,7 +842,11 @@ func buildConfirmFn(mode string) core.ConfirmFn {
 	case "always":
 		return ui.ConfirmTool
 	case "never":
-		return func(_, _ string) bool { return true }
+		return func(toolName, _ string) bool {
+			// git_push is an irreversible external side effect. Even in auto mode,
+			// require an explicit higher-level path instead of silently approving it.
+			return toolName != "git_push"
+		}
 	default: // "dangerous"
 		return ui.ConfirmTool
 	}

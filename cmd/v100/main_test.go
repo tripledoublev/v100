@@ -244,6 +244,19 @@ func TestWrapConfirmFnWithActivity(t *testing.T) {
 	}
 }
 
+func TestBuildConfirmFnNeverDeniesGitPush(t *testing.T) {
+	confirmFn := buildConfirmFn("never")
+	if confirmFn == nil {
+		t.Fatal("expected confirm function")
+	}
+	if confirmFn("fs_write", `{"path":"x"}`) != true {
+		t.Fatal("expected non-git dangerous tools to remain auto-approved in never mode")
+	}
+	if confirmFn("git_push", `{"remote":"origin"}`) != false {
+		t.Fatal("expected git_push to be denied in never mode")
+	}
+}
+
 func TestLoadConfigAddsDefaultProviders(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
