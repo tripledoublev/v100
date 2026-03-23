@@ -26,6 +26,9 @@ func TestDefault(t *testing.T) {
 	if !strings.Contains(p.SystemPrompt, "save files into the workspace") {
 		t.Error("expected default system prompt to disclose workspace-save constraint")
 	}
+	if !strings.Contains(p.SystemPrompt, "minimal sanitized environment") {
+		t.Error("expected default system prompt to disclose sanitized shell environment")
+	}
 }
 
 func TestLoadFromFile(t *testing.T) {

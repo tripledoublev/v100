@@ -26,7 +26,7 @@ func Sh() Tool { return &shTool{} }
 
 func (t *shTool) Name() string { return "sh" }
 func (t *shTool) Description() string {
-	return "Execute a shell command with a timeout. This may read or download external resources and save outputs into the workspace when session/network policy allows it. Use carefully."
+	return "Execute a shell command with a timeout. This may read or download external resources and save outputs into the workspace when session/network policy allows it. Commands run with a minimal sanitized environment rather than inheriting the full operator shell env. Use carefully."
 }
 func (t *shTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *shTool) Effects() ToolEffects {
@@ -87,7 +87,7 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 
 	res, err := call.Session.Run(ctx, executor.RunRequest{
 		Command:      "sh",
-		Args:         []string{"-c", a.Cmd},
+		Args:         []string{"-c", sanitizedShellWrapperScript, "v100-sh", a.Cmd},
 		Dir:          ".",
 		StdoutWriter: outputDeltaWriter(call, "stdout"),
 		StderrWriter: outputDeltaWriter(call, "stderr"),
@@ -112,3 +112,15 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		DurationMS: time.Since(start).Milliseconds(),
 	}), nil
 }
+
+const sanitizedShellWrapperScript = `
+exec env -i \
+PATH="${PATH:-/usr/bin:/bin}" \
+HOME="$PWD" \
+TMPDIR="${TMPDIR:-/tmp}" \
+PWD="$PWD" \
+LANG="${LANG:-C.UTF-8}" \
+TERM="${TERM:-dumb}" \
+SHELL=sh \
+sh -c "$1"
+`

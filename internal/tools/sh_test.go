@@ -96,3 +96,63 @@ func TestShStreamsSanitizedOutputDeltas(t *testing.T) {
 		t.Fatalf("missing expected deltas: stdout=%v stderr=%v got=%v", hasStdout, hasStderr, got)
 	}
 }
+
+func TestShDoesNotExposeParentEnvironmentSecrets(t *testing.T) {
+	t.Setenv("V100_SECRET_TEST", "hidden-value")
+
+	sourceDir := t.TempDir()
+	session := startHostSession(t, sourceDir)
+	sandboxDir := session.Workspace()
+
+	call := tools.ToolCallContext{
+		WorkspaceDir: sourceDir,
+		Session:      session,
+		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
+	}
+	args, err := json.Marshal(map[string]any{
+		"cmd": "printf '%s' \"${V100_SECRET_TEST:-}\"",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tools.Sh().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("sh failed: %s", res.Output)
+	}
+	if strings.TrimSpace(res.Stdout) != "" {
+		t.Fatalf("expected sanitized env to hide parent secret, got stdout %q", res.Stdout)
+	}
+}
+
+func TestShSanitizedEnvironmentStillHasWorkingPath(t *testing.T) {
+	sourceDir := t.TempDir()
+	session := startHostSession(t, sourceDir)
+	sandboxDir := session.Workspace()
+
+	call := tools.ToolCallContext{
+		WorkspaceDir: sourceDir,
+		Session:      session,
+		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
+	}
+	args, err := json.Marshal(map[string]any{
+		"cmd": "command -v env >/dev/null && printf ok",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tools.Sh().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("sh failed: %s", res.Output)
+	}
+	if strings.TrimSpace(res.Stdout) != "ok" {
+		t.Fatalf("expected PATH-preserved env to find core commands, got %q", res.Stdout)
+	}
+}
