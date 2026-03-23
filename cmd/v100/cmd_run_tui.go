@@ -90,8 +90,15 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				return
 			}
 			var retryErr *providers.RetryableError
+			var retryBudgetErr *providers.RetryBudgetExceededError
+			if errors.As(err, &retryBudgetErr) {
+				reason = classifyProviderFailureReason(err)
+				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
+				tui.Quit()
+				return
+			}
 			if errors.As(err, &retryErr) {
-				reason = "error"
+				reason = classifyProviderFailureReason(err)
 				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
 				tui.Quit()
 				return
@@ -215,8 +222,11 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 					reason = "budget_exceeded"
 				} else {
 					var retryErr *providers.RetryableError
-					if errors.As(err, &retryErr) {
-						reason = "error"
+					var retryBudgetErr *providers.RetryBudgetExceededError
+					if errors.As(err, &retryBudgetErr) {
+						reason = classifyProviderFailureReason(err)
+					} else if errors.As(err, &retryErr) {
+						reason = classifyProviderFailureReason(err)
 					} else {
 						reason = "error"
 					}

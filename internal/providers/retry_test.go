@@ -47,10 +47,11 @@ func (p *stubProvider) Metadata(ctx context.Context, model string) (ModelMetadat
 
 func testRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts: 3,
-		BaseDelay:   time.Millisecond,
-		MaxDelay:    time.Millisecond,
-		JitterFrac:  0,
+		MaxAttempts:  3,
+		BaseDelay:    time.Millisecond,
+		MaxDelay:     time.Millisecond,
+		MaxTotalWait: 5 * time.Millisecond,
+		JitterFrac:   0,
 	}
 }
 
@@ -171,6 +172,51 @@ func TestRetryProviderContextCancellationStopsRetry(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestRetryProviderExhaustsTotalRetryWaitBudget(t *testing.T) {
+	attempts := 0
+	p := &stubProvider{
+		name: "stub",
+		completeFn: func(context.Context, CompleteRequest) (CompleteResponse, error) {
+			attempts++
+			return CompleteResponse{}, &RetryableError{
+				Err:        errors.New("rate limited"),
+				StatusCode: 429,
+				RetryAfter: 4 * time.Millisecond,
+			}
+		},
+	}
+
+	cfg := testRetryConfig()
+	cfg.MaxAttempts = 5
+	cfg.MaxDelay = 10 * time.Millisecond
+	cfg.MaxTotalWait = 5 * time.Millisecond
+
+	rp := WithRetry(p, cfg)
+	_, err := rp.Complete(context.Background(), CompleteRequest{})
+	var budgetErr *RetryBudgetExceededError
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("Complete error = %v, want RetryBudgetExceededError", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if budgetErr.LastErr == nil || budgetErr.LastErr.StatusCode != 429 {
+		t.Fatalf("budgetErr.LastErr = %+v, want HTTP 429", budgetErr.LastErr)
+	}
+}
+
+func TestBackoffDelayCapsRetryAfterByMaxDelay(t *testing.T) {
+	cfg := RetryConfig{
+		BaseDelay:    time.Second,
+		MaxDelay:     30 * time.Second,
+		MaxTotalWait: 2 * time.Minute,
+		JitterFrac:   0,
+	}
+	if got := backoffDelay(cfg, 0, 59*time.Second); got != 30*time.Second {
+		t.Fatalf("backoffDelay() = %v, want 30s", got)
 	}
 }
 

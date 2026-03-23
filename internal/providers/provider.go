@@ -160,3 +160,26 @@ func (e *RetryableError) Error() string {
 }
 
 func (e *RetryableError) Unwrap() error { return e.Err }
+
+// RetryBudgetExceededError signals that retryable provider failures consumed the
+// configured retry-wait budget before a successful response was produced.
+type RetryBudgetExceededError struct {
+	LastErr *RetryableError
+	Waited  time.Duration
+	MaxWait time.Duration
+}
+
+func (e *RetryBudgetExceededError) Error() string {
+	if e == nil || e.LastErr == nil {
+		return "retry budget exhausted"
+	}
+	return fmt.Sprintf("retry budget exhausted after %s while handling HTTP %d: %v",
+		e.Waited.Round(time.Second), e.LastErr.StatusCode, e.LastErr.Err)
+}
+
+func (e *RetryBudgetExceededError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.LastErr
+}

@@ -442,6 +442,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	// Step-level cancellation
 	var stepCancel context.CancelFunc
 	var stepMu sync.Mutex
+	var signalInterrupted atomic.Bool
 
 	// Signal handler
 	sigs := make(chan os.Signal, 1)
@@ -450,6 +451,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		for range sigs {
 			stepMu.Lock()
 			if stepCancel != nil {
+				signalInterrupted.Store(true)
 				fmt.Fprintln(os.Stderr, ui.Warn("\ninterrupted by signal"))
 				stepCancel()
 				stepCancel = nil
@@ -457,7 +459,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				continue
 			}
 			stepMu.Unlock()
-			reason = "user_exit"
+			reason = "signal_interrupt"
 			_ = loop.EmitRunEnd(reason, "")
 			os.Exit(0)
 		}
@@ -554,6 +556,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
+				if signalInterrupted.Load() {
+					reason = "signal_interrupt"
+					goto done
+				}
 				// User interrupted intentionally; don't emit error event
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
@@ -564,6 +570,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 					return nil
 				}
 				var retryErr *providers.RetryableError
+				var retryBudgetErr *providers.RetryBudgetExceededError
+				if errors.As(err, &retryBudgetErr) {
+					providerErr = true
+					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryBudgetError(retryBudgetErr)))
+					reason = classifyProviderFailureReason(err)
+					goto done
+				}
 				if errors.As(err, &retryErr) {
 					providerErr = true
 					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
@@ -609,6 +622,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
+				if signalInterrupted.Load() {
+					reason = "signal_interrupt"
+					break
+				}
 				// User interrupted intentionally; don't emit error event
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
@@ -618,6 +635,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 					break
 				}
 				var retryErr *providers.RetryableError
+				var retryBudgetErr *providers.RetryBudgetExceededError
+				if errors.As(err, &retryBudgetErr) {
+					providerErr = true
+					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryBudgetError(retryBudgetErr)))
+					reason = classifyProviderFailureReason(err)
+					break
+				}
 				if errors.As(err, &retryErr) {
 					providerErr = true
 					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
@@ -713,6 +737,32 @@ func formatRetryError(retryErr *providers.RetryableError) string {
 		msg += fmt.Sprintf(" — quota reset after %s", resetTime.String())
 	}
 	return msg
+}
+
+func formatRetryBudgetError(err *providers.RetryBudgetExceededError) string {
+	if err == nil {
+		return "retry budget exhausted"
+	}
+	msg := err.Error()
+	if err.MaxWait > 0 {
+		msg += fmt.Sprintf(" (max wait %s)", err.MaxWait.Round(time.Second))
+	}
+	return msg
+}
+
+func classifyProviderFailureReason(err error) string {
+	var retryBudgetErr *providers.RetryBudgetExceededError
+	if errors.As(err, &retryBudgetErr) {
+		if retryBudgetErr.LastErr != nil && retryBudgetErr.LastErr.StatusCode == 429 {
+			return "rate_limit_exhausted"
+		}
+		return "retry_budget_exhausted"
+	}
+	var retryErr *providers.RetryableError
+	if errors.As(err, &retryErr) && retryErr.StatusCode == 429 {
+		return "rate_limit_exhausted"
+	}
+	return "error"
 }
 
 // generateRunSummary generates a one-sentence summary of a completed run.

@@ -14,10 +14,11 @@ import (
 
 // RetryConfig controls retry behaviour for the RetryProvider middleware.
 type RetryConfig struct {
-	MaxAttempts int           // default 5
-	BaseDelay   time.Duration // default 1s
-	MaxDelay    time.Duration // default 30s
-	JitterFrac  float64       // default 0.25
+	MaxAttempts  int           // default 5
+	BaseDelay    time.Duration // default 1s
+	MaxDelay     time.Duration // default 30s
+	MaxTotalWait time.Duration // default 90s across all retries for a single call
+	JitterFrac   float64       // default 0.25
 	// OnRetry is called before each retry sleep. If nil, a default message is printed to stderr.
 	OnRetry func(attempt int, delay time.Duration, statusCode int)
 }
@@ -25,10 +26,11 @@ type RetryConfig struct {
 // DefaultRetryConfig returns sensible defaults.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts: 5,
-		BaseDelay:   1 * time.Second,
-		MaxDelay:    30 * time.Second,
-		JitterFrac:  0.25,
+		MaxAttempts:  5,
+		BaseDelay:    1 * time.Second,
+		MaxDelay:     30 * time.Second,
+		MaxTotalWait: 90 * time.Second,
+		JitterFrac:   0.25,
 	}
 }
 
@@ -60,6 +62,9 @@ func normalizeRetryConfig(cfg RetryConfig) RetryConfig {
 	if cfg.MaxDelay <= 0 {
 		cfg.MaxDelay = defaults.MaxDelay
 	}
+	if cfg.MaxTotalWait <= 0 {
+		cfg.MaxTotalWait = defaults.MaxTotalWait
+	}
 	if cfg.JitterFrac < 0 {
 		cfg.JitterFrac = 0
 	}
@@ -88,6 +93,7 @@ func (rp *RetryProvider) Complete(ctx context.Context, req CompleteRequest) (Com
 func retryCall[T any](ctx context.Context, cfg RetryConfig, fn func() (T, error)) (T, error) {
 	var zero T
 	var lastErr error
+	var waited time.Duration
 	for attempt := 0; attempt < cfg.MaxAttempts; attempt++ {
 		resp, err := fn()
 		if err == nil {
@@ -105,6 +111,13 @@ func retryCall[T any](ctx context.Context, cfg RetryConfig, fn func() (T, error)
 		}
 
 		delay := backoffDelay(cfg, attempt, re.RetryAfter)
+		if cfg.MaxTotalWait > 0 && waited+delay > cfg.MaxTotalWait {
+			return zero, &RetryBudgetExceededError{
+				LastErr: re,
+				Waited:  waited,
+				MaxWait: cfg.MaxTotalWait,
+			}
+		}
 		if cfg.OnRetry != nil {
 			cfg.OnRetry(attempt, delay, re.StatusCode)
 		} else {
@@ -114,6 +127,7 @@ func retryCall[T any](ctx context.Context, cfg RetryConfig, fn func() (T, error)
 		if err := waitForRetry(ctx, delay); err != nil {
 			return zero, err
 		}
+		waited += delay
 	}
 	return zero, lastErr
 }
@@ -140,6 +154,9 @@ func isRetryableStatus(code int) bool {
 
 func backoffDelay(cfg RetryConfig, attempt int, retryAfter time.Duration) time.Duration {
 	if retryAfter > 0 {
+		if cfg.MaxDelay > 0 && retryAfter > cfg.MaxDelay {
+			return cfg.MaxDelay
+		}
 		return retryAfter
 	}
 	delay := float64(cfg.BaseDelay) * math.Pow(2, float64(attempt))
