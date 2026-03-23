@@ -12,6 +12,21 @@ import (
 	"time"
 )
 
+func remappedAbsolutePathWarning(mapper PathTranslator, requestedPath, sandboxPath string) string {
+	if mapper == nil || requestedPath == "" || !filepath.IsAbs(requestedPath) {
+		return ""
+	}
+	virtualPath := filepath.ToSlash(mapper.ToVirtual(sandboxPath))
+	cleanRequested := filepath.ToSlash(filepath.Clean(requestedPath))
+	if virtualPath == "" || virtualPath == cleanRequested {
+		return ""
+	}
+	if strings.HasPrefix(virtualPath, "/workspace/") {
+		return fmt.Sprintf("absolute path %q was remapped into sandbox path %q; shell commands still see the real host path %q", requestedPath, virtualPath, cleanRequested)
+	}
+	return ""
+}
+
 // ─────────────────────────────────────────
 // fs.read
 // ─────────────────────────────────────────
@@ -71,6 +86,9 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	}
 	if a.MaxChars > 0 && len(content) > a.MaxChars {
 		content = content[:a.MaxChars] + "\n... truncated to max_chars"
+	}
+	if warning := remappedAbsolutePathWarning(call.Mapper, a.Path, path); warning != "" {
+		content = "[warning] " + warning + "\n" + content
 	}
 	return ToolResult{
 		OK:         true,
@@ -234,10 +252,18 @@ func (t *fsWriteTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	if len(preview) > 200 {
 		preview = preview[:200] + "…"
 	}
-	previewJSON, _ := json.Marshal(preview)
+	payload := map[string]any{
+		"bytes_written": n,
+		"sha256":        fmt.Sprintf("%x", digest),
+		"preview":       preview,
+	}
+	if warning := remappedAbsolutePathWarning(call.Mapper, a.Path, path); warning != "" {
+		payload["warning"] = warning
+	}
+	previewJSON, _ := json.Marshal(payload)
 	return ToolResult{
 		OK:         true,
-		Output:     fmt.Sprintf(`{"bytes_written":%d,"sha256":"%x","preview":%s}`, n, digest, previewJSON),
+		Output:     string(previewJSON),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -295,7 +321,11 @@ func (t *fsListTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 		}
 		names = append(names, n)
 	}
-	b, _ := json.Marshal(map[string]any{"entries": names})
+	payload := map[string]any{"entries": names}
+	if warning := remappedAbsolutePathWarning(call.Mapper, a.Path, path); warning != "" {
+		payload["warning"] = warning
+	}
+	b, _ := json.Marshal(payload)
 	return ToolResult{
 		OK:         true,
 		Output:     string(b),
@@ -345,7 +375,11 @@ func (t *fsMkdirTool) Exec(ctx context.Context, call ToolCallContext, args json.
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return failResult(start, err.Error()), nil
 	}
-	b, _ := json.Marshal(map[string]string{"created": call.Mapper.ToVirtual(path)})
+	payload := map[string]any{"created": call.Mapper.ToVirtual(path)}
+	if warning := remappedAbsolutePathWarning(call.Mapper, a.Path, path); warning != "" {
+		payload["warning"] = warning
+	}
+	b, _ := json.Marshal(payload)
 	return ToolResult{
 		OK:         true,
 		Output:     string(b),
