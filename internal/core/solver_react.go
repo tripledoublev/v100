@@ -344,7 +344,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			break
 		}
 		stopToolsTriggered := false
-		if !watchdogInjected {
+		if !watchdogInjected && !watchdogsDisabled(l) {
 			if msg, reason, action, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
 				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
 					Action:  hookActionTraceName(action),
@@ -444,6 +444,10 @@ func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, st
 		return "", "", HookContinue, false
 	}
 	return "System watchdog: this step is spending too many tokens on read-heavy inspection. Tool use is now DISABLED for the remainder of this step. Stop searching and reading, synthesize the evidence you already have, and answer now.", "read_heavy_watchdog", HookStopTools, true
+}
+
+func watchdogsDisabled(l *Loop) bool {
+	return l != nil && l.Policy != nil && l.Policy.DisableWatchdogs
 }
 
 func hookActionTraceName(action HookAction) string {

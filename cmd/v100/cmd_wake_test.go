@@ -383,6 +383,7 @@ func TestRunHeadlessIssueWorkerPassesWakeBudgetsAndToolCeiling(t *testing.T) {
 		"--unsafe",
 		"--exit",
 		"--sandbox",
+		"--disable-watchdogs",
 		"--provider codex",
 		"--budget-steps 17",
 		"--budget-tokens 54321",

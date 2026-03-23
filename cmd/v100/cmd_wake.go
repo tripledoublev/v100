@@ -776,7 +776,7 @@ func runHeadlessIssueWorker(ctx context.Context, cfg *config.Config, exe, cfgPat
 	if cfgPath != "" {
 		args = append(args, "--config", cfgPath)
 	}
-	args = append(args, "run", "--auto", "--unsafe", "--exit", "--sandbox", "--provider", providerName)
+	args = append(args, "run", "--auto", "--unsafe", "--exit", "--sandbox", "--disable-watchdogs", "--provider", providerName)
 	if cfg != nil && cfg.Wake.BudgetSteps > 0 {
 		args = append(args, "--budget-steps", strconv.Itoa(cfg.Wake.BudgetSteps))
 	}

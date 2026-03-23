@@ -45,6 +45,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		budgetCostFlag   float64
 		toolTimeoutFlag  int
 		maxToolCallsFlag int
+		disableWatchdogs bool
 		confirmToolsFlag string
 		maxReplansFlag   int
 		memoryModeFlag   string
@@ -256,6 +257,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if toolTimeoutFlag > 0 {
 				pol.ToolTimeoutMS = toolTimeoutFlag
 			}
+			if disableWatchdogs {
+				pol.DisableWatchdogs = true
+			}
 			pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
 			if cfg.Defaults.ContextLimit > 0 {
 				pol.ContextLimit = cfg.Defaults.ContextLimit
@@ -314,6 +318,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().Float64Var(&budgetCostFlag, "budget-cost", 0, "max cost in USD (0=config default)")
 	cmd.Flags().IntVar(&toolTimeoutFlag, "tool-timeout", 0, "tool timeout in ms (0=config default)")
 	cmd.Flags().IntVar(&maxToolCallsFlag, "max-tool-calls-per-step", 0, "max tool calls per step")
+	cmd.Flags().BoolVar(&disableWatchdogs, "disable-watchdogs", false, "disable inspection/read-heavy watchdog interventions")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&memoryModeFlag, "memory-mode", "", "memory injection mode: always|auto|off")
 	cmd.Flags().IntVar(&memoryTokensFlag, "memory-max-tokens", 0, "approximate token budget for injected MEMORY.md context")
@@ -337,6 +342,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&topKFlag, "top-k", 0, "top-k sampling (0=provider default)")
 	cmd.Flags().IntVar(&maxTokensFlag, "max-tokens", 0, "max output tokens (0=provider default)")
 	cmd.Flags().IntVar(&seedFlag, "seed", 0, "random seed for reproducibility (0=none)")
+	_ = cmd.Flags().MarkHidden("disable-watchdogs")
 
 	return cmd
 }
