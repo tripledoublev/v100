@@ -85,6 +85,50 @@ func TestBuildSandboxSessionDisabledUsesSourceWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildSandboxSessionEnabledNormalizesRelativeWorkspaceToAbsolute(t *testing.T) {
+	cfg := testConfig()
+	cfg.Sandbox.Enabled = true
+	cfg.Sandbox.Backend = "host"
+
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := withWorkingDir(root, func() error {
+		session, mapper, workspace, err := buildSandboxSession(cfg, "run-1", "repo", "runs")
+		if err != nil {
+			return err
+		}
+		t.Cleanup(func() { _ = session.Close() })
+
+		if !filepath.IsAbs(workspace) {
+			t.Fatalf("workspace = %q, want absolute path", workspace)
+		}
+		if !filepath.IsAbs(mapper.HostRoot) {
+			t.Fatalf("mapper.HostRoot = %q, want absolute path", mapper.HostRoot)
+		}
+		if !filepath.IsAbs(mapper.SandboxRoot) {
+			t.Fatalf("mapper.SandboxRoot = %q, want absolute path", mapper.SandboxRoot)
+		}
+
+		gotPath, ok := mapper.SecurePath(".")
+		if !ok {
+			t.Fatal("expected workspace root to be secure")
+		}
+		if gotPath != mapper.SandboxRoot {
+			t.Fatalf("SecurePath(.) = %q, want %q", gotPath, mapper.SandboxRoot)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoopNetworkTier(t *testing.T) {
 	cfg := testConfig()
 

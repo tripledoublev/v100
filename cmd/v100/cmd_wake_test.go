@@ -331,15 +331,70 @@ func TestBuildWakeIssuePromptIncludesIssueWorkflow(t *testing.T) {
 	prompt := buildWakeIssuePrompt(cfg, "/repo", issue)
 	for _, want := range []string{
 		"Close open issues overnight.",
+		"Repository workspace: current repository root (repo)",
 		"Selected GitHub issue: #123 Fix wake daemon",
 		"./scripts/lint.sh",
-		"go test ./...",
-		"go build ./...",
+		"env GOCACHE=.gocache go test ./...",
+		"env GOCACHE=.gocache go build ./...",
+		"Use relative paths like `cmd/v100/cmd_run.go` or `dogfood/verify_test.toml` with repo tools.",
+		"Do not pass the absolute host workspace path to repo tools.",
 		"Do not push and do not close the GitHub issue yourself; the daemon will handle that after verifying your commit.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %q", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "/repo/.gocache") {
+		t.Fatalf("prompt should not contain host absolute verification paths: %q", prompt)
+	}
+}
+
+func TestRunHeadlessIssueWorkerPassesWakeBudgetsAndToolCeiling(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var got wakeExecCall
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		got = wakeExecCall{name: name, args: append([]string(nil), args...), stdin: stdin}
+		return "run id: 20260322T120000-deadbeef\n", nil
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Wake.BudgetSteps = 17
+	cfg.Wake.BudgetTokens = 54321
+	cfg.Defaults.MaxToolCallsPerStep = 37
+	cfg.Policies["default"] = config.PolicyConfig{MaxToolCallsPerStep: 41}
+
+	runID, err := runHeadlessIssueWorker(context.Background(), cfg, "/tmp/v100", "/tmp/cfg.toml", "prompt body", "codex")
+	if err != nil {
+		t.Fatalf("runHeadlessIssueWorker() error = %v", err)
+	}
+	if runID != "20260322T120000-deadbeef" {
+		t.Fatalf("runID = %q", runID)
+	}
+	if got.name != "/tmp/v100" {
+		t.Fatalf("command name = %q, want /tmp/v100", got.name)
+	}
+	joined := strings.Join(got.args, " ")
+	for _, want := range []string{
+		"--config /tmp/cfg.toml",
+		"run",
+		"--auto",
+		"--unsafe",
+		"--exit",
+		"--sandbox",
+		"--provider codex",
+		"--budget-steps 17",
+		"--budget-tokens 54321",
+		"--max-tool-calls-per-step 41",
+		"--prompt-file -",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %q", want, joined)
+		}
+	}
+	if got.stdin != "prompt body" {
+		t.Fatalf("stdin = %q, want prompt body", got.stdin)
 	}
 }
 

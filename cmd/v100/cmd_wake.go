@@ -139,14 +139,15 @@ func wakeStartCmd(cfgPath *string) *cobra.Command {
 			if err := child.Start(); err != nil {
 				return fmt.Errorf("start wake daemon: %w", err)
 			}
-			if err := waitForWakeReady(statePath, child.Process.Pid, token, 5*time.Second); err != nil {
+			childPID := child.Process.Pid
+			if err := waitForWakeReady(statePath, childPID, token, 5*time.Second); err != nil {
 				_ = child.Process.Kill()
 				return err
 			}
 			_ = child.Process.Release()
 
 			fmt.Printf("✓ wake started\n")
-			fmt.Printf("  pid: %d\n", child.Process.Pid)
+			fmt.Printf("  pid: %d\n", childPID)
 			fmt.Printf("  state: %s\n", statePath)
 			fmt.Printf("  log: %s\n", logPath)
 			fmt.Printf("  interval: %s\n", interval)
@@ -584,7 +585,7 @@ func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspa
 		return "", nil, issue, err
 	}
 	prompt := buildWakeIssuePrompt(cfg, workspace, *issue)
-	runID, err := runHeadlessIssueWorker(ctx, exe, cfgPath, prompt, providerName)
+	runID, err := runHeadlessIssueWorker(ctx, cfg, exe, cfgPath, prompt, providerName)
 	if err != nil {
 		return runID, nil, issue, err
 	}
@@ -734,41 +735,65 @@ func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue)
 		}
 	}
 
+	workspaceLabel := "current repository root"
+	if base := filepath.Base(strings.TrimSpace(workspace)); base != "" && base != "." && base != string(filepath.Separator) {
+		workspaceLabel = fmt.Sprintf("current repository root (%s)", base)
+	}
+
 	return fmt.Sprintf(
 		"Autonomous daemon objective:\n%s\n\n"+
 			"Repository workspace: %s\n"+
 			"Selected GitHub issue: #%d %s\n"+
 			"Labels: %s\n\n"+
 			"Issue body:\n%s\n\n"+
+			"Execution notes:\n"+
+			"- You are already running from the repository root inside the sandbox workspace.\n"+
+			"- Use relative paths like `cmd/v100/cmd_run.go` or `dogfood/verify_test.toml` with repo tools.\n"+
+			"- Do not pass the absolute host workspace path to repo tools.\n\n"+
 			"Required workflow:\n"+
 			"1. Inspect the code and choose the minimal correct implementation.\n"+
 			"2. Make the code changes.\n"+
 			"3. Run exactly these verification commands if relevant:\n"+
 			"   - ./scripts/lint.sh\n"+
-			"   - env GOCACHE=%s/.gocache go test ./...\n"+
-			"   - env GOCACHE=%s/.gocache go build ./...\n"+
+			"   - env GOCACHE=.gocache go test ./...\n"+
+			"   - env GOCACHE=.gocache go build ./...\n"+
 			"4. Review your own diff for regressions and incomplete edge cases.\n"+
 			"5. Commit with a focused message only if verification passes.\n"+
 			"6. Do not push and do not close the GitHub issue yourself; the daemon will handle that after verifying your commit.\n"+
 			"7. If blocked or verification fails, do not commit.\n"+
 			"8. Work end-to-end in this run; do not stop after analysis.\n",
 		objective,
-		workspace,
+		workspaceLabel,
 		issue.Number,
 		issue.Title,
 		strings.Join(labels, ", "),
 		strings.TrimSpace(issue.Body),
-		workspace,
-		workspace,
 	)
 }
 
-func runHeadlessIssueWorker(ctx context.Context, exe, cfgPath, prompt, providerName string) (string, error) {
+func runHeadlessIssueWorker(ctx context.Context, cfg *config.Config, exe, cfgPath, prompt, providerName string) (string, error) {
 	args := []string{}
 	if cfgPath != "" {
 		args = append(args, "--config", cfgPath)
 	}
-	args = append(args, "run", "--auto", "--unsafe", "--exit", "--sandbox", "--provider", providerName, "--prompt-file", "-")
+	args = append(args, "run", "--auto", "--unsafe", "--exit", "--sandbox", "--provider", providerName)
+	if cfg != nil && cfg.Wake.BudgetSteps > 0 {
+		args = append(args, "--budget-steps", strconv.Itoa(cfg.Wake.BudgetSteps))
+	}
+	if cfg != nil && cfg.Wake.BudgetTokens > 0 {
+		args = append(args, "--budget-tokens", strconv.Itoa(cfg.Wake.BudgetTokens))
+	}
+	maxToolCalls := 0
+	if cfg != nil {
+		maxToolCalls = cfg.Defaults.MaxToolCallsPerStep
+		if pol, ok := cfg.Policies["default"]; ok && pol.MaxToolCallsPerStep > maxToolCalls {
+			maxToolCalls = pol.MaxToolCallsPerStep
+		}
+	}
+	if maxToolCalls <= 0 {
+		maxToolCalls = 50
+	}
+	args = append(args, "--max-tool-calls-per-step", strconv.Itoa(maxToolCalls), "--prompt-file", "-")
 	out, err := wakeExecCommand(ctx, prompt, exe, args...)
 	runID := extractRunIDFromOutput(out)
 	if err != nil {

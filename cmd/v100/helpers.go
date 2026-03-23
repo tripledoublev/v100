@@ -251,24 +251,31 @@ func validateToolRegistry(reg *tools.Registry) error {
 }
 
 func buildSandboxSession(cfg *config.Config, runID, sourceWorkspace, runBase string) (executor.Session, *core.PathMapper, string, error) {
+	sourceAbs, err := filepath.Abs(sourceWorkspace)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	execFactory, err := executor.NewExecutor(cfg.Sandbox, runBase)
 	if err != nil {
 		return nil, nil, "", err
 	}
-	session, err := execFactory.NewSession(runID, sourceWorkspace)
+	session, err := execFactory.NewSession(runID, sourceAbs)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	sandboxWorkspace := sourceWorkspace
+	sandboxWorkspace := sourceAbs
 	if cfg.Sandbox.Enabled {
 		if err := session.Start(context.Background()); err != nil {
 			return nil, nil, "", err
 		}
-		sandboxWorkspace = session.Workspace()
+		sandboxWorkspace, err = filepath.Abs(session.Workspace())
+		if err != nil {
+			return nil, nil, "", err
+		}
 	}
 
-	mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
+	mapper := core.NewPathMapper(sourceAbs, sandboxWorkspace)
 	return session, mapper, sandboxWorkspace, nil
 }
 
