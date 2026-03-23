@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.2.7 — 2026-03-22
+
+**Autonomous Wake Hardening and Transcript Fixes**
+
+This patch release hardens the new wake issue-worker loop, restores missing user-message visibility in the UI, and tightens router escalation when cheap-tier models hallucinate tools.
+
+### Wake and Autonomy
+
+- **Wake issue-worker git safety** — Autonomous issue-worker cycles now require a clean working tree before starting, require exactly one new commit, and only auto-push/close from the default branch.
+- **Wake sandbox fingerprint baseline** — Sandboxed runs now persist the source-workspace fingerprint at run start, improving apply-back conflict detection and baseline tracking.
+- **Issue-worker watchdog handling** — Headless wake issue-worker runs disable read-heavy watchdog interventions that were prematurely stopping autonomous inspection loops.
+
+### UI and Transcript Fixes
+
+- **CLI and TUI user messages restored** — Submitted user messages now appear again in both the CLI transcript and TUI transcript instead of disappearing after the duplicate-echo workaround.
+- **CLI prompt echo cleanup** — The terminal prompt line is cleared before event rendering so submitted messages are shown exactly once.
+- **Compact failure digest improvements** — Failure digests are auto-printed at the end of failed runs with cleaner operator-facing summaries.
+
+### Routing and Sandbox Behavior
+
+- **Router cheap-tier escalation hardened** — The router now escalates to the smart tier when the cheap model emits unknown or disabled tool names, while still allowing trivial safe mutations like `fs_mkdir` to stay cheap.
+- **Sandbox apply-back on `prompt_exit`** — Non-interactive `--exit` runs now allow normal sandbox apply-back, matching the intended successful one-shot flow.
+
+### Reliability and Provider Fixes
+
+- **MiniMax unresolved tool-call sanitization** — Live and provider-facing history now quarantine unresolved tool calls more aggressively to avoid MiniMax request failures.
+- **Host network policy regression fixed** — Host-mode sessions no longer bypass `network_tier=off` through the shell tool.
+- **Gemini embedding auth corrected** — Gemini embeddings now use real API-key auth instead of the wrong subscription-token path.
+
 ## v0.2.6 — 2026-03-21
 
 **MiniMax Default Upgrade and Docs Refresh**
