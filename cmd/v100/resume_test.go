@@ -215,6 +215,7 @@ func TestRunReasonAllowsApplyBack(t *testing.T) {
 	}{
 		{reason: "user_exit", want: true},
 		{reason: "completed", want: true},
+		{reason: "prompt_exit", want: true},
 		{reason: "budget_steps", want: false},
 		{reason: "error", want: false},
 	}

@@ -333,7 +333,7 @@ func finalizeSandboxRun(cfg *config.Config, run *core.Run, reason string, mapper
 
 func runReasonAllowsApplyBack(reason string) bool {
 	switch reason {
-	case "user_exit", "completed":
+	case "user_exit", "completed", "prompt_exit":
 		return true
 	default:
 		return false

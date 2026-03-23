@@ -9,6 +9,31 @@ import (
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
+// trivialMutations lists tools that mutate the workspace but are de facto
+// safe and should NOT trigger escalation to the frontier model. Any tool
+// not in this map is subject to escalation if it carries MutatesWorkspace,
+// ExternalSideEffect, or MutatesRunState.
+var trivialMutations = map[string]bool{
+	"fs_mkdir": true, // creating directories is idempotent and reversible
+}
+
+func routerToolNeedsEscalation(l *Loop, toolName string) bool {
+	if l == nil || l.Tools == nil {
+		return true
+	}
+	tool, ok := l.Tools.Get(toolName)
+	if !ok {
+		// Unknown or disabled tools from the cheap tier should be retried on
+		// the smart tier instead of being allowed to hallucinate into failure.
+		return true
+	}
+	effects := tool.Effects()
+	if effects.MutatesWorkspace || effects.ExternalSideEffect || effects.MutatesRunState {
+		return !trivialMutations[toolName]
+	}
+	return false
+}
+
 // RouterSolver dynamically switches between a cheap and a smart provider.
 type RouterSolver struct {
 	Cheap providers.Provider
@@ -103,8 +128,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		needsEscalation := false
 		if !smartMode && s.Smart != nil {
 			for _, tc := range resp.ToolCalls {
-				effects := l.Tools.Effects(tc.Name)
-				if effects.MutatesWorkspace || effects.ExternalSideEffect || effects.MutatesRunState {
+				if routerToolNeedsEscalation(l, tc.Name) {
 					needsEscalation = true
 					break
 				}
