@@ -762,6 +762,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 		}
 	}
 	// Apply compression policy defaults from config
+	if cfg.Defaults.MaxToolCallsPerStep > 0 {
+		p.MaxToolCallsPerStep = cfg.Defaults.MaxToolCallsPerStep
+	}
 	if cfg.Defaults.MaxToolResultChars > 0 {
 		p.MaxToolResultChars = cfg.Defaults.MaxToolResultChars
 	}
