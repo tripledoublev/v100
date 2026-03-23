@@ -92,7 +92,19 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			)
 			break
 		}
-		fmt.Printf("\n%s\n", ts)
+		content := p.Content
+		if p.ImageCount > 0 {
+			if content != "" {
+				content += " "
+			}
+			content += imageCount(p.ImageCount)
+		}
+		indented := indentLines(content, "              ")
+		fmt.Printf("\n%s  %s  %s\n",
+			ts,
+			styleUser.Render("you"),
+			indented,
+		)
 
 	case core.EventModelCall:
 		if r.inSubAgent > 0 {
@@ -453,6 +465,7 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 	for {
 		if _, err := in.Read(buf[:]); err != nil {
 			if err == io.EOF {
+				clearPromptLine(out)
 				_, _ = fmt.Fprintln(out)
 				return PromptResult{}, fmt.Errorf("EOF")
 			}
@@ -461,12 +474,13 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 		statusMsg = ""
 		switch b := buf[0]; b {
 		case '\r', '\n':
-			_, _ = fmt.Fprintln(out)
+			clearPromptLine(out)
 			return PromptResult{
 				Text:   string(text),
 				Images: append([][]byte(nil), images...),
 			}, nil
 		case 0x03:
+			clearPromptLine(out)
 			_, _ = fmt.Fprintln(out)
 			return PromptResult{}, fmt.Errorf("interrupt")
 		case 0x7f, 0x08:
@@ -499,6 +513,10 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 		}
 		render()
 	}
+}
+
+func clearPromptLine(out io.Writer) {
+	_, _ = fmt.Fprint(out, "\r\033[K")
 }
 
 func promptLine(text string, images [][]byte, statusMsg string) string {

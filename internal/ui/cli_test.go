@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"github.com/tripledoublev/v100/internal/core"
 )
 
-func TestCLIRendererUsesPlainSpeakerLabels(t *testing.T) {
+func TestCLIRendererShowsUserMessageOnceInTranscript(t *testing.T) {
 	r := NewCLIRenderer()
 
 	out := captureStdout(t, func() {
@@ -25,11 +26,11 @@ func TestCLIRendererUsesPlainSpeakerLabels(t *testing.T) {
 	})
 
 	plain := stripANSI(out)
-	if strings.Contains(plain, "hello") {
-		t.Fatalf("did not expect echoed user message, got %q", plain)
+	if count := strings.Count(plain, "hello"); count != 1 {
+		t.Fatalf("expected exactly one rendered user message, got %d in %q", count, plain)
 	}
-	if strings.Contains(plain, " me ") {
-		t.Fatalf("did not expect plain user label, got %q", plain)
+	if !strings.Contains(plain, " you  hello") {
+		t.Fatalf("expected plain user label and content, got %q", plain)
 	}
 	if !strings.Contains(plain, " agent  world") {
 		t.Fatalf("expected plain agent label, got %q", plain)
@@ -39,7 +40,7 @@ func TestCLIRendererUsesPlainSpeakerLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !matched {
-		t.Fatalf("expected timestamp-only user marker, got %q", plain)
+		t.Fatalf("expected timestamp in user message row, got %q", plain)
 	}
 }
 
@@ -120,6 +121,14 @@ func TestPromptLineIncludesImageCount(t *testing.T) {
 	}
 	if !strings.Contains(line, "[Image #1]") {
 		t.Fatalf("expected image marker in %q", line)
+	}
+}
+
+func TestClearPromptLineWritesEscapeSequence(t *testing.T) {
+	var buf bytes.Buffer
+	clearPromptLine(&buf)
+	if got, want := buf.String(), "\r\033[K"; got != want {
+		t.Fatalf("clearPromptLine() = %q, want %q", got, want)
 	}
 }
 

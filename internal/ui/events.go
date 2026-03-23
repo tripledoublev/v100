@@ -55,8 +55,19 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", content)
 				break
 			}
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", ts)
-			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s\n", ev.TS.Format(time.TimeOnly))
+			content := p.Content
+			if p.ImageCount > 0 {
+				if content != "" {
+					content += " "
+				}
+				content += imageCount(p.ImageCount)
+			}
+			wrapped := m.wrapPlainForTranscript(content)
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render("you"), wrapped)
+			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
+			_, _ = fmt.Fprintf(&m.plainBuf, "\nyou: %s\n", content)
 		}
 
 	case core.EventModelResp:
