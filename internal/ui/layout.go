@@ -9,8 +9,8 @@ import (
 
 // Border overhead constants: how many columns/rows are consumed by lipgloss borders and padding.
 const (
-	splitBorderCols  = 5  // Each pane has 2 border cols, and split adds 1-col gap: 2 + 2 + 1
-	singleBorderSize = 2  // Single pane borders consume 2 rows/cols
+	splitBorderCols  = 5 // Each pane has 2 border cols, and split adds 1-col gap: 2 + 2 + 1
+	singleBorderSize = 2 // Single pane borders consume 2 rows/cols
 )
 
 type headerLayout struct {
@@ -20,13 +20,13 @@ type headerLayout struct {
 }
 
 type viewLayoutPlan struct {
-	header            headerLayout
-	inputWidth        int
-	leftPaneHeight    int
-	singlePaneHeight  int
-	remainingHeight   int
-	showSplit         bool
-	panes             paneLayout
+	header           headerLayout
+	inputWidth       int
+	leftPaneHeight   int
+	singlePaneHeight int
+	remainingHeight  int
+	showSplit        bool
+	panes            paneLayout
 }
 
 type paneLayout struct {
@@ -93,9 +93,8 @@ func computePaneLayout(totalWidth, totalHeight, leftPanePct, tracePanePct int) p
 	return layout
 }
 
-func (p paneLayout) withRightColumnHeights(metricsRendered, statusRendered, tracePanePct int) paneLayout {
-	traceRemaining := p.remainingHeight - metricsRendered - statusRendered
-	traceRendered := traceRemaining * tracePanePct / 100
+func (p paneLayout) withRightColumnHeights(metricsRendered, statusRendered int) paneLayout {
+	traceRendered := p.remainingHeight - metricsRendered - statusRendered
 	if traceRendered < 4 {
 		traceRendered = 4
 	}

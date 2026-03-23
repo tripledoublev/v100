@@ -40,12 +40,21 @@ func TestComputePaneLayoutAppliesHeightMinimums(t *testing.T) {
 
 func TestPaneLayoutWithRightColumnHeightsRespectsMinimumTraceHeight(t *testing.T) {
 	base := computePaneLayout(140, 20, 66, 50)
-	layout := base.withRightColumnHeights(8, 10, 50)
+	layout := base.withRightColumnHeights(8, 10)
 	if layout.traceContentHeight < 2 {
 		t.Fatalf("trace content height = %d, want >= 2", layout.traceContentHeight)
 	}
 	if layout.traceViewportHeight < 1 {
 		t.Fatalf("trace viewport height = %d, want >= 1", layout.traceViewportHeight)
+	}
+}
+
+func TestPaneLayoutWithRightColumnHeightsFillsRemainingColumnHeight(t *testing.T) {
+	base := computePaneLayout(140, 30, 66, 50)
+	layout := base.withRightColumnHeights(12, 8)
+	traceRendered := layout.traceContentHeight + 2
+	if got, want := traceRendered+12+8, layout.remainingHeight; got != want {
+		t.Fatalf("right column rendered height = %d, want %d", got, want)
 	}
 }
 
@@ -166,6 +175,9 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────╮
 │transcript line one                                                                                   │ │trace                                                │
 │transcript line two                                                                                   │ │trace line one                                       │
+│                                                                                                      │ │trace line two                                       │
+│                                                                                                      │ │                                                     │
+│                                                                                                      │ │                                                     │
 │                                                                                                      │ ╰─────────────────────────────────────────────────────╯
 │                                                                                                      │ ╭─────────────────────────────────────────────────────╮
 │                                                                                                      │ │visual inspector                                     │
@@ -191,10 +203,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 │                                                                                                      │ │sub-agents: active=0 done=0 failed=0                 │
 │                                                                                                      │ │last: none                                           │
 │                                                                                                      │ │                                                     │
-│                                                                                                      │ ╰─────────────────────────────────────────────────────╯
-│                                                                                                      │
-│                                                                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │> ask v100 to inspect, patch, or debug...                                                                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`,

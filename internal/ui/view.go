@@ -93,7 +93,7 @@ func (m *TUIModel) View() string {
 			statusRendered = lipgloss.Height(statusPane)
 		}
 
-		layout = layout.withRightColumnHeights(metricsRendered, statusRendered, m.tracePanePct)
+		layout = layout.withRightColumnHeights(metricsRendered, statusRendered)
 
 		// Left column: content = remaining - 2 so rendered = remaining.
 		m.transcript.Width = layout.transcriptWidth
