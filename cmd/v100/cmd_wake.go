@@ -567,6 +567,24 @@ func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspa
 	if !cfg.Sandbox.Enabled {
 		return "", nil, nil, errors.New("wake issue worker requires sandbox.enabled=true")
 	}
+	cleanBefore, err := wakeGitClean(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if !cleanBefore {
+		return "", nil, nil, errors.New("wake issue worker requires a clean working tree before starting a cycle")
+	}
+	currentBranch, err := wakeGitCurrentBranch(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defaultBranch, err := wakeGitDefaultBranch(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if currentBranch != defaultBranch {
+		return "", nil, nil, fmt.Errorf("wake issue worker only auto-pushes and closes from the default branch (%s); current branch is %s", defaultBranch, currentBranch)
+	}
 	issue, err := selectWakeIssue(ctx, cfg, state)
 	if err != nil {
 		return "", nil, nil, err
@@ -596,6 +614,13 @@ func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspa
 	if headAfter == "" || headAfter == headBefore {
 		return runID, nil, issue, fmt.Errorf("issue #%d run completed without creating a new commit", issue.Number)
 	}
+	commitCount, err := wakeGitCommitCount(ctx, headBefore, headAfter)
+	if err != nil {
+		return runID, nil, issue, err
+	}
+	if commitCount != 1 {
+		return runID, nil, issue, fmt.Errorf("issue #%d run created %d commits; expected exactly 1", issue.Number, commitCount)
+	}
 	clean, err := wakeGitClean(ctx)
 	if err != nil {
 		return runID, nil, issue, err
@@ -603,7 +628,7 @@ func runWakeIssueCycle(ctx context.Context, cfg *config.Config, cfgPath, workspa
 	if !clean {
 		return runID, nil, issue, fmt.Errorf("issue #%d run left a dirty working tree", issue.Number)
 	}
-	if err := wakeGitPush(ctx); err != nil {
+	if err := wakeGitPush(ctx, currentBranch); err != nil {
 		return runID, nil, issue, err
 	}
 
@@ -821,10 +846,46 @@ func wakeGitClean(ctx context.Context) (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
-func wakeGitPush(ctx context.Context) error {
-	out, err := wakeExecCommand(ctx, "", "git", "push", "origin", "HEAD")
+func wakeGitCurrentBranch(ctx context.Context) (string, error) {
+	out, err := wakeExecCommand(ctx, "", "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return fmt.Errorf("git push origin HEAD: %w\n%s", err, strings.TrimSpace(out))
+		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w\n%s", err, strings.TrimSpace(out))
+	}
+	branch := strings.TrimSpace(out)
+	if branch == "" || branch == "HEAD" {
+		return "", errors.New("wake issue worker requires a named local branch")
+	}
+	return branch, nil
+}
+
+func wakeGitDefaultBranch(ctx context.Context) (string, error) {
+	out, err := wakeExecCommand(ctx, "", "git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git symbolic-ref refs/remotes/origin/HEAD: %w\n%s", err, strings.TrimSpace(out))
+	}
+	ref := strings.TrimSpace(out)
+	if ref == "" {
+		return "", errors.New("could not determine origin default branch")
+	}
+	return strings.TrimPrefix(ref, "origin/"), nil
+}
+
+func wakeGitCommitCount(ctx context.Context, from, to string) (int, error) {
+	out, err := wakeExecCommand(ctx, "", "git", "rev-list", "--count", from+".."+to)
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: %w\n%s", from, to, err, strings.TrimSpace(out))
+	}
+	count, convErr := strconv.Atoi(strings.TrimSpace(out))
+	if convErr != nil {
+		return 0, fmt.Errorf("parse git rev-list count %q: %w", strings.TrimSpace(out), convErr)
+	}
+	return count, nil
+}
+
+func wakeGitPush(ctx context.Context, branch string) error {
+	out, err := wakeExecCommand(ctx, "", "git", "push", "origin", "HEAD:"+branch)
+	if err != nil {
+		return fmt.Errorf("git push origin HEAD:%s: %w\n%s", branch, err, strings.TrimSpace(out))
 	}
 	return nil
 }

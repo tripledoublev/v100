@@ -487,3 +487,128 @@ func TestWakeGitCleanParsesDirtyAndCleanTrees(t *testing.T) {
 		t.Fatalf("wakeGitClean() clean = %v err=%v, want false nil", clean, err)
 	}
 }
+
+func TestWakeGitCurrentBranchRejectsDetachedHead(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		return "HEAD\n", nil
+	}
+	_, err := wakeGitCurrentBranch(context.Background())
+	if err == nil {
+		t.Fatal("expected detached HEAD to fail")
+	}
+}
+
+func TestWakeGitDefaultBranchParsesOriginHEAD(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		return "origin/main\n", nil
+	}
+	branch, err := wakeGitDefaultBranch(context.Background())
+	if err != nil {
+		t.Fatalf("wakeGitDefaultBranch() error = %v", err)
+	}
+	if branch != "main" {
+		t.Fatalf("wakeGitDefaultBranch() = %q, want main", branch)
+	}
+}
+
+func TestWakeGitCommitCountParsesCount(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var gotArgs []string
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "1\n", nil
+	}
+	count, err := wakeGitCommitCount(context.Background(), "abc", "def")
+	if err != nil {
+		t.Fatalf("wakeGitCommitCount() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("wakeGitCommitCount() = %d, want 1", count)
+	}
+	if strings.Join(gotArgs, " ") != "rev-list --count abc..def" {
+		t.Fatalf("args = %q", strings.Join(gotArgs, " "))
+	}
+}
+
+func TestWakeGitPushUsesNamedBranch(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var gotArgs []string
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "", nil
+	}
+	if err := wakeGitPush(context.Background(), "main"); err != nil {
+		t.Fatalf("wakeGitPush() error = %v", err)
+	}
+	if strings.Join(gotArgs, " ") != "push origin HEAD:main" {
+		t.Fatalf("args = %q", strings.Join(gotArgs, " "))
+	}
+}
+
+func TestRunWakeIssueCycleRequiresCleanTreeBeforeStarting(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var calls []wakeExecCall
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		calls = append(calls, wakeExecCall{name: name, args: append([]string(nil), args...), stdin: stdin})
+		if len(args) >= 2 && args[0] == "status" && args[1] == "--short" {
+			return " M internal/ui/cli.go\n", nil
+		}
+		return "", fmt.Errorf("unexpected call: %v", args)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Sandbox.Enabled = true
+	cfg.Wake.Mode = "issue_worker"
+
+	_, _, _, err := runWakeIssueCycle(context.Background(), cfg, "", t.TempDir(), "minimax", &core.WakeState{})
+	if err == nil || !strings.Contains(err.Error(), "requires a clean working tree") {
+		t.Fatalf("runWakeIssueCycle() err = %v, want clean-tree failure", err)
+	}
+	if len(calls) != 1 || strings.Join(calls[0].args, " ") != "status --short" {
+		t.Fatalf("calls = %+v, want only git status --short", calls)
+	}
+}
+
+func TestRunWakeIssueCycleRequiresDefaultBranch(t *testing.T) {
+	oldExec := wakeExecCommand
+	defer func() { wakeExecCommand = oldExec }()
+
+	var calls []wakeExecCall
+	wakeExecCommand = func(ctx context.Context, stdin string, name string, args ...string) (string, error) {
+		calls = append(calls, wakeExecCall{name: name, args: append([]string(nil), args...), stdin: stdin})
+		switch strings.Join(args, " ") {
+		case "status --short":
+			return "", nil
+		case "rev-parse --abbrev-ref HEAD":
+			return "feature/test\n", nil
+		case "symbolic-ref --quiet --short refs/remotes/origin/HEAD":
+			return "origin/main\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call: %v", args)
+		}
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Sandbox.Enabled = true
+	cfg.Wake.Mode = "issue_worker"
+
+	_, _, _, err := runWakeIssueCycle(context.Background(), cfg, "", t.TempDir(), "minimax", &core.WakeState{})
+	if err == nil || !strings.Contains(err.Error(), "default branch (main)") {
+		t.Fatalf("runWakeIssueCycle() err = %v, want default-branch failure", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("calls = %+v, want 3 setup calls", calls)
+	}
+}
