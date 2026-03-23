@@ -187,3 +187,42 @@ func TestBenchBootstrapForceOverwritesWithValidScaffold(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDefaultBenchBootstrapPathPrefersBenchmarksDirWhenPresent(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		benchDir := filepath.Join("tests", "benchmarks")
+		if err := os.MkdirAll(benchDir, 0o755); err != nil {
+			return err
+		}
+		got, err := defaultBenchBootstrapPath("demo")
+		if err != nil {
+			return err
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		want := filepath.Join(cwd, "tests", "benchmarks", "demo.bench.toml")
+		if got != want {
+			t.Fatalf("defaultBenchBootstrapPath() = %q, want %q", got, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDefaultBenchBootstrapPathFallsBackToCWDWhenBenchmarksDirMissing(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		got, err := defaultBenchBootstrapPath("demo")
+		if err != nil {
+			return err
+		}
+		if got != "demo.bench.toml" {
+			t.Fatalf("defaultBenchBootstrapPath() = %q, want %q", got, "demo.bench.toml")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

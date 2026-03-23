@@ -270,7 +270,10 @@ func benchBootstrapCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			filename := name + ".bench.toml"
+			filename, err := defaultBenchBootstrapPath(name)
+			if err != nil {
+				return err
+			}
 			if !force {
 				if _, err := os.Stat(filename); err == nil {
 					return fmt.Errorf("%s already exists; use --force to overwrite", filename)
@@ -320,6 +323,19 @@ scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, mo
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing scaffold file")
 
 	return cmd
+}
+
+func defaultBenchBootstrapPath(name string) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	filename := name + ".bench.toml"
+	benchDir := filepath.Join(cwd, "tests", "benchmarks")
+	if info, err := os.Stat(benchDir); err == nil && info.IsDir() {
+		return filepath.Join(benchDir, filename), nil
+	}
+	return filename, nil
 }
 
 func addBenchRunFlags(cmd *cobra.Command, opts *benchRunOptions) {

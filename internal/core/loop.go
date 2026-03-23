@@ -866,8 +866,12 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			continue // skip this message, try next
 		}
 
-		_ = l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens)
-		_ = l.Budget.AddCost(resp.Usage.CostUSD)
+		if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression tokens: %v\n", err)
+		}
+		if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression cost: %v\n", err)
+		}
 		totalCompressCost += resp.Usage.CostUSD
 
 		// Replace content in-place, preserving metadata
@@ -924,9 +928,12 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	if err != nil {
 		return err
 	}
-
-	_ = l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens)
-	_ = l.Budget.AddCost(resp.Usage.CostUSD)
+	if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression tokens: %v\n", err)
+	}
+	if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression cost: %v\n", err)
+	}
 
 	summary := providers.Message{
 		Role:    "system",

@@ -110,12 +110,15 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		if r.inSubAgent > 0 {
 			break
 		}
+		// Reset streaming state for every model call, regardless of TTY.
+		r.mu.Lock()
+		r.streamedText = false
+		r.mu.Unlock()
 		// Skip spinner when stdout is not a TTY (pipe/file redirect)
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			break
 		}
 		r.mu.Lock()
-		r.streamedText = false // reset for new model call
 		r.modelCallStart = time.Now()
 		r.modelCallStop = make(chan struct{})
 		r.modelCallDone = make(chan struct{})
@@ -155,8 +158,13 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		// Skip printing text if it was already streamed via EventModelToken
-		if p.Text != "" && !r.streamedText {
+		// Consume streaming state under mutex to avoid data race with EventModelToken.
+		r.mu.Lock()
+		streamedText := r.streamedText
+		r.streamedText = false
+		r.mu.Unlock()
+		// Skip printing text if it was already streamed via EventModelToken.
+		if p.Text != "" && !streamedText {
 			indented := indentLines(p.Text, "              ")
 			fmt.Printf("%s  %s  %s\n",
 				ts,
@@ -164,8 +172,8 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 				indented,
 			)
 		}
-		// If text was streamed and there are tool calls, print a blank line for separation
-		if r.streamedText && len(p.ToolCalls) > 0 {
+		// If text was streamed and there are tool calls, print a blank line for separation.
+		if streamedText && len(p.ToolCalls) > 0 {
 			fmt.Print("")
 		}
 		for _, tc := range p.ToolCalls {
