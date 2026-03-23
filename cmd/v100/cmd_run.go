@@ -217,6 +217,13 @@ func runCmd(cfgPath *string) *cobra.Command {
 				Sandbox:         cfg.Sandbox,
 				CreatedAt:       time.Now().UTC(),
 			}
+
+			if cfg.Sandbox.Enabled {
+				if fp, err := core.WorkspaceFingerprint(sourceWorkspace); err == nil {
+					meta.SourceFingerprint = fp
+				}
+			}
+
 			_ = core.WriteMeta(runDir, meta)
 
 			tracePath := filepath.Join(runDir, "trace.jsonl")
