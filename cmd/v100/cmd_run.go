@@ -544,7 +544,25 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err := runCLIInput(stepCtx, loop, initialPrompt, nil, planMode)
+		var err error
+		for {
+			err = runCLIInput(stepCtx, loop, initialPrompt, nil, planMode)
+			if err == nil {
+				break
+			}
+			var budgetErr *core.ErrBudgetExceeded
+			if errors.As(err, &budgetErr) {
+				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
+					return promptContinueWithoutTokenLimit(os.Stdin, os.Stderr, reason)
+				}) {
+				case interactiveBudgetRetry:
+					continue
+				case interactiveBudgetContinue:
+					err = nil
+				}
+			}
+			break
+		}
 
 		stepMu.Lock()
 		stepCancel = nil
@@ -610,7 +628,24 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err = runCLIInput(stepCtx, loop, input, images, planMode)
+		for {
+			err = runCLIInput(stepCtx, loop, input, images, planMode)
+			if err == nil {
+				break
+			}
+			var budgetErr *core.ErrBudgetExceeded
+			if errors.As(err, &budgetErr) {
+				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
+					return promptContinueWithoutTokenLimit(os.Stdin, os.Stderr, reason)
+				}) {
+				case interactiveBudgetRetry:
+					continue
+				case interactiveBudgetContinue:
+					err = nil
+				}
+			}
+			break
+		}
 
 		stepMu.Lock()
 		stepCancel = nil

@@ -80,6 +80,14 @@ func (t *BudgetTracker) RemainingCost() float64 {
 	return r
 }
 
+// DisableTokenLimit clears the token cap while preserving usage counters.
+func (t *BudgetTracker) DisableTokenLimit() {
+	if t == nil || t.b == nil {
+		return
+	}
+	t.b.MaxTokens = 0
+}
+
 // Summary returns a human-readable budget usage string.
 func (t *BudgetTracker) Summary() string {
 	b := t.b

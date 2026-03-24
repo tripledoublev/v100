@@ -74,7 +74,11 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
 		}
 
-		if err := loop.StepWithImages(stepCtx, req.Text, images); err != nil {
+		for {
+			err := loop.StepWithImages(stepCtx, req.Text, images)
+			if err == nil {
+				return
+			}
 			if logger != nil {
 				logger.Printf("step error: %v", err)
 			}
@@ -84,6 +88,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
+				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
+					return tui.RequestConfirm("token budget", "Token budget hit ("+reason+"). Continue this interactive run without a token limit?")
+				}) {
+				case interactiveBudgetRetry:
+					continue
+				case interactiveBudgetContinue:
+					return
+				}
 				reason = "budget_exceeded"
 				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
 				tui.Quit()
@@ -104,6 +116,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 				return
 			}
 			// For non-fatal errors, continue (user can retry or exit)
+			return
 		}
 	}
 

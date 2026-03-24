@@ -244,9 +244,18 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		if input == "/quit" || input == "/exit" {
 			break
 		}
-		if err := loop.StepWithImages(ctx, input, images); err != nil {
+		err = loop.StepWithImages(ctx, input, images)
+		if err != nil {
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
+				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
+					return promptContinueWithoutTokenLimit(os.Stdin, os.Stderr, reason)
+				}) {
+				case interactiveBudgetRetry:
+					continue
+				case interactiveBudgetContinue:
+					continue
+				}
 				reason = "budget_exceeded"
 				break
 			}
@@ -296,16 +305,29 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		for _, img := range req.Images {
 			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
 		}
-		if err := loop.StepWithImages(ctx, req.Text, images); err != nil {
+		for {
+			err := loop.StepWithImages(ctx, req.Text, images)
+			if err == nil {
+				return
+			}
 			if logger != nil {
 				logger.Printf("step error: %v", err)
 			}
 			var budgetErr *core.ErrBudgetExceeded
 			if errors.As(err, &budgetErr) {
+				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
+					return tui.RequestConfirm("token budget", "Token budget hit ("+reason+"). Continue this interactive run without a token limit?")
+				}) {
+				case interactiveBudgetRetry:
+					continue
+				case interactiveBudgetContinue:
+					return
+				}
 				reason = "budget_exceeded"
 				_ = loop.EmitRunEnd(reason, "")
 				tui.Quit()
 			}
+			return
 		}
 	}
 
