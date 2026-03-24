@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package ui
@@ -17,18 +18,18 @@ import (
 const powerSupplyDir = "/sys/class/power_supply"
 
 func readDeviceStatus(now time.Time) deviceStatus {
+	return readDeviceStatusFromDir(powerSupplyDir, now)
+}
+
+func readDeviceStatusFromDir(dir string, now time.Time) deviceStatus {
 	status := deviceStatus{CheckedAt: now}
-	entries, err := os.ReadDir(powerSupplyDir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return status
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		base := filepath.Join(powerSupplyDir, entry.Name())
-		typ := readTrimmedFile(filepath.Join(base, "type"))
-		if !strings.EqualFold(typ, "battery") {
+		base := filepath.Join(dir, entry.Name())
+		if !isBatterySupply(base) {
 			continue
 		}
 		status.BatteryPresent = true
@@ -37,6 +38,23 @@ func readDeviceStatus(now time.Time) deviceStatus {
 		return status
 	}
 	return status
+}
+
+func isBatterySupply(base string) bool {
+	typ := readTrimmedFile(filepath.Join(base, "type"))
+	if strings.EqualFold(typ, "battery") {
+		return true
+	}
+	if v := readIntFile(filepath.Join(base, "capacity")); v >= 0 {
+		return true
+	}
+	if now, full := readIntFile(filepath.Join(base, "energy_now")), readIntFile(filepath.Join(base, "energy_full")); now >= 0 && full > 0 {
+		return true
+	}
+	if now, full := readIntFile(filepath.Join(base, "charge_now")), readIntFile(filepath.Join(base, "charge_full")); now >= 0 && full > 0 {
+		return true
+	}
+	return false
 }
 
 func readBatteryPercent(base string) int {
