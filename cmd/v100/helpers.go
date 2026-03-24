@@ -33,6 +33,27 @@ func loadConfig(cfgPath string) (*config.Config, error) {
 	return config.Load(cfgPath)
 }
 
+func configuredAgentNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func formatUnknownAgentRole(cfg *config.Config, role string) string {
+	role = strings.TrimSpace(role)
+	names := configuredAgentNames(cfg)
+	if len(names) == 0 {
+		return fmt.Sprintf("unknown agent role: %s (no roles configured; add [agents.<name>] to config)", role)
+	}
+	return fmt.Sprintf("unknown agent role: %s (available: %s; run `v100 agents`)", role, strings.Join(names, ", "))
+}
+
 func validateExecutionSafety(cfg *config.Config, confirmMode string, allowUnsafeHost bool) error {
 	if cfg == nil {
 		return nil
@@ -390,7 +411,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		if strings.TrimSpace(params.Agent) != "" {
 			cfgRole, ok := cfg.Agents[params.Agent]
 			if !ok {
-				return tools.AgentRunResult{OK: false, Result: "unknown agent role: " + params.Agent}
+				return tools.AgentRunResult{OK: false, Result: formatUnknownAgentRole(cfg, params.Agent)}
 			}
 			roleCfg = cfgRole
 		}

@@ -532,6 +532,10 @@ For a concrete operator loop with ten runnable tasks, sandbox drills, and a star
 
 ## Multi-agent quick examples
 
+```bash
+v100 agents
+```
+
 ```text
 Call dispatch with {"agent":"researcher","task":"Find replay implementation and list key files."}
 Call orchestrate with {"pattern":"fanout","tasks":[{"agent":"researcher","task":"Map replay"},{"agent":"reviewer","task":"List risks"}]}

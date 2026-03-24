@@ -75,6 +75,39 @@ func providersCmd(cfgPath *string) *cobra.Command {
 	}
 }
 
+func agentsCmd(cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "agents",
+		Short: "List configured agent roles",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			names := configuredAgentNames(cfg)
+			if len(names) == 0 {
+				fmt.Println("No agent roles configured. Add [agents.<name>] blocks to your config.")
+				return nil
+			}
+			for _, name := range names {
+				agent := cfg.Agents[name]
+				model := strings.TrimSpace(agent.Model)
+				if model == "" {
+					model = "(default)"
+				}
+				fmt.Printf("%-12s model=%-12s steps=%-3d tokens=%-6d tools=%s\n",
+					name,
+					model,
+					agent.BudgetSteps,
+					agent.BudgetTokens,
+					strings.Join(agent.Tools, ","),
+				)
+			}
+			return nil
+		},
+	}
+}
+
 func configInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "config init",
