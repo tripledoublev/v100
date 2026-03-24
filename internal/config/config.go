@@ -278,7 +278,7 @@ budget_cost_usd = 0.0
 tool_timeout_ms = 30000
 max_tool_calls_per_step = 50
 memory_mode = "auto"       # always | auto | off
-memory_max_tokens = 256    # approximate token budget for injected MEMORY.md context
+memory_max_tokens = 256    # approximate token budget for retrieved durable memory context
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
 max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
 compress_protect_recent = 6   # recent messages protected from targeted compression

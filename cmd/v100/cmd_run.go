@@ -324,7 +324,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&disableWatchdogs, "disable-watchdogs", false, "disable inspection/read-heavy watchdog interventions")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&memoryModeFlag, "memory-mode", "", "memory injection mode: always|auto|off")
-	cmd.Flags().IntVar(&memoryTokensFlag, "memory-max-tokens", 0, "approximate token budget for injected MEMORY.md context")
+	cmd.Flags().IntVar(&memoryTokensFlag, "memory-max-tokens", 0, "approximate token budget for retrieved durable-memory context")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable Bubble Tea TUI")
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")

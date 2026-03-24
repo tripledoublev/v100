@@ -160,8 +160,8 @@ func (t *blackboardSearchTool) Exec(ctx context.Context, call ToolCallContext, a
 		return failResult(start, "embedding query: "+err.Error()), nil
 	}
 
-	// 2. Load vector store
-	s := memory.NewVectorStore(call.RunID)
+	// 2. Load workspace-scoped vector store
+	s := memory.NewWorkspaceVectorStore(blackboardWorkspaceDir(call))
 	if err := s.Load(); err != nil {
 		return failResult(start, "load vector store: "+err.Error()), nil
 	}
@@ -221,8 +221,8 @@ func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, ar
 		return failResult(start, "embedding content: "+err.Error()), nil
 	}
 
-	// 2. Load vector store
-	s := memory.NewVectorStore(call.RunID)
+	// 2. Load workspace-scoped vector store
+	s := memory.NewWorkspaceVectorStore(blackboardWorkspaceDir(call))
 	_ = s.Load() // ignore error if not exists
 
 	// 3. Add item

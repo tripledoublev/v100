@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/memory"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -43,12 +45,12 @@ func (c *capturingProvider) Metadata(_ context.Context, model string) (providers
 
 type noopTool struct{}
 
-func (t noopTool) Name() string                     { return "noop" }
-func (t noopTool) Description() string              { return "no-op tool for tests" }
-func (t noopTool) InputSchema() json.RawMessage     { return json.RawMessage(`{"type":"object"}`) }
-func (t noopTool) OutputSchema() json.RawMessage    { return json.RawMessage(`{"type":"object"}`) }
-func (t noopTool) DangerLevel() tools.DangerLevel   { return tools.Safe }
-func (t noopTool) Effects() tools.ToolEffects       { return tools.ToolEffects{} }
+func (t noopTool) Name() string                   { return "noop" }
+func (t noopTool) Description() string            { return "no-op tool for tests" }
+func (t noopTool) InputSchema() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (t noopTool) OutputSchema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
+func (t noopTool) DangerLevel() tools.DangerLevel { return tools.Safe }
+func (t noopTool) Effects() tools.ToolEffects     { return tools.ToolEffects{} }
 func (t noopTool) Exec(_ context.Context, _ tools.ToolCallContext, _ json.RawMessage) (tools.ToolResult, error) {
 	return tools.ToolResult{OK: true, Output: "ok"}, nil
 }
@@ -464,14 +466,14 @@ func TestTargetedCompressionBudgetAccounted(t *testing.T) {
 
 // ── Memory injection ──────────────────────────────────────────────────────────
 
-// TestMemoryInjectedIntoProviderCall verifies that when Policy.MemoryPath points
-// to an existing MEMORY.md, its contents appear as a reference assistant message
-// when the current turn suggests prior-context retrieval.
+// TestMemoryInjectedIntoProviderCall verifies that relevant memory entries are
+// retrieved into the provider call instead of injecting the full MEMORY.md body.
 func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	dir := t.TempDir()
 	memPath := filepath.Join(dir, "MEMORY.md")
-	memContent := "- 2026-03-04: decided to use system role for summaries"
-	if err := os.WriteFile(memPath, []byte(memContent), 0o644); err != nil {
+	relevant := "- 2026-03-04: decided to use system role for summaries"
+	unrelated := "- 2026-03-05: local bench note about CSS polish"
+	if err := os.WriteFile(memPath, []byte(strings.Join([]string{relevant, unrelated}, "\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -500,7 +502,7 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 		ConfirmFn: func(_, _ string) bool { return true },
 	}
 
-	if err := loop.Step(context.Background(), "what do you remember?"); err != nil {
+	if err := loop.Step(context.Background(), "what do you remember about summaries?"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -511,9 +513,15 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	msgs := prov.requests[0].Messages
 	found := false
 	for _, m := range msgs {
-		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+		if m.Role == "assistant" && strings.Contains(m.Content, relevant) {
+			if !strings.Contains(m.Content, "Retrieved durable memory relevant to this turn") {
+				t.Fatalf("memory reference message missing retrieval header: %q", m.Content)
+			}
 			if !strings.Contains(m.Content, "background context only") {
 				t.Fatalf("memory reference message missing warning: %q", m.Content)
+			}
+			if strings.Contains(m.Content, unrelated) {
+				t.Fatalf("unexpected unrelated memory entry in retrieved context: %q", m.Content)
 			}
 			found = true
 			break
@@ -610,7 +618,7 @@ func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
 
 	msgs := prov.requests[0].Messages
 	for _, m := range msgs {
-		if m.Role == "assistant" && strings.Contains(m.Content, "Reference notes from MEMORY.md") {
+		if m.Role == "assistant" && strings.Contains(m.Content, "Retrieved durable memory relevant to this turn") {
 			if !strings.Contains(m.Content, "[truncated]") {
 				t.Fatalf("expected truncation marker in %q", m.Content)
 			}
@@ -618,6 +626,68 @@ func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
 		}
 	}
 	t.Fatal("expected memory reference assistant message")
+}
+
+func TestMemoryRetrievalIncludesWorkspaceVectorEntries(t *testing.T) {
+	dir := t.TempDir()
+	memPath := filepath.Join(dir, "MEMORY.md")
+	if err := os.WriteFile(memPath, []byte("- 2026-03-04: fallback note"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := memory.NewWorkspaceVectorStore(dir)
+	if err := store.Add(memory.MemoryItem{
+		ID:      "mem-1",
+		Content: "Store replay summaries under artifacts/ for later inspection",
+		Metadata: memory.Metadata{
+			Tags: map[string]string{"scope": "workspace", "topic": "replay"},
+		},
+		TS: time.Date(2026, 3, 24, 3, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "ok"}},
+	}
+
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	pol := policy.Default()
+	pol.MemoryPath = memPath
+	pol.MemoryMode = "always"
+
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 100_000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+	}
+
+	if err := loop.Step(context.Background(), "what should we remember about replay artifacts?"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, m := range prov.requests[0].Messages {
+		if m.Role == "assistant" && strings.Contains(m.Content, "Store replay summaries under artifacts/") {
+			if !strings.Contains(m.Content, "source=workspace-memory") {
+				t.Fatalf("expected workspace-memory source metadata in %q", m.Content)
+			}
+			if !strings.Contains(m.Content, "tags=scope=workspace,topic=replay") {
+				t.Fatalf("expected tags metadata in %q", m.Content)
+			}
+			return
+		}
+	}
+	t.Fatal("expected workspace vector memory in provider request")
 }
 
 func TestMemorySkippedInAutoModeWhenTurnLooksUnrelated(t *testing.T) {

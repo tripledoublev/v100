@@ -7,7 +7,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tripledoublev/v100/internal/providers"
 )
+
+type blackboardEmbeddingProvider struct{}
+
+func (p *blackboardEmbeddingProvider) Name() string { return "test" }
+func (p *blackboardEmbeddingProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{}
+}
+func (p *blackboardEmbeddingProvider) Complete(context.Context, providers.CompleteRequest) (providers.CompleteResponse, error) {
+	return providers.CompleteResponse{}, nil
+}
+func (p *blackboardEmbeddingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{Embedding: []float32{1, 0}}, nil
+}
+func (p *blackboardEmbeddingProvider) Metadata(context.Context, string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{}, nil
+}
 
 func TestBlackboardReadWriteShareWorkspaceAcrossRuns(t *testing.T) {
 	workspace := t.TempDir()
@@ -81,5 +99,59 @@ func TestAppendBlackboardDispatchUsesWorkspaceBlackboard(t *testing.T) {
 	}
 	if !strings.Contains(text, "- agent: researcher") {
 		t.Fatalf("blackboard entry missing agent: %q", text)
+	}
+}
+
+func TestBlackboardVectorStoreSharesWorkspaceAcrossRuns(t *testing.T) {
+	workspace := t.TempDir()
+	prov := &blackboardEmbeddingProvider{}
+
+	args, err := json.Marshal(map[string]any{
+		"content": "remember the replay artifact convention",
+		"tags":    map[string]string{"scope": "workspace"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	storeRes, err := BlackboardStore().Exec(context.Background(), ToolCallContext{
+		RunID:            "run-1",
+		WorkspaceDir:     t.TempDir(),
+		HostWorkspaceDir: workspace,
+		Provider:         prov,
+	}, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !storeRes.OK {
+		t.Fatalf("blackboard_store failed: %s", storeRes.Output)
+	}
+
+	searchArgs, err := json.Marshal(map[string]any{
+		"query": "replay artifact",
+		"limit": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	searchRes, err := BlackboardSearch().Exec(context.Background(), ToolCallContext{
+		RunID:            "run-2",
+		WorkspaceDir:     t.TempDir(),
+		HostWorkspaceDir: workspace,
+		Provider:         prov,
+	}, searchArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !searchRes.OK {
+		t.Fatalf("blackboard_search failed: %s", searchRes.Output)
+	}
+	if !strings.Contains(searchRes.Output, "remember the replay artifact convention") {
+		t.Fatalf("blackboard_search output = %q, want shared workspace vector memory", searchRes.Output)
+	}
+
+	if _, err := os.Stat(filepath.Join(workspace, "blackboard.vectors.json")); err != nil {
+		t.Fatalf("expected workspace vector store file: %v", err)
 	}
 }

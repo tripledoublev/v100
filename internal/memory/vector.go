@@ -47,6 +47,14 @@ func NewVectorStore(runID string) *VectorStore {
 	}
 }
 
+// NewWorkspaceVectorStore initializes a store scoped to a workspace directory.
+func NewWorkspaceVectorStore(workspaceDir string) *VectorStore {
+	return &VectorStore{
+		runPath: filepath.Join(workspaceDir, "blackboard.vectors.json"),
+		items:   []MemoryItem{},
+	}
+}
+
 // Load reads existing vectors from disk.
 func (s *VectorStore) Load() error {
 	data, err := os.ReadFile(s.runPath)
@@ -75,6 +83,13 @@ func (s *VectorStore) Save() error {
 func (s *VectorStore) Add(item MemoryItem) error {
 	s.items = append(s.items, item)
 	return s.Save()
+}
+
+// Items returns a copy of the currently loaded items.
+func (s *VectorStore) Items() []MemoryItem {
+	out := make([]MemoryItem, len(s.items))
+	copy(out, s.items)
+	return out
 }
 
 // Search returns top-k items sorted by cosine similarity to the query embedding.
