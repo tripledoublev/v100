@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -70,6 +71,35 @@ func LoadAuditEntries(workspaceDir string) ([]AuditEntry, error) {
 	return entries, nil
 }
 
+func ForgetAuditEntry(workspaceDir, id string) error {
+	if strings.HasPrefix(id, "MEMORY.md:") {
+		lineNo, err := strconv.Atoi(strings.TrimPrefix(id, "MEMORY.md:"))
+		if err != nil {
+			return fmt.Errorf("parse memory line: %w", err)
+		}
+		return forgetManualAuditEntry(filepath.Join(workspaceDir, "MEMORY.md"), lineNo)
+	}
+
+	store := NewWorkspaceVectorStore(workspaceDir)
+	if err := store.Load(); err != nil {
+		return err
+	}
+	kept := store.items[:0]
+	removed := false
+	for _, item := range store.items {
+		if item.ID == id {
+			removed = true
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if !removed {
+		return fmt.Errorf("memory entry %q not found", id)
+	}
+	store.items = append([]MemoryItem(nil), kept...)
+	return store.Save()
+}
+
 func parseManualAuditEntries(text string) []AuditEntry {
 	lines := strings.Split(text, "\n")
 	entries := make([]AuditEntry, 0, len(lines))
@@ -98,4 +128,21 @@ func parseManualAuditEntries(text string) []AuditEntry {
 		})
 	}
 	return entries
+}
+
+func forgetManualAuditEntry(path string, lineNo int) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	if lineNo <= 0 || lineNo > len(lines) {
+		return fmt.Errorf("memory entry line %d not found", lineNo)
+	}
+	lines = append(lines[:lineNo-1], lines[lineNo:]...)
+	text := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	if text != "" {
+		text += "\n"
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
 }

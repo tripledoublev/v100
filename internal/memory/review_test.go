@@ -50,3 +50,46 @@ func TestLoadAuditEntriesIncludesManualAndWorkspaceMemory(t *testing.T) {
 		t.Fatal("missing workspace vector audit entry")
 	}
 }
+
+func TestForgetAuditEntryRemovesWorkspaceVectorEntry(t *testing.T) {
+	workspace := t.TempDir()
+	store := NewWorkspaceVectorStore(workspace)
+	if err := store.Add(MemoryItem{ID: "mem-1", Content: "persist replay artifacts"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ForgetAuditEntry(workspace, "mem-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := LoadAuditEntries(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("LoadAuditEntries() returned %d entries after forget, want 0", len(entries))
+	}
+}
+
+func TestForgetAuditEntryRemovesManualMemoryLine(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "MEMORY.md")
+	if err := os.WriteFile(path, []byte("- first note\n- second note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ForgetAuditEntry(workspace, "MEMORY.md:1"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "first note") {
+		t.Fatalf("manual memory line was not removed: %q", string(data))
+	}
+	if !strings.Contains(string(data), "second note") {
+		t.Fatalf("manual memory removal corrupted remaining content: %q", string(data))
+	}
+}

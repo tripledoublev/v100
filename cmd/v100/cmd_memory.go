@@ -6,11 +6,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tripledoublev/v100/internal/memory"
+	"github.com/tripledoublev/v100/internal/providers"
 )
+
+var buildMemoryProvider = buildProvider
 
 func memoryCmd(cfgPath *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -19,6 +23,8 @@ func memoryCmd(cfgPath *string) *cobra.Command {
 	}
 	cmd.AddCommand(
 		memoryListCmd(cfgPath),
+		memoryRememberCmd(cfgPath),
+		memoryForgetCmd(cfgPath),
 		memoryShowCmd(cfgPath),
 	)
 	return cmd
@@ -71,6 +77,80 @@ func memoryShowCmd(cfgPath *string) *cobra.Command {
 				}
 			}
 			return fmt.Errorf("memory entry %q not found in %s", id, filepath.Base(workspace))
+		},
+	}
+}
+
+func memoryRememberCmd(cfgPath *string) *cobra.Command {
+	var tagFlags []string
+	cmd := &cobra.Command{
+		Use:   "remember <text>",
+		Short: "Store a durable memory entry in the current workspace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			prov, err := buildMemoryProvider(cfg, cfg.Defaults.Provider)
+			if err != nil {
+				return err
+			}
+			workspace, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			content := strings.TrimSpace(args[0])
+			emb, err := prov.Embed(cmd.Context(), providers.EmbedRequest{Text: content})
+			if err != nil {
+				return err
+			}
+			store := memory.NewWorkspaceVectorStore(workspace)
+			_ = store.Load()
+			tags := parseTags(tagFlags)
+			if _, ok := tags["scope"]; !ok {
+				tags["scope"] = "workspace"
+			}
+			if _, ok := tags["origin"]; !ok {
+				tags["origin"] = "cli:remember"
+			}
+			if _, ok := tags["confidence"]; !ok {
+				tags["confidence"] = "manual"
+			}
+			item := memory.MemoryItem{
+				ID:        fmt.Sprintf("mem-%x", time.Now().UnixNano()),
+				Content:   content,
+				Embedding: emb.Embedding,
+				Metadata:  memory.Metadata{Tags: tags},
+				TS:        time.Now().UTC(),
+			}
+			if err := store.Add(item); err != nil {
+				return err
+			}
+			fmt.Println("stored memory entry: " + item.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringArrayVar(&tagFlags, "tag", nil, "memory tag in key=value form")
+	return cmd
+}
+
+func memoryForgetCmd(cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "forget <id>",
+		Short: "Remove a durable memory entry by ID",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			workspace, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			id := strings.TrimSpace(args[0])
+			if err := memory.ForgetAuditEntry(workspace, id); err != nil {
+				return err
+			}
+			fmt.Println("forgot memory entry: " + id)
+			return nil
 		},
 	}
 }
