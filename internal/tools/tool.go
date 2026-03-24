@@ -27,16 +27,17 @@ type ToolEffects struct {
 
 // ToolCallContext provides runtime context to a tool execution.
 type ToolCallContext struct {
-	RunID           string
-	StepID          string
-	CallID          string
-	WorkspaceDir    string // host path to active workspace (sandbox if enabled)
-	TimeoutMS       int
-	Provider        providers.Provider
-	Registry        *Registry        // access to other enabled tools
-	Session         executor.Session // active sandbox session
-	Mapper          PathTranslator   // bidirectional path mapping
-	EmitOutputDelta func(stream, text string) error
+	RunID            string
+	StepID           string
+	CallID           string
+	WorkspaceDir     string // host path to active workspace (sandbox if enabled)
+	HostWorkspaceDir string // original source workspace for shared state across runs
+	TimeoutMS        int
+	Provider         providers.Provider
+	Registry         *Registry        // access to other enabled tools
+	Session          executor.Session // active sandbox session
+	Mapper           PathTranslator   // bidirectional path mapping
+	EmitOutputDelta  func(stream, text string) error
 }
 
 // PathTranslator defines the subset of core.PathMapper needed by tools.

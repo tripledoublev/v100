@@ -182,10 +182,6 @@ func runCmd(cfgPath *string) *cobra.Command {
 				return fmt.Errorf("create run dir: %w", err)
 			}
 			_ = os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o755)
-			blackboardPath := filepath.Join(runDir, "blackboard.md")
-			if _, err := os.Stat(blackboardPath); os.IsNotExist(err) {
-				_ = os.WriteFile(blackboardPath, []byte("# Blackboard\n\n"), 0o644)
-			}
 
 			// Set workspace grounding
 			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)

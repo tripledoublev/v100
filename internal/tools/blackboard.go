@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/memory"
@@ -24,7 +25,7 @@ func BlackboardStore() Tool  { return &blackboardStoreTool{} }
 
 func (t *blackboardReadTool) Name() string { return "blackboard_read" }
 func (t *blackboardReadTool) Description() string {
-	return "Read shared run blackboard content (legacy text format)."
+	return "Read shared workspace blackboard content."
 }
 func (t *blackboardReadTool) DangerLevel() DangerLevel { return Safe }
 func (t *blackboardReadTool) Effects() ToolEffects     { return ToolEffects{} }
@@ -36,7 +37,7 @@ func (t *blackboardReadTool) OutputSchema() json.RawMessage {
 }
 func (t *blackboardReadTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	start := time.Now()
-	path := blackboardPath(call.RunID)
+	path := blackboardPath(blackboardWorkspaceDir(call))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -53,7 +54,7 @@ func (t *blackboardReadTool) Exec(ctx context.Context, call ToolCallContext, arg
 
 func (t *blackboardWriteTool) Name() string { return "blackboard_write" }
 func (t *blackboardWriteTool) Description() string {
-	return "Append or overwrite shared run blackboard content (legacy text format)."
+	return "Append or overwrite shared workspace blackboard content."
 }
 func (t *blackboardWriteTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *blackboardWriteTool) Effects() ToolEffects     { return ToolEffects{MutatesRunState: true} }
@@ -83,7 +84,7 @@ func (t *blackboardWriteTool) Exec(ctx context.Context, call ToolCallContext, ar
 	if a.Append != nil {
 		appendMode = *a.Append
 	}
-	path := blackboardPath(call.RunID)
+	path := blackboardPath(blackboardWorkspaceDir(call))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return failResult(start, "mkdir: "+err.Error()), nil
 	}
@@ -247,6 +248,19 @@ func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, ar
 	}, nil
 }
 
-func blackboardPath(runID string) string {
-	return filepath.Join("runs", runID, "blackboard.md")
+func blackboardWorkspaceDir(call ToolCallContext) string {
+	if root := strings.TrimSpace(call.HostWorkspaceDir); root != "" {
+		return root
+	}
+	if root := strings.TrimSpace(call.WorkspaceDir); root != "" {
+		return root
+	}
+	if runID := strings.TrimSpace(call.RunID); runID != "" {
+		return filepath.Join("runs", runID)
+	}
+	return "runs"
+}
+
+func blackboardPath(workspaceDir string) string {
+	return filepath.Join(workspaceDir, "blackboard.md")
 }

@@ -389,8 +389,8 @@ In deterministic mode, model responses and tool outputs are replayed from trace 
 | `agent` | **dangerous** | Spawn a bounded sub-agent run |
 | `dispatch` | **dangerous** | Dispatch a task to a named agent role |
 | `orchestrate` | **dangerous** | Coordinate multiple dispatches (fanout/pipeline) |
-| `blackboard_read` | safe | Read shared run blackboard |
-| `blackboard_write` | **dangerous** | Append/overwrite shared run blackboard |
+| `blackboard_read` | safe | Read shared workspace blackboard |
+| `blackboard_write` | **dangerous** | Append/overwrite shared workspace blackboard |
 | `reflect` | safe | Meta-cognitive self-critique and plan evaluation |
 | `blackboard_search` | safe | Search vectorized blackboard memory |
 | `blackboard_store` | **dangerous** | Store a record in vectorized blackboard |
@@ -464,10 +464,11 @@ context_limit = 80000
 runs/<run_id>/
   trace.jsonl     # append-only event log (21 event types)
   meta.json       # run metadata: name/tags/provider/model/score
-  blackboard.md   # shared scratchpad for multi-agent coordination
   artifacts/      # per-run artifact files
   tui.debug.log   # optional, if --tui-debug
 ```
+
+The shared blackboard lives at `blackboard.md` in the active workspace root, so notes persist across runs in the same project.
 
 ## Evaluation workflow
 

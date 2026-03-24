@@ -112,7 +112,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 			if !res.OK {
 				ok = false
 			}
-			_ = appendBlackboardDispatch(call.RunID, a.Pattern, task.Agent, task.Task, res)
+			_ = appendBlackboardDispatch(blackboardWorkspaceDir(call), a.Pattern, task.Agent, task.Task, res)
 		}
 	} else {
 		sem := make(chan struct{}, a.MaxParallel)
@@ -136,7 +136,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 					WorkspaceDir: call.WorkspaceDir,
 				})
 				results[i] = res
-				_ = appendBlackboardDispatch(call.RunID, a.Pattern, task.Agent, task.Task, res)
+				_ = appendBlackboardDispatch(blackboardWorkspaceDir(call), a.Pattern, task.Agent, task.Task, res)
 			}()
 		}
 		wg.Wait()
@@ -191,8 +191,8 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 	}, nil
 }
 
-func appendBlackboardDispatch(runID, pattern, agent, task string, res AgentRunResult) error {
-	path := blackboardPath(runID)
+func appendBlackboardDispatch(workspaceDir, pattern, agent, task string, res AgentRunResult) error {
+	path := blackboardPath(workspaceDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

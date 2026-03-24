@@ -315,16 +315,21 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		}
 	}
 	var deltaMu sync.Mutex
+	hostWorkspaceDir := l.Run.Dir
+	if l.Mapper != nil && strings.TrimSpace(l.Mapper.HostRoot) != "" {
+		hostWorkspaceDir = l.Mapper.HostRoot
+	}
 	callCtx := tools.ToolCallContext{
-		RunID:        l.Run.ID,
-		StepID:       stepID,
-		CallID:       tc.ID,
-		WorkspaceDir: l.Run.Dir,
-		TimeoutMS:    timeout,
-		Provider:     l.Provider,
-		Registry:     l.Tools,
-		Session:      l.Session,
-		Mapper:       l.Mapper,
+		RunID:            l.Run.ID,
+		StepID:           stepID,
+		CallID:           tc.ID,
+		WorkspaceDir:     l.Run.Dir,
+		HostWorkspaceDir: hostWorkspaceDir,
+		TimeoutMS:        timeout,
+		Provider:         l.Provider,
+		Registry:         l.Tools,
+		Session:          l.Session,
+		Mapper:           l.Mapper,
 		EmitOutputDelta: func(stream, text string) error {
 			if strings.TrimSpace(text) == "" {
 				return nil
