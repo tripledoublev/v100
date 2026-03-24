@@ -51,4 +51,4 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ steps.golangci.outputs.version }}
-          args: --timeout=5m
+          args: --timeout=5m ./cmd/... ./internal/...

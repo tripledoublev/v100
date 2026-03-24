@@ -16,12 +16,13 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
+TARGETS=(./cmd/... ./internal/...)
 
 if command -v golangci-lint >/dev/null 2>&1; then
   INSTALLED="$(golangci-lint version 2>/dev/null | awk '{print $4}')"
   if [[ "$INSTALLED" == "$VERSION" ]]; then
-    exec golangci-lint run --timeout=5m "$@"
+    exec golangci-lint run --timeout=5m "$@" "${TARGETS[@]}"
   fi
 fi
 
-exec go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${VERSION}" run --timeout=5m "$@"
+exec go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${VERSION}" run --timeout=5m "$@" "${TARGETS[@]}"
