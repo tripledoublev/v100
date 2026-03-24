@@ -224,6 +224,56 @@ func detectRadioPlayer() string {
 	return ""
 }
 
+func normalizeSongMatchPart(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	replacer := strings.NewReplacer(
+		"/", " ",
+		"\\", " ",
+		"_", " ",
+		"-", " ",
+		"[", " ",
+		"]", " ",
+		"(", " ",
+		")", " ",
+		".", " ",
+	)
+	s = replacer.Replace(s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func findExistingDownloadedSong(dir, artist, title string) (string, bool) {
+	titleNorm := normalizeSongMatchPart(title)
+	if titleNorm == "" {
+		return "", false
+	}
+	artistNorm := normalizeSongMatchPart(artist)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(entry.Name()), ".mp3") {
+			continue
+		}
+
+		base := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		baseNorm := normalizeSongMatchPart(base)
+		if !strings.Contains(baseNorm, titleNorm) {
+			continue
+		}
+		if artistNorm == "" || strings.Contains(baseNorm, artistNorm) {
+			return entry.Name(), true
+		}
+	}
+
+	return "", false
+}
+
 func fetchNowPlayingCmd(stationType, stationID string) tea.Cmd {
 	if stationType == "" || stationID == "" {
 		return nil
@@ -243,11 +293,11 @@ func (m *TUIModel) startDownloadCmd() tea.Cmd {
 		m.radioErr = "no radio station configured"
 		return nil
 	}
-	
+
 	// Capture current metadata from the model to ensure consistency with UI
 	artist := m.radioArtist
 	title := m.radioTitle
-	
+
 	m.statusMode = "downloading"
 	m.statusLine = "initializing download..."
 	m.radioErr = ""
@@ -261,33 +311,42 @@ func (m *TUIModel) startDownloadCmd() tea.Cmd {
 				return downloadDoneMsg{err: "now-playing unavailable"}
 			}
 		}
-		
+
 		song := strings.TrimSpace(artist + " - " + title)
 		query := strings.TrimSpace(artist + " " + title + " audio")
 		if query == "" || query == "NTS audio" {
 			return downloadDoneMsg{err: "empty or invalid song metadata"}
 		}
-		
+
 		if _, err := exec.LookPath("yt-dlp"); err != nil {
 			return downloadDoneMsg{err: "yt-dlp not installed"}
 		}
-		
+
 		dir := "/home/v/Music/favorites"
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return downloadDoneMsg{err: "cannot create favorites folder"}
 		}
-		
+
+		// Check if this song is already downloaded
+		if existing, ok := findExistingDownloadedSong(dir, artist, title); ok {
+			return downloadDoneMsg{
+				artist: artist,
+				title:  title,
+				err:    "already downloaded: " + existing,
+			}
+		}
+
 		metaPath := filepath.Join(dir, "favorites.txt")
 		if f, err := os.OpenFile(metaPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 			_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " | " + song + "\n")
 			_ = f.Close()
 		}
-		
+
 		outTmpl := filepath.Join(dir, "%(title)s [%(id)s].%(ext)s")
 		cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "-o", outTmpl, "ytsearch1:"+query)
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
-		
+
 		if err := cmd.Run(); err != nil {
 			return downloadDoneMsg{err: "yt-dlp error: " + err.Error()}
 		}
@@ -447,7 +506,7 @@ func fetchNTSNowPlaying(channel string) (string, string, error) {
 	}
 
 	elapsed := int(time.Since(channelData.Now.StartTimestamp).Seconds())
-	
+
 	// Find the track with the largest offset <= elapsed
 	bestIdx := -1
 	for i, t := range tData.Results {
@@ -468,18 +527,18 @@ func fetchNTSNowPlaying(channel string) (string, string, error) {
 func (m *TUIModel) radioSelectView() string {
 	var sb strings.Builder
 	sb.WriteString(tuiHeaderStyle.Render("Radio Station Selector") + "\n\n")
-	
+
 	for i, s := range availableStations {
 		prefix := "  "
 		if i == m.radioSelectIdx {
 			prefix = "> "
 		}
-		
+
 		nameStr := s.Name
 		if m.radioURL == s.URL {
 			nameStr += " (playing)"
 		}
-		
+
 		line := prefix + nameStr
 		if i == m.radioSelectIdx {
 			sb.WriteString(tuiInputActiveStyle.Render(line) + "\n")
@@ -489,9 +548,9 @@ func (m *TUIModel) radioSelectView() string {
 			sb.WriteString(tuiHeaderDimStyle.Render(line) + "\n")
 		}
 	}
-	
+
 	sb.WriteString("\n" + tuiHeaderDimStyle.Render("  ↑/↓: navigate   Enter: select   Esc: cancel"))
-	
+
 	box := tuiPaneStyle.Render(sb.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
