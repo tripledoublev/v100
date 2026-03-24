@@ -38,6 +38,7 @@ func rootCmd() *cobra.Command {
 		toolsCmd(&cfgPath),
 		providersCmd(&cfgPath),
 		agentsCmd(&cfgPath),
+		memoryCmd(&cfgPath),
 		configInitCmd(),
 		doctorCmd(&cfgPath),
 		installCmd(),
