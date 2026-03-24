@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -154,5 +155,43 @@ func TestShSanitizedEnvironmentStillHasWorkingPath(t *testing.T) {
 	}
 	if strings.TrimSpace(res.Stdout) != "ok" {
 		t.Fatalf("expected PATH-preserved env to find core commands, got %q", res.Stdout)
+	}
+}
+
+func TestShOutputIncludesExplicitLineBoundaries(t *testing.T) {
+	sourceDir := t.TempDir()
+	session := startHostSession(t, sourceDir)
+	sandboxDir := session.Workspace()
+
+	call := tools.ToolCallContext{
+		WorkspaceDir: sourceDir,
+		Session:      session,
+		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
+	}
+	args, err := json.Marshal(map[string]any{
+		"cmd": "printf '%s\\n' \"$PWD\"; printf 'total 3\\nfoo\\n'",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tools.Sh().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("sh failed: %s", res.Output)
+	}
+
+	var payload struct {
+		StdoutLines []string `json:"stdout_lines"`
+	}
+	if err := json.Unmarshal([]byte(res.Output), &payload); err != nil {
+		t.Fatalf("tool output was not valid JSON: %v\n%s", err, res.Output)
+	}
+
+	want := []string{"/workspace", "total 3", "foo"}
+	if !reflect.DeepEqual(payload.StdoutLines, want) {
+		t.Fatalf("stdout_lines = %v, want %v", payload.StdoutLines, want)
 	}
 }

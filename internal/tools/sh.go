@@ -49,7 +49,9 @@ func (t *shTool) OutputSchema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"stdout":   {"type": "string"},
+			"stdout_lines": {"type": "array", "items": {"type": "string"}},
 			"stderr":   {"type": "string"},
+			"stderr_lines": {"type": "array", "items": {"type": "string"}},
 			"exit_code": {"type": "integer"}
 		}
 	}`)
@@ -96,11 +98,19 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		return failResult(start, "exec error: "+err.Error()), nil
 	}
 
-	out, err := json.Marshal(map[string]interface{}{
+	payload := map[string]any{
 		"stdout":    res.Stdout,
 		"stderr":    res.Stderr,
 		"exit_code": res.ExitCode,
-	})
+	}
+	if lines := outputLines(res.Stdout); len(lines) > 0 {
+		payload["stdout_lines"] = lines
+	}
+	if lines := outputLines(res.Stderr); len(lines) > 0 {
+		payload["stderr_lines"] = lines
+	}
+
+	out, err := json.Marshal(payload)
 	if err != nil {
 		return failResult(start, "marshal result: "+err.Error()), nil
 	}
@@ -111,6 +121,15 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		Stderr:     res.Stderr,
 		DurationMS: time.Since(start).Milliseconds(),
 	}), nil
+}
+
+func outputLines(s string) []string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 const sanitizedShellWrapperScript = `
