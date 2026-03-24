@@ -448,7 +448,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			stepMu.Lock()
 			if stepCancel != nil {
 				signalInterrupted.Store(true)
-				fmt.Fprintln(os.Stderr, ui.Warn("\ninterrupted by signal"))
+				printInterruptWarning(os.Stderr, "interrupted by signal")
 				stepCancel()
 				stepCancel = nil
 				stepMu.Unlock()
@@ -490,7 +490,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 						if b[0] == 27 { // Escape
 							stepMu.Lock()
 							if stepCancel != nil {
-								fmt.Fprintln(os.Stderr, ui.Warn("\ninterrupted by Escape"))
+								printInterruptWarning(os.Stderr, "interrupted by Escape")
 								stepCancel()
 								stepCancel = nil
 							}
@@ -679,6 +679,11 @@ func wrapConfirmFnWithActivity(confirmFn core.ConfirmFn, active *atomic.Bool) co
 		defer active.Store(false)
 		return confirmFn(toolName, args)
 	}
+}
+
+func printInterruptWarning(w io.Writer, message string) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.Warn(message))
 }
 
 func runCLIInput(ctx context.Context, loop *core.Loop, input string, images []providers.ImageAttachment, planMode bool) error {

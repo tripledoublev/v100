@@ -85,6 +85,32 @@ func TestCLIRendererUsesPlainToolResultStatus(t *testing.T) {
 	}
 }
 
+func TestCLIRendererShowsSystemWarningBeforeRunEnd(t *testing.T) {
+	r := NewCLIRenderer()
+
+	out := captureStdout(t, func() {
+		r.RenderEvent(eventWithPayload(t, core.EventUserMsg, core.UserMsgPayload{
+			Source:  "system",
+			Content: "token budget 50% consumed",
+		}))
+		r.RenderEvent(eventWithPayload(t, core.EventRunEnd, core.RunEndPayload{
+			Reason:     "budget_tokens",
+			UsedSteps:  1,
+			UsedTokens: 50000,
+		}))
+	})
+
+	plain := stripANSI(out)
+	warnIdx := strings.Index(plain, "token budget 50% consumed")
+	endIdx := strings.Index(plain, "run end")
+	if warnIdx == -1 || endIdx == -1 {
+		t.Fatalf("expected both warning and run end in output, got %q", plain)
+	}
+	if warnIdx > endIdx {
+		t.Fatalf("expected warning before run end, got %q", plain)
+	}
+}
+
 func TestPromptWithImagesReadsPlainCLIInput(t *testing.T) {
 	old := os.Stdin
 	r, w, err := os.Pipe()
