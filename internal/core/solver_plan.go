@@ -114,9 +114,7 @@ func (s *PlanExecuteSolver) replan(ctx context.Context, l *Loop, stepID string, 
 
 func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, prompt string) (string, error) {
 	// Maybe compress history before calling the provider.
-	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
-	}
+	_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
 
 	msgs := append([]providers.Message{}, l.buildMessagesForStep(stepID)...)
 	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})

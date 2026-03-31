@@ -151,6 +151,74 @@ func TestCompressionTriggeredAboveThreshold(t *testing.T) {
 	if firstRole != "system" {
 		t.Errorf("summarization request first message role = %q, want system", firstRole)
 	}
+
+	events, err := core.ReadAll(loop.Run.TraceFile)
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Type != core.EventCompress {
+			continue
+		}
+		var payload core.CompressPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal compress payload: %v", err)
+		}
+		if payload.Trigger == "context_limit" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected context_limit compression event")
+	}
+}
+
+func TestCompressionTriggeredByTokenBudgetPressure(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "summary for budget headroom", Usage: providers.Usage{InputTokens: 120, OutputTokens: 20}},
+			{AssistantText: "main response"},
+		},
+	}
+	loop := newCompressLoop(t, prov, 0)
+	loop.Budget = core.NewBudgetTracker(&core.Budget{
+		MaxSteps:   50,
+		MaxTokens:  3_000,
+		UsedTokens: 2_300,
+	})
+	prefillMessages(loop, 12, 400)
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(prov.requests) < 2 {
+		t.Fatalf("expected >= 2 provider calls (budget compression + completion), got %d", len(prov.requests))
+	}
+
+	events, err := core.ReadAll(loop.Run.TraceFile)
+	if err != nil {
+		t.Fatalf("read trace: %v", err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Type != core.EventCompress {
+			continue
+		}
+		var payload core.CompressPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal compress payload: %v", err)
+		}
+		if payload.Trigger == "budget_tokens" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected budget_tokens compression event")
+	}
 }
 
 // ── Role correctness ─────────────────────────────────────────────────────────

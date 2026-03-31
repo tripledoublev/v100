@@ -157,6 +157,7 @@ type CompressPayload struct {
 	TokensBefore       int     `json:"tokens_before"`
 	TokensAfter        int     `json:"tokens_after"`
 	CostUSD            float64 `json:"cost_usd"`
+	Trigger            string  `json:"trigger,omitempty"`             // "context_limit" or "budget_tokens"
 	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
 	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
 	MessagesFailed     int     `json:"messages_failed,omitempty"`     // compression failures

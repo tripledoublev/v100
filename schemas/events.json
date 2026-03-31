@@ -60,7 +60,7 @@
     "agent.start":       { "properties": { "agent_id": { "type": "string" }, "task": { "type": "string" } } },
     "agent.dispatch":    { "properties": { "agent": { "type": "string" }, "task": { "type": "string" }, "model": { "type": "string" } } },
     "agent.end":         { "properties": { "agent_id": { "type": "string" }, "result": { "type": "string" } } },
-    "context.compress":  { "properties": { "before_tokens": { "type": "integer" }, "after_tokens": { "type": "integer" } } },
+    "context.compress":  { "properties": { "messages_before": { "type": "integer" }, "messages_after": { "type": "integer" }, "tokens_before": { "type": "integer" }, "tokens_after": { "type": "integer" }, "cost_usd": { "type": "number" }, "trigger": { "type": "string" }, "strategy": { "type": "string" }, "messages_compressed": { "type": "integer" }, "messages_failed": { "type": "integer" }, "tokens_saved": { "type": "integer" }, "duration_ms": { "type": "integer" }, "provider_model": { "type": "string" } } },
     "step.summary":      { "properties": { "step": { "type": "integer" }, "tokens": { "type": "integer" }, "tool_calls": { "type": "integer" } } },
     "solver.plan":       { "properties": { "plan": { "type": "string" } } },
     "solver.replan":     { "properties": { "attempt": { "type": "integer" }, "reason": { "type": "string" }, "plan": { "type": "string" } } },

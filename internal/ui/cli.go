@@ -73,7 +73,7 @@ func (r *CLIRenderer) stopModelSpinner() bool {
 
 // RenderEvent prints a human-readable, colorized representation of an event.
 func (r *CLIRenderer) RenderEvent(ev core.Event) {
-	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
+	ts := styleMuted.Render(ev.TS.Local().Format(time.TimeOnly))
 
 	switch ev.Type {
 	case core.EventRunStart:
@@ -346,7 +346,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		fmt.Printf("%s  %s  %s\n",
 			ts,
-			styleInfo.Render("⊘ compress"),
+			styleInfo.Render("⊘ "+compressEventLabel(p.Trigger)),
 			styleMuted.Render(fmt.Sprintf("%d→%d msgs  ~%dk→%dk tok  $%.4f",
 				p.MessagesBefore, p.MessagesAfter,
 				p.TokensBefore/1000, p.TokensAfter/1000, p.CostUSD)),
@@ -544,7 +544,7 @@ func promptLine(text string, images [][]byte, statusMsg string) string {
 
 // PrintReplayEvent prints a styled replay view of a trace event.
 func PrintReplayEvent(ev core.Event) {
-	ts := ev.TS.Format("15:04:05")
+	ts := ev.TS.Local().Format("15:04:05")
 
 	switch ev.Type {
 	case core.EventRunStart:
@@ -683,7 +683,7 @@ func PrintReplayEvent(ev core.Event) {
 		var p core.CompressPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		fmt.Printf("\n  %s  %s\n",
-			styleInfo.Render("⊘ compress"),
+			styleInfo.Render("⊘ "+compressEventLabel(p.Trigger)),
 			styleMuted.Render(fmt.Sprintf("%d→%d msgs  ~%dk→%dk tok  $%.4f",
 				p.MessagesBefore, p.MessagesAfter,
 				p.TokensBefore/1000, p.TokensAfter/1000, p.CostUSD)),

@@ -62,6 +62,11 @@ type Loop struct {
 	pendingUserImages  []providers.ImageAttachment
 }
 
+const (
+	budgetCompressionMinContextTokens = 500
+	budgetCompressionLookaheadSteps   = 4
+)
+
 func (l *Loop) runHooks(stepID string) HookResult {
 	if len(l.Hooks) == 0 {
 		return HookResult{Action: HookContinue}
@@ -764,8 +769,8 @@ func estimateTokens(msgs []providers.Message) int {
 //   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
 func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	tokensBefore := estimateTokens(l.previewMessagesForStep(stepID))
-	threshold := l.Policy.ContextLimit * 3 / 4
-	if tokensBefore < threshold {
+	trigger := l.compressionTrigger(tokensBefore)
+	if trigger == "" {
 		return nil
 	}
 
@@ -843,8 +848,8 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		l.Messages[c.idx].Content = "[compressed] " + resp.AssistantText
 		compressed++
 
-		// Check if we're below threshold now
-		if estimateTokens(l.previewMessagesForStep(stepID)) < threshold {
+		// Stop early once pressure has eased enough.
+		if l.compressionTrigger(estimateTokens(l.previewMessagesForStep(stepID))) == "" {
 			break
 		}
 	}
@@ -857,6 +862,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			TokensBefore:       tokensBefore,
 			TokensAfter:        tokensAfter,
 			CostUSD:            totalCompressCost,
+			Trigger:            trigger,
 			Strategy:           "targeted",
 			MessagesCompressed: compressed,
 			MessagesFailed:     failedCount,
@@ -865,11 +871,13 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 			ProviderModel:      cp.Name(),
 		})
 
-		if tokensAfter < threshold {
+		nextTrigger := l.compressionTrigger(tokensAfter)
+		if nextTrigger == "" {
 			return nil
 		}
 		// Update tokensBefore for pass 2
 		tokensBefore = tokensAfter
+		trigger = nextTrigger
 	}
 
 	// ── Pass 2: Bulk fallback (oldest-half summarization) ─────────────────
@@ -913,6 +921,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		TokensBefore:       tokensBefore,
 		TokensAfter:        tokensAfter,
 		CostUSD:            resp.Usage.CostUSD,
+		Trigger:            trigger,
 		Strategy:           "bulk",
 		MessagesCompressed: cutoff,
 		TokensSaved:        tokensBefore - tokensAfter,
@@ -920,6 +929,30 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 		ProviderModel:      cp.Name(),
 	})
 	return nil
+}
+
+func (l *Loop) compressionTrigger(tokensBefore int) string {
+	if l.Policy != nil && l.Policy.ContextLimit > 0 {
+		threshold := l.Policy.ContextLimit * 3 / 4
+		if tokensBefore >= threshold {
+			return "context_limit"
+		}
+	}
+	if l.Budget == nil || tokensBefore < budgetCompressionMinContextTokens {
+		return ""
+	}
+	b := l.Budget.Budget()
+	if b.MaxTokens <= 0 {
+		return ""
+	}
+	remaining := b.MaxTokens - b.UsedTokens
+	if remaining <= 0 {
+		return ""
+	}
+	if remaining <= tokensBefore*budgetCompressionLookaheadSteps {
+		return "budget_tokens"
+	}
+	return ""
 }
 
 func (l *Loop) emit(t EventType, stepID string, payload any) (Event, error) {

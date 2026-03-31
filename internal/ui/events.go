@@ -10,8 +10,19 @@ import (
 	"github.com/tripledoublev/v100/internal/core"
 )
 
+func compressEventLabel(trigger string) string {
+	switch trigger {
+	case "budget_tokens":
+		return "compress budget"
+	case "context_limit":
+		return "compress context"
+	default:
+		return "compress"
+	}
+}
+
 func (m *TUIModel) appendEvent(ev core.Event) {
-	ts := styleMuted.Render(ev.TS.Format(time.TimeOnly))
+	ts := styleMuted.Render(ev.TS.Local().Format(time.TimeOnly))
 	m.updateStatusFromEvent(ev)
 	m.lastEventAt = ev.TS
 	sub := len(m.activeAgents) > 0
@@ -300,7 +311,8 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 		var p core.CompressPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		return sep + "  " + styleInfo.Render("⊘⊘") + "  " + styleInfo.Render(
-			fmt.Sprintf("compress  %d→%d msgs  ~%dk→%dk tok",
+			fmt.Sprintf("%s  %d→%d msgs  ~%dk→%dk tok",
+				compressEventLabel(p.Trigger),
 				p.MessagesBefore, p.MessagesAfter,
 				p.TokensBefore/1000, p.TokensAfter/1000))
 	default:
@@ -395,9 +407,15 @@ func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
 		m.statusLine = fmt.Sprintf("step %d done — %d tools, %dms, $%.4f",
 			p.StepNumber, p.ToolCalls, p.DurationMS, p.CostUSD)
 	case core.EventCompress:
+		var p core.CompressPayload
+		_ = json.Unmarshal(ev.Payload, &p)
 		m.noteCompressEvent(ev.TS)
 		m.statusMode = "thinking"
-		m.statusLine = "context compressed"
+		if p.Trigger == "budget_tokens" {
+			m.statusLine = "context compressed to preserve token budget"
+		} else {
+			m.statusLine = "context compressed"
+		}
 	}
 }
 

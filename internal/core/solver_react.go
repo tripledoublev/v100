@@ -58,9 +58,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
 
 	// 2. Maybe compress history before calling the provider.
-	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
-	}
+	_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
 
 	// 3. Continue model/tool turns until the model produces a final (no-tool) response.
 	maxToolCalls := 50 // sensible high default
@@ -262,9 +260,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			break
 		}
 
-			denialLoopBreak := false
-			denialStopTools := false
-			for _, tc := range toolCalls {
+		denialLoopBreak := false
+		denialStopTools := false
+		for _, tc := range toolCalls {
 			if isInspectionTool(tc.Name) {
 				inspectionToolCalls++
 			} else {
@@ -294,52 +292,52 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 					})
 				}
 
-					if denialCounts[key] >= 2 {
-						msg := fmt.Sprintf("System: tool %q was denied %d times with the same arguments. Do not retry this action. Please summarize what you were trying to accomplish and stop.", tc.Name, denialCounts[key])
-						_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
-							Action:  hookActionTraceName(HookStopTools),
-							Message: msg,
-							Reason:  "repeated_denial",
-						})
-						l.Messages = append(l.Messages, providers.Message{
-							Role:    "system",
-							Content: msg,
-						})
-						toolsStopped = true
-						denialStopTools = true
-						denialLoopBreak = true
-						break
-					}
+				if denialCounts[key] >= 2 {
+					msg := fmt.Sprintf("System: tool %q was denied %d times with the same arguments. Do not retry this action. Please summarize what you were trying to accomplish and stop.", tc.Name, denialCounts[key])
+					_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+						Action:  hookActionTraceName(HookStopTools),
+						Message: msg,
+						Reason:  "repeated_denial",
+					})
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
+						Content: msg,
+					})
+					toolsStopped = true
+					denialStopTools = true
+					denialLoopBreak = true
+					break
+				}
 
 				// Also break if we see too many denials of any kind in a single step to prevent spinning.
 				totalDenials := 0
 				for _, count := range denialCounts {
 					totalDenials += count
 				}
-					if totalDenials >= 5 {
-						msg := "System: too many tool denials in this step. Stop and ask the operator for guidance."
-						_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
-							Action:  hookActionTraceName(HookStopTools),
-							Message: msg,
-							Reason:  "too_many_denials",
-						})
-						l.Messages = append(l.Messages, providers.Message{
-							Role:    "system",
-							Content: msg,
-						})
-						toolsStopped = true
-						denialStopTools = true
-						denialLoopBreak = true
-						break
-					}
+				if totalDenials >= 5 {
+					msg := "System: too many tool denials in this step. Stop and ask the operator for guidance."
+					_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+						Action:  hookActionTraceName(HookStopTools),
+						Message: msg,
+						Reason:  "too_many_denials",
+					})
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "system",
+						Content: msg,
+					})
+					toolsStopped = true
+					denialStopTools = true
+					denialLoopBreak = true
+					break
 				}
 			}
-			if denialLoopBreak {
-				if denialStopTools {
-					continue
-				}
-				break
+		}
+		if denialLoopBreak {
+			if denialStopTools {
+				continue
 			}
+			break
+		}
 		if toolCallsUsed >= maxToolCalls {
 			break
 		}

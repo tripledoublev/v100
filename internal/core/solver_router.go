@@ -57,9 +57,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
 
 	// 2. Maybe compress history before calling the provider.
-	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		_ = l.maybeCompress(ctx, stepID)
-	}
+	_ = l.maybeCompress(ctx, stepID)
 
 	maxToolCalls := 50
 	if l.Policy != nil && l.Policy.MaxToolCallsPerStep > 0 {
