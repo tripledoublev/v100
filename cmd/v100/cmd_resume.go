@@ -318,7 +318,6 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			_ = loop.EmitRunEnd(reason, "")
 			tui.Quit()
 		}
-		return
 	}
 
 	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)

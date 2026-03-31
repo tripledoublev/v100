@@ -110,8 +110,6 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			tui.Quit()
 			return
 		}
-		// For non-fatal errors, continue (user can retry or exit)
-		return
 	}
 
 	interruptFn := func() {

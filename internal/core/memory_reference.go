@@ -141,9 +141,7 @@ func selectMemoryReferenceEntries(entries []memoryReferenceEntry, query string, 
 			return nil
 		}
 		scored = make([]memoryReferenceEntry, 0, len(entries))
-		for _, entry := range entries {
-			scored = append(scored, entry)
-		}
+		scored = append(scored, entries...)
 	}
 
 	sort.SliceStable(scored, func(i, j int) bool {

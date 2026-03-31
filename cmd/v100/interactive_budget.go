@@ -102,14 +102,14 @@ func promptContinueWithoutBudgetLimit(in io.Reader, out io.Writer, reason string
 	if in == nil || out == nil {
 		return false
 	}
-	fmt.Fprintf(out, "%s Continue this interactive run without the %s? [y/N]: ", ui.Warn(interactiveBudgetLabel(reason)+" hit: "+reason), interactiveBudgetLimit(reason))
+	_, _ = fmt.Fprintf(out, "%s Continue this interactive run without the %s? [y/N]: ", ui.Warn(interactiveBudgetLabel(reason)+" hit: "+reason), interactiveBudgetLimit(reason))
 	reader := bufio.NewReader(in)
 	line, err := reader.ReadString('\n')
 	if err != nil && len(line) == 0 {
-		fmt.Fprintln(out)
+		_, _ = fmt.Fprintln(out)
 		return false
 	}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes", "c", "continue":
 		return true

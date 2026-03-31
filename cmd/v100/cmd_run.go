@@ -690,8 +690,8 @@ func wrapConfirmFnWithActivity(confirmFn core.ConfirmFn, active *atomic.Bool) co
 }
 
 func printInterruptWarning(w io.Writer, message string) {
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, ui.Warn(message))
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, ui.Warn(message))
 }
 
 func runCLIInput(ctx context.Context, loop *core.Loop, input string, images []providers.ImageAttachment, planMode bool) error {
