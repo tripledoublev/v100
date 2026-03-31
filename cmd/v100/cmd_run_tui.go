@@ -74,50 +74,44 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
 		}
 
-		for {
-			err := loop.StepWithImages(stepCtx, req.Text, images)
-			if err == nil {
-				return
-			}
-			if logger != nil {
-				logger.Printf("step error: %v", err)
-			}
-			if errors.Is(err, context.Canceled) {
-				// User interrupted intentionally; don't emit error event
-				return
-			}
-			var budgetErr *core.ErrBudgetExceeded
-			if errors.As(err, &budgetErr) {
-				switch handleInteractiveBudgetExceeded(budget, budgetErr, func(reason string) bool {
-					return tui.RequestConfirm("token budget", "Token budget hit ("+reason+"). Continue this interactive run without a token limit?")
-				}) {
-				case interactiveBudgetRetry:
-					continue
-				case interactiveBudgetContinue:
-					return
-				}
-				reason = "budget_exceeded"
-				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
-				tui.Quit()
-				return
-			}
-			var retryErr *providers.RetryableError
-			var retryBudgetErr *providers.RetryBudgetExceededError
-			if errors.As(err, &retryBudgetErr) {
-				reason = classifyProviderFailureReason(err)
-				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
-				tui.Quit()
-				return
-			}
-			if errors.As(err, &retryErr) {
-				reason = classifyProviderFailureReason(err)
-				_ = emitFinalTUIRunEnd(loop, prov, model, reason)
-				tui.Quit()
-				return
-			}
-			// For non-fatal errors, continue (user can retry or exit)
+		err := runInteractiveStep(func() error {
+			return loop.StepWithImages(stepCtx, req.Text, images)
+		}, budget, func(reason string) bool {
+			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
+		})
+		if err == nil {
 			return
 		}
+		if logger != nil {
+			logger.Printf("step error: %v", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			// User interrupted intentionally; don't emit error event
+			return
+		}
+		var budgetErr *core.ErrBudgetExceeded
+		if errors.As(err, &budgetErr) {
+			reason = "budget_exceeded"
+			_ = emitFinalTUIRunEnd(loop, prov, model, reason)
+			tui.Quit()
+			return
+		}
+		var retryErr *providers.RetryableError
+		var retryBudgetErr *providers.RetryBudgetExceededError
+		if errors.As(err, &retryBudgetErr) {
+			reason = classifyProviderFailureReason(err)
+			_ = emitFinalTUIRunEnd(loop, prov, model, reason)
+			tui.Quit()
+			return
+		}
+		if errors.As(err, &retryErr) {
+			reason = classifyProviderFailureReason(err)
+			_ = emitFinalTUIRunEnd(loop, prov, model, reason)
+			tui.Quit()
+			return
+		}
+		// For non-fatal errors, continue (user can retry or exit)
+		return
 	}
 
 	interruptFn := func() {
@@ -217,7 +211,11 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err := loop.Step(stepCtx, initialPrompt)
+		err := runInteractiveStep(func() error {
+			return loop.Step(stepCtx, initialPrompt)
+		}, budget, func(reason string) bool {
+			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
+		})
 
 		stepMu.Lock()
 		stepCancel = nil

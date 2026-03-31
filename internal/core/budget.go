@@ -88,6 +88,22 @@ func (t *BudgetTracker) DisableTokenLimit() {
 	t.b.MaxTokens = 0
 }
 
+// DisableStepLimit clears the step cap while preserving usage counters.
+func (t *BudgetTracker) DisableStepLimit() {
+	if t == nil || t.b == nil {
+		return
+	}
+	t.b.MaxSteps = 0
+}
+
+// DisableCostLimit clears the cost cap while preserving usage counters.
+func (t *BudgetTracker) DisableCostLimit() {
+	if t == nil || t.b == nil {
+		return
+	}
+	t.b.MaxCostUSD = 0
+}
+
 // Summary returns a human-readable budget usage string.
 func (t *BudgetTracker) Summary() string {
 	b := t.b
