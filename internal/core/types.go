@@ -34,6 +34,7 @@ const (
 	EventSolverReplan     EventType = "solver.replan"
 	EventHookIntervention EventType = "hook.intervention"
 	EventGeneratedGoal    EventType = "generated.goal"
+	EventPolicyEvolve     EventType = "policy.evolve"
 )
 
 // HookAction identifies the action a policy hook wants to take.
@@ -295,6 +296,17 @@ type AgentEndPayload struct {
 type GeneratedGoalPayload struct {
 	Content string `json:"content"`
 	StepID  string `json:"step_id,omitempty"`
+}
+
+// PolicyEvolvePayload is the Payload for EventPolicyEvolve.
+type PolicyEvolvePayload struct {
+	EvolveID       string  `json:"evolve_id"`
+	BaselineScore  float64 `json:"baseline_score"`
+	CandidateScore float64 `json:"candidate_score"`
+	Decision       string  `json:"decision"` // "recommend_adopt" or "recommend_reject"
+	Rationale      string  `json:"rationale"`
+	CandidatePath  string  `json:"candidate_path"`
+	SourceTraceID  string  `json:"source_trace_id"`
 }
 
 // ErrBudgetExceeded is returned when any budget limit is hit.
