@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,6 +57,89 @@ func TestResolveResumeSourceWorkspace(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestResolveResumeProviderSelectionKeepsTracedProviderByDefault(t *testing.T) {
+	cfg := testConfig()
+
+	providerName, model, changed := resolveResumeProviderSelection(cfg, "minimax", "MiniMax-M2.7", "", "")
+	if providerName != "minimax" {
+		t.Fatalf("providerName = %q, want minimax", providerName)
+	}
+	if model != "MiniMax-M2.7" {
+		t.Fatalf("model = %q, want traced model", model)
+	}
+	if changed {
+		t.Fatal("expected unchanged selection")
+	}
+	if cfg.Defaults.Provider != "minimax" {
+		t.Fatalf("cfg.Defaults.Provider = %q, want minimax", cfg.Defaults.Provider)
+	}
+}
+
+func TestResolveResumeProviderSelectionUsesOverrideProviderDefaultModel(t *testing.T) {
+	cfg := testConfig()
+
+	providerName, model, changed := resolveResumeProviderSelection(cfg, "minimax", "MiniMax-M2.7", "codex", "")
+	if providerName != "codex" {
+		t.Fatalf("providerName = %q, want codex", providerName)
+	}
+	if want := cfg.Providers["codex"].DefaultModel; model != want {
+		t.Fatalf("model = %q, want %q", model, want)
+	}
+	if !changed {
+		t.Fatal("expected selection change when provider override is used")
+	}
+}
+
+func TestResolveResumeProviderSelectionUsesExplicitModelOverride(t *testing.T) {
+	cfg := testConfig()
+
+	providerName, model, changed := resolveResumeProviderSelection(cfg, "minimax", "MiniMax-M2.7", "", "gpt-5.4")
+	if providerName != "minimax" {
+		t.Fatalf("providerName = %q, want minimax", providerName)
+	}
+	if model != "gpt-5.4" {
+		t.Fatalf("model = %q, want gpt-5.4", model)
+	}
+	if !changed {
+		t.Fatal("expected selection change when model override is used")
+	}
+	if got := cfg.Providers["minimax"].DefaultModel; got != "gpt-5.4" {
+		t.Fatalf("cfg.Providers[minimax].DefaultModel = %q, want gpt-5.4", got)
+	}
+}
+
+func TestBuildProviderWithModelUsesExplicitSelection(t *testing.T) {
+	cfg := testConfig()
+	cfg.Providers["minimax"] = config.ProviderConfig{Type: "minimax", DefaultModel: "cfg-default"}
+
+	prov, err := buildProviderWithModel(cfg, "minimax", "trace-model")
+	if err != nil {
+		t.Fatalf("buildProviderWithModel returned error: %v", err)
+	}
+
+	metadata, err := prov.Metadata(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Metadata returned error: %v", err)
+	}
+	if metadata.Model != "trace-model" {
+		t.Fatalf("metadata.Model = %q, want trace-model", metadata.Model)
+	}
+	if cfg.Providers["minimax"].DefaultModel != "cfg-default" {
+		t.Fatalf("buildProviderWithModel should not mutate config default, got %q", cfg.Providers["minimax"].DefaultModel)
+	}
+}
+
+func TestResumeCmdRegistersProviderAndModelFlags(t *testing.T) {
+	cfgPath := ""
+	cmd := resumeCmd(&cfgPath)
+	if cmd.Flags().Lookup("provider") == nil {
+		t.Fatal("expected --provider flag on resume command")
+	}
+	if cmd.Flags().Lookup("model") == nil {
+		t.Fatal("expected --model flag on resume command")
 	}
 }
 

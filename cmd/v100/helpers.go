@@ -83,6 +83,35 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 	return buildProviderFromConfig(pc)
 }
 
+func ensureProviderConfig(cfg *config.Config, providerName string) {
+	if cfg == nil {
+		return
+	}
+	if _, ok := cfg.Providers[providerName]; ok {
+		return
+	}
+	defaults := config.DefaultConfig()
+	if pc, ok := defaults.Providers[providerName]; ok {
+		cfg.Providers[providerName] = pc
+		return
+	}
+	cfg.Providers[providerName] = config.ProviderConfig{
+		Type: providerName,
+	}
+}
+
+func buildProviderWithModel(cfg *config.Config, providerName, model string) (providers.Provider, error) {
+	ensureProviderConfig(cfg, providerName)
+	pc, ok := cfg.Providers[providerName]
+	if !ok {
+		return nil, fmt.Errorf("provider %q not configured", providerName)
+	}
+	if trimmed := strings.TrimSpace(model); trimmed != "" {
+		pc.DefaultModel = trimmed
+	}
+	return buildProviderFromConfig(pc)
+}
+
 func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
 	if pc.Type == "codex" {
 		original := pc.DefaultModel
@@ -146,6 +175,57 @@ func persistModelMetadata(runDir string, metadata providers.ModelMetadata) {
 	}
 	meta.ModelMetadata = metadata
 	_ = core.WriteMeta(runDir, meta)
+}
+
+func persistRunSelection(runDir, providerName, model string, metadata providers.ModelMetadata, clearMetadata bool) {
+	meta, err := core.ReadMeta(runDir)
+	if err != nil {
+		return
+	}
+	meta.Provider = strings.TrimSpace(providerName)
+	meta.Model = strings.TrimSpace(model)
+	if clearMetadata || metadata != (providers.ModelMetadata{}) {
+		meta.ModelMetadata = metadata
+	}
+	_ = core.WriteMeta(runDir, meta)
+}
+
+func resolveProviderMetadata(ctx context.Context, prov providers.Provider, model string, fallback providers.ModelMetadata) providers.ModelMetadata {
+	if fallback != (providers.ModelMetadata{}) {
+		return fallback
+	}
+	if prov == nil {
+		return fallback
+	}
+	metadata, err := prov.Metadata(ctx, model)
+	if err != nil {
+		return fallback
+	}
+	return metadata
+}
+
+func traceWorkspace(cfg *config.Config, workspace string) string {
+	if cfg != nil && cfg.Sandbox.Enabled {
+		return "/workspace"
+	}
+	return workspace
+}
+
+func appendTraceEvent(trace *core.TraceWriter, runID string, eventType core.EventType, payload any) error {
+	if trace == nil {
+		return nil
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("trace event marshal: %w", err)
+	}
+	return trace.Write(core.Event{
+		TS:      time.Now().UTC(),
+		RunID:   runID,
+		EventID: fmt.Sprintf("ev-%d", time.Now().UTC().UnixNano()),
+		Type:    eventType,
+		Payload: b,
+	})
 }
 
 func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {

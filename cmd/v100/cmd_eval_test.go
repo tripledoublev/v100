@@ -39,6 +39,56 @@ func TestPersistModelMetadataUpdatesMeta(t *testing.T) {
 	}
 }
 
+func TestPersistRunSelectionUpdatesProviderModelAndClearsMetadata(t *testing.T) {
+	runDir := t.TempDir()
+	original := providers.ModelMetadata{Model: "old-model", ContextSize: 64000, IsFree: true}
+	if err := core.WriteMeta(runDir, core.RunMeta{
+		RunID:         "run-1",
+		Provider:      "minimax",
+		Model:         "old-model",
+		ModelMetadata: original,
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	persistRunSelection(runDir, "codex", "gpt-5.4", providers.ModelMetadata{}, true)
+
+	meta, err := core.ReadMeta(runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Provider != "codex" {
+		t.Fatalf("provider = %q, want codex", meta.Provider)
+	}
+	if meta.Model != "gpt-5.4" {
+		t.Fatalf("model = %q, want gpt-5.4", meta.Model)
+	}
+	if meta.ModelMetadata != (providers.ModelMetadata{}) {
+		t.Fatalf("model metadata = %+v, want cleared metadata", meta.ModelMetadata)
+	}
+
+	updated := providers.ModelMetadata{Model: "gpt-5.4", ContextSize: 256000}
+	persistRunSelection(runDir, "codex", "gpt-5.4", updated, false)
+
+	meta, err = core.ReadMeta(runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ModelMetadata != updated {
+		t.Fatalf("model metadata = %+v, want %+v", meta.ModelMetadata, updated)
+	}
+	if meta.Provider != "codex" || meta.Model != "gpt-5.4" {
+		t.Fatalf("provider/model = %q/%q, want codex/gpt-5.4", meta.Provider, meta.Model)
+	}
+	if meta.CreatedAt.IsZero() {
+		t.Fatal("created_at should be preserved")
+	}
+	if meta.RunID != "run-1" {
+		t.Fatalf("run_id = %q, want run-1", meta.RunID)
+	}
+}
+
 func TestQueryCmdShowsModelMetadata(t *testing.T) {
 	root := t.TempDir()
 	runsDir := filepath.Join(root, "runs")

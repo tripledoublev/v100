@@ -24,6 +24,8 @@ import (
 
 func resumeCmd(cfgPath *string) *cobra.Command {
 	var (
+		providerFlag     string
+		modelFlag        string
 		tuiFlag          bool
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
@@ -83,11 +85,12 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				cfg.Sandbox.Enabled = sandboxFlag
 			}
 
-			if providerName == "" {
-				providerName = cfg.Defaults.Provider
+			providerName, model, selectionChanged := resolveResumeProviderSelection(cfg, providerName, model, providerFlag, modelFlag)
+			if selectionChanged {
+				metadata = providers.ModelMetadata{}
 			}
 
-			prov, err := buildProvider(cfg, providerName)
+			prov, err := buildProviderWithModel(cfg, providerName, model)
 			if err != nil {
 				return err
 			}
@@ -171,11 +174,13 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
 			if tuiFlag {
-				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata)
+				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata, selectionChanged)
 			}
-			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, session, mapper, metadata)
+			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, session, mapper, metadata, selectionChanged)
 		},
 	}
+	cmd.Flags().StringVar(&providerFlag, "provider", "", "provider name (overrides traced run/config)")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "model name (overrides traced run/config)")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "enable Bubble Tea TUI")
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
@@ -193,11 +198,26 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 }
 
 func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
 
 	renderer := ui.NewCLIRenderer()
 	outputFn := core.OutputFn(renderer.RenderEvent)
 	registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), workspace, pol.MaxToolCallsPerStep, session, mapper)
+
+	ctx := context.Background()
+	metadata = resolveProviderMetadata(ctx, prov, model, metadata)
+	persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, metadata, selectionChanged)
+	if selectionChanged {
+		if err := appendTraceEvent(trace, run.ID, core.EventRunStart, core.RunStartPayload{
+			Policy:        pol.Name,
+			Provider:      prov.Name(),
+			Model:         model,
+			Workspace:     traceWorkspace(cfg, workspace),
+			ModelMetadata: metadata,
+		}); err != nil {
+			return err
+		}
+	}
 
 	loop := &core.Loop{
 		Run:              run,
@@ -217,7 +237,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 	loop.OutputFn = outputFn
-	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
+	defer persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, loop.ModelMetadata, false)
 
 	fmt.Println(ui.Info(fmt.Sprintf("Resuming run %s  (%d events loaded)", run.ID, len(events))))
 	// Fix #8: Show resume context banner with provider/model/budget/context count
@@ -226,7 +246,6 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	fmt.Println(ui.Info(ui.Dim("context: ") + fmt.Sprintf("%d messages", len(msgs))))
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 
-	ctx := context.Background()
 	reason := "user_exit"
 	for {
 		promptResult, err := ui.PromptWithImages("")
@@ -268,7 +287,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 }
 
 func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, resumeSummary string, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, resumeSummary string, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
 
 	var logger *log.Logger
 	if debug {
@@ -284,6 +303,20 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	var tui *ui.TUI
 	ctx := context.Background()
 	reason := "user_exit"
+
+	metadata = resolveProviderMetadata(ctx, prov, model, metadata)
+	persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, metadata, selectionChanged)
+	if selectionChanged {
+		if err := appendTraceEvent(trace, run.ID, core.EventRunStart, core.RunStartPayload{
+			Policy:        pol.Name,
+			Provider:      prov.Name(),
+			Model:         model,
+			Workspace:     traceWorkspace(cfg, workspace),
+			ModelMetadata: metadata,
+		}); err != nil {
+			return err
+		}
+	}
 
 	var loop *core.Loop
 
@@ -352,7 +385,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
-	persistModelMetadata(filepath.Dir(run.TraceFile), metadata)
+	defer persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, loop.ModelMetadata, false)
 
 	// Start Bubble Tea first: Program.Send blocks until Run() starts the event loop.
 	runErrCh := make(chan error, 1)
@@ -426,4 +459,40 @@ func resolveResumeSourceWorkspace(workspaceFlag, runDir, tracedWorkspace string,
 		return resolveWorkspace(tracedWorkspace, runDir)
 	}
 	return resolveWorkspace("", runDir)
+}
+
+func resolveResumeProviderSelection(cfg *config.Config, tracedProvider, tracedModel, providerOverride, modelOverride string) (string, string, bool) {
+	tracedProvider = strings.TrimSpace(tracedProvider)
+	tracedModel = strings.TrimSpace(tracedModel)
+	providerOverride = strings.TrimSpace(providerOverride)
+	modelOverride = strings.TrimSpace(modelOverride)
+
+	providerName := tracedProvider
+	if providerOverride != "" {
+		providerName = providerOverride
+	}
+	if providerName == "" {
+		providerName = strings.TrimSpace(cfg.Defaults.Provider)
+	}
+
+	ensureProviderConfig(cfg, providerName)
+	cfg.Defaults.Provider = providerName
+
+	if modelOverride != "" {
+		pc := cfg.Providers[providerName]
+		pc.DefaultModel = modelOverride
+		cfg.Providers[providerName] = pc
+	}
+
+	providerChanged := tracedProvider != "" && providerName != tracedProvider
+	model := tracedModel
+	switch {
+	case modelOverride != "":
+		model = modelOverride
+	case providerChanged || model == "":
+		model = strings.TrimSpace(cfg.Providers[providerName].DefaultModel)
+	}
+
+	selectionChanged := providerChanged || (modelOverride != "" && modelOverride != tracedModel)
+	return providerName, model, selectionChanged
 }
