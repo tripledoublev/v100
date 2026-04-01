@@ -29,7 +29,7 @@ func TestCLIRendererShowsUserMessageOnceInTranscript(t *testing.T) {
 	if count := strings.Count(plain, "hello"); count != 1 {
 		t.Fatalf("expected exactly one rendered user message, got %d in %q", count, plain)
 	}
-	if !strings.Contains(plain, " you  hello") {
+	if !strings.Contains(plain, " ●  hello") {
 		t.Fatalf("expected plain user label and content, got %q", plain)
 	}
 	if !strings.Contains(plain, " agent  world") {

@@ -163,7 +163,7 @@ func TestUserMessageAppearsInTranscript(t *testing.T) {
 	})
 
 	out := stripANSI(m.transcriptBuf.String())
-	if !strings.Contains(out, "nice!") || !strings.Contains(out, "you") {
+	if !strings.Contains(out, "nice!") || !strings.Contains(out, userMessageLabel) {
 		t.Fatalf("expected user message content in transcript, got %q", out)
 	}
 	wantTS := time.Date(2026, 3, 18, 18, 28, 36, 0, time.UTC).Local().Format(time.TimeOnly)

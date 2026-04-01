@@ -102,7 +102,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		indented := indentLines(content, "              ")
 		fmt.Printf("\n%s  %s  %s\n",
 			ts,
-			styleUser.Render("you"),
+			styleUser.Render(userMessageLabel),
 			indented,
 		)
 
@@ -556,7 +556,7 @@ func PrintReplayEvent(ev core.Event) {
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		borderClr := clrUser
-		label := styleUser.Render("you")
+		label := styleUser.Render(userMessageLabel)
 		if p.Source == "system" {
 			borderClr = clrWarning
 			label = styleWarn.Render("v100")

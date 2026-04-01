@@ -74,11 +74,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				content += imageCount(p.ImageCount)
 			}
 			wrapped := m.wrapPlainForTranscript(content)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render("you"), wrapped)
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
 			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
-			_, _ = fmt.Fprintf(&m.plainBuf, "\nyou: %s\n", content)
+			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", userMessageLabel, content)
 		}
 
 	case core.EventModelResp:
@@ -236,7 +236,7 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 		if p.Source == "system" {
 			return sep + "  " + indent + styleWarn.Render(">>") + "  " + styleWarn.Render("v100")
 		}
-		return sep + "  " + indent + styleUser.Render(">>") + "  " + styleUser.Render("you")
+		return sep + "  " + indent + styleUser.Render(">>") + "  " + styleUser.Render(userMessageLabel)
 	case core.EventModelResp:
 		var p core.ModelRespPayload
 		_ = json.Unmarshal(ev.Payload, &p)

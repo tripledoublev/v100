@@ -5,6 +5,8 @@ import (
 	"github.com/muesli/termenv"
 )
 
+const userMessageLabel = "●"
+
 // Color palette
 var (
 	clrPrimary   = lipgloss.Color("#A78BFA") // violet  — v100 brand
