@@ -1,3 +1,11 @@
+## Commit Gate
+
+- Before creating any commit in this repo, always run all three checks:
+  - `./scripts/lint.sh`
+  - relevant tests at minimum, and prefer `go test ./...` when feasible
+  - rebuild the binary with `go build -o ./v100 ./cmd/v100`
+- Only commit once those checks succeed.
+
 ## March 2026 UX & Provider Hardening
 
 ### 1. Extensive Benchmarking & Research
