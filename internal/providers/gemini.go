@@ -58,7 +58,7 @@ func NewGeminiProvider(tokenPath, defaultModel string) (*GeminiProvider, error) 
 func (p *GeminiProvider) Name() string { return "gemini" }
 
 func (p *GeminiProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: true}
 }
 
 // accessToken returns a valid access token, refreshing if expired.

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,7 +58,7 @@ func NewCodexProvider(tokenPath, defaultModel string) (*CodexProvider, error) {
 func (p *CodexProvider) Name() string { return "codex" }
 
 func (p *CodexProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: true}
 }
 
 // accessToken returns a valid access token + accountID, refreshing if expired.
@@ -191,6 +192,13 @@ type codexInput struct {
 	Output    *string `json:"output,omitempty"`
 }
 
+type codexInputContent struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
 type codexToolDef struct {
 	Type        string          `json:"type"`
 	Name        string          `json:"name"`
@@ -210,9 +218,45 @@ func codexConvertMessages(msgs []Message) (string, []codexInput) {
 			instructions = m.Content
 
 		case "user":
+			if len(m.Images) == 0 {
+				input = append(input, codexInput{
+					Role:    "user",
+					Content: m.Content,
+				})
+				break
+			}
+			content := make([]codexInputContent, 0, len(m.Images)+1)
+			if m.Content != "" {
+				content = append(content, codexInputContent{
+					Type: "input_text",
+					Text: m.Content,
+				})
+			}
+			for _, img := range m.Images {
+				if len(img.Data) == 0 {
+					continue
+				}
+				mimeType := strings.TrimSpace(img.MIMEType)
+				if mimeType == "" {
+					mimeType = "image/png"
+				}
+				content = append(content, codexInputContent{
+					Type:     "input_image",
+					ImageURL: "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(img.Data),
+					Detail:   "auto",
+				})
+			}
+			if len(content) == 0 {
+				input = append(input, codexInput{
+					Role:    "user",
+					Content: m.Content,
+				})
+				break
+			}
 			input = append(input, codexInput{
+				Type:    "message",
 				Role:    "user",
-				Content: m.Content,
+				Content: content,
 			})
 
 		case "assistant":

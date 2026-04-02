@@ -287,6 +287,30 @@ func TestLoopTokenBudgetExceededStillCountsStep(t *testing.T) {
 	}
 }
 
+func TestLoopStepWithImagesRejectsUnsupportedProvider(t *testing.T) {
+	prov := &mockProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "should not be called"},
+		},
+	}
+	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
+	defer func() { _ = trace.Close() }()
+
+	err := loop.StepWithImages(context.Background(), "look at this", []providers.ImageAttachment{{
+		MIMEType: "image/png",
+		Data:     []byte("fake-image"),
+	}})
+	if err == nil {
+		t.Fatal("expected provider capability error")
+	}
+	if !strings.Contains(err.Error(), "does not support image attachments") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("provider should not have been called, got %d calls", prov.calls)
+	}
+}
+
 func TestLoopInspectionWatchdogInjectsSynthesisMessage(t *testing.T) {
 	prov := &watchdogCapturingProvider{
 		responses: []providers.CompleteResponse{

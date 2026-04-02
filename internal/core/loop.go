@@ -115,6 +115,9 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 
 // StepWithImages processes a single user input and optional image attachments.
 func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []providers.ImageAttachment) error {
+	if len(images) > 0 && !l.Provider.Capabilities().Images {
+		return fmt.Errorf("provider %q does not support image attachments", l.Provider.Name())
+	}
 	// Auto-discover metadata on first step if not set
 	if l.ModelMetadata.Model == "" {
 		m, err := l.Provider.Metadata(ctx, "")

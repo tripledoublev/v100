@@ -12,6 +12,7 @@ type Capabilities struct {
 	ToolCalls bool
 	JSONMode  bool
 	Streaming bool
+	Images    bool
 }
 
 // ImageAttachment carries a user-provided image for multimodal providers.

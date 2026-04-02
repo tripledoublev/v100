@@ -77,7 +77,7 @@ func defaultClaudeTokenPath() string {
 func (p *AnthropicProvider) Name() string { return "anthropic" }
 
 func (p *AnthropicProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true}
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: true}
 }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {

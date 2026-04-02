@@ -44,7 +44,7 @@ func NewOpenAIProvider(authEnv, baseURL, model string) (*OpenAIProvider, error) 
 func (p *OpenAIProvider) Name() string { return "openai" }
 
 func (p *OpenAIProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: true, Streaming: true}
+	return Capabilities{ToolCalls: true, JSONMode: true, Streaming: true, Images: true}
 }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {

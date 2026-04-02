@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,43 @@ func TestCodexConvertMessagesUserInputHasNoOutputField(t *testing.T) {
 	}
 	if _, ok := obj["output"]; ok {
 		t.Fatalf("unexpected output field in user input payload: %s", string(b))
+	}
+}
+
+func TestCodexConvertMessagesUserImagesBecomeInputImageItems(t *testing.T) {
+	_, input := codexConvertMessages([]Message{
+		{
+			Role:    "user",
+			Content: "what is in this image?",
+			Images: []ImageAttachment{{
+				MIMEType: "image/png",
+				Data:     []byte("png-bytes"),
+			}},
+		},
+	})
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %d", len(input))
+	}
+	if input[0].Type != "message" {
+		t.Fatalf("expected message input type, got %q", input[0].Type)
+	}
+	parts, ok := input[0].Content.([]codexInputContent)
+	if !ok {
+		t.Fatalf("expected structured content, got %#v", input[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected text and image parts, got %d", len(parts))
+	}
+	if parts[0].Type != "input_text" || parts[0].Text != "what is in this image?" {
+		t.Fatalf("unexpected text part: %#v", parts[0])
+	}
+	if parts[1].Type != "input_image" {
+		t.Fatalf("unexpected image part type: %#v", parts[1])
+	}
+	if parts[1].Detail != "auto" {
+		t.Fatalf("expected auto detail, got %q", parts[1].Detail)
+	}
+	if !strings.HasPrefix(parts[1].ImageURL, "data:image/png;base64,") {
+		t.Fatalf("unexpected image data URL: %q", parts[1].ImageURL)
 	}
 }
