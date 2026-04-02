@@ -969,6 +969,7 @@ func analyzeCmd() *cobra.Command {
 func mutateCmd(cfgPath *string) *cobra.Command {
 	var provider string
 	var model string
+	var budgets eval.MutationBudgets
 
 	cmd := &cobra.Command{
 		Use:   "mutate <run_id>",
@@ -1003,14 +1004,20 @@ func mutateCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			res, err := eval.MutatePrompt(context.Background(), prov, model, events)
+			res, err := eval.MutatePrompt(context.Background(), prov, model, budgets, events)
 			if err != nil {
 				return err
 			}
 
 			fmt.Printf("Optimizer analysis for run %s\n", ui.Info(runID))
 			fmt.Printf("\n%s\n%s\n", ui.Header("ORIGINAL PROMPT"), res.OriginalPrompt)
-			fmt.Printf("\n%s\n%s\n", ui.Header("MUTATED PROMPT"), ui.OK(res.MutatedPrompt))
+			if res.RejectedReason != "" {
+				fmt.Printf("\n%s\n%s\n", ui.Header("REJECTED CANDIDATE"), ui.Warn(res.CandidatePrompt))
+				fmt.Printf("\n%s\n%s\n", ui.Header("APPLIED PROMPT"), res.MutatedPrompt)
+				fmt.Printf("\n%s\n%s\n", ui.Header("REJECTION"), ui.Fail(res.RejectedReason))
+			} else {
+				fmt.Printf("\n%s\n%s\n", ui.Header("MUTATED PROMPT"), ui.OK(res.MutatedPrompt))
+			}
 			fmt.Printf("\n%s\n%s\n", ui.Header("RATIONALE"), res.Rationale)
 
 			return nil
@@ -1019,6 +1026,7 @@ func mutateCmd(cfgPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&provider, "provider", "", "Provider override for optimizer")
 	cmd.Flags().StringVar(&model, "model", "", "Model override for optimizer")
+	bindMutationBudgetFlags(cmd, &budgets)
 
 	return cmd
 }

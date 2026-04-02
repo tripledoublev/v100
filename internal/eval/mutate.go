@@ -10,18 +10,108 @@ import (
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
+// MutationBudgets constrains mutation output size.
+type MutationBudgets struct {
+	MaxPromptChars                int `json:"max_prompt_chars"`
+	MaxPromptGrowthChars          int `json:"max_prompt_growth_chars"`
+	MaxToolDescriptionChars       int `json:"max_tool_description_chars"`
+	MaxToolDescriptionGrowthChars int `json:"max_tool_description_growth_chars"`
+}
+
+// DefaultMutationBudgets returns the built-in mutation size limits.
+func DefaultMutationBudgets() MutationBudgets {
+	return MutationBudgets{
+		MaxPromptChars:                6000,
+		MaxPromptGrowthChars:          800,
+		MaxToolDescriptionChars:       600,
+		MaxToolDescriptionGrowthChars: 200,
+	}
+}
+
 // PolicyMutationResult holds the suggested policy mutation.
 type PolicyMutationResult struct {
-	OriginalPolicy string `json:"original_policy"`
-	MutatedPolicy  string `json:"mutated_policy"`
-	Rationale      string `json:"rationale"`
+	OriginalPolicy  string `json:"original_policy"`
+	CandidatePolicy string `json:"candidate_policy,omitempty"`
+	MutatedPolicy   string `json:"mutated_policy"`
+	Rationale       string `json:"rationale"`
+	RejectedReason  string `json:"rejected_reason,omitempty"`
 }
 
 // MutationResult holds the suggested prompt mutation.
 type MutationResult struct {
-	OriginalPrompt string `json:"original_prompt"`
-	MutatedPrompt  string `json:"mutated_prompt"`
-	Rationale      string `json:"rationale"`
+	OriginalPrompt  string `json:"original_prompt"`
+	CandidatePrompt string `json:"candidate_prompt,omitempty"`
+	MutatedPrompt   string `json:"mutated_prompt"`
+	Rationale       string `json:"rationale"`
+	RejectedReason  string `json:"rejected_reason,omitempty"`
+}
+
+type mutationSectionKind string
+
+const (
+	mutationSectionPrompt          mutationSectionKind = "prompt"
+	mutationSectionToolDescription mutationSectionKind = "tool_description"
+)
+
+type mutationSection struct {
+	Kind      mutationSectionKind
+	Name      string
+	Original  string
+	Candidate string
+}
+
+func (b MutationBudgets) normalized() MutationBudgets {
+	def := DefaultMutationBudgets()
+	if b.MaxPromptChars <= 0 {
+		b.MaxPromptChars = def.MaxPromptChars
+	}
+	if b.MaxPromptGrowthChars <= 0 {
+		b.MaxPromptGrowthChars = def.MaxPromptGrowthChars
+	}
+	if b.MaxToolDescriptionChars <= 0 {
+		b.MaxToolDescriptionChars = def.MaxToolDescriptionChars
+	}
+	if b.MaxToolDescriptionGrowthChars <= 0 {
+		b.MaxToolDescriptionGrowthChars = def.MaxToolDescriptionGrowthChars
+	}
+	return b
+}
+
+func validateMutationBudgets(b MutationBudgets, sections []mutationSection) string {
+	b = b.normalized()
+	for _, section := range sections {
+		maxChars, maxGrowth := mutationBudgetLimits(b, section.Kind)
+		label := mutationSectionLabel(section)
+		if maxChars > 0 && len(section.Candidate) > maxChars {
+			return fmt.Sprintf("%s exceeds max chars: %d > %d", label, len(section.Candidate), maxChars)
+		}
+		growth := len(section.Candidate) - len(section.Original)
+		if maxGrowth > 0 && growth > maxGrowth {
+			return fmt.Sprintf("%s exceeds max growth: +%d > +%d", label, growth, maxGrowth)
+		}
+	}
+	return ""
+}
+
+func mutationBudgetLimits(b MutationBudgets, kind mutationSectionKind) (maxChars int, maxGrowth int) {
+	switch kind {
+	case mutationSectionToolDescription:
+		return b.MaxToolDescriptionChars, b.MaxToolDescriptionGrowthChars
+	default:
+		return b.MaxPromptChars, b.MaxPromptGrowthChars
+	}
+}
+
+func mutationSectionLabel(section mutationSection) string {
+	if strings.TrimSpace(section.Name) != "" {
+		return section.Name
+	}
+	switch section.Kind {
+	case mutationSectionToolDescription:
+		return "tool description"
+	default:
+		return "prompt"
+	}
 }
 
 const mutationSystemPrompt = `You are the v100 Prompt Optimizer. 
@@ -50,10 +140,10 @@ MUTATED PROMPT: <new prompt text>
 RATIONALE: <why this change prevents the detected failure>`
 
 // MutatePrompt analyzes a run and suggests a better prompt.
-func MutatePrompt(ctx context.Context, prov providers.Provider, model string, events []core.Event) (MutationResult, error) {
+func MutatePrompt(ctx context.Context, prov providers.Provider, model string, budgets MutationBudgets, events []core.Event) (MutationResult, error) {
 	report := AnalyzeTrajectory(events)
 	stats := core.ComputeStats(events)
-	
+
 	originalPrompt := ""
 	for _, ev := range events {
 		if ev.Type == core.EventUserMsg {
@@ -70,9 +160,10 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, ev
 
 	if len(report.Labels) == 0 && report.ToolErrors == 0 && stats.ToolFailures == 0 {
 		return MutationResult{
-			OriginalPrompt: originalPrompt,
-			MutatedPrompt:  originalPrompt,
-			Rationale:      "No behavioral issues or tool failures detected; original prompt is likely fine.",
+			OriginalPrompt:  originalPrompt,
+			CandidatePrompt: originalPrompt,
+			MutatedPrompt:   originalPrompt,
+			Rationale:       "No behavioral issues or tool failures detected; original prompt is likely fine.",
 		}, nil
 	}
 
@@ -86,12 +177,12 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, ev
 
 	prompt := strings.ReplaceAll(mutationSystemPrompt, "{{original}}", originalPrompt)
 	prompt = strings.ReplaceAll(prompt, "{{analysis}}", analysisSb.String())
-	
+
 	// Inject quantitative metrics
 	prompt = strings.ReplaceAll(prompt, "{{steps}}", fmt.Sprintf("%d", stats.TotalSteps))
 	prompt = strings.ReplaceAll(prompt, "{{errors}}", fmt.Sprintf("%d", stats.ToolFailures))
 	prompt = strings.ReplaceAll(prompt, "{{tokens}}", fmt.Sprintf("%d", stats.TokensIn+stats.TokensOut))
-	
+
 	saturation := 0.0
 	if stats.ModelMetadata.ContextSize > 0 {
 		saturation = float64(stats.TokensIn) / float64(stats.ModelMetadata.ContextSize) * 100
@@ -125,11 +216,23 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, ev
 		}
 	}
 
-	return MutationResult{
-		OriginalPrompt: originalPrompt,
-		MutatedPrompt:  mutated,
-		Rationale:      rationale,
-	}, nil
+	result := MutationResult{
+		OriginalPrompt:  originalPrompt,
+		CandidatePrompt: mutated,
+		MutatedPrompt:   mutated,
+		Rationale:       rationale,
+	}
+	if reason := validateMutationBudgets(budgets, []mutationSection{{
+		Kind:      mutationSectionPrompt,
+		Name:      "mutated prompt",
+		Original:  originalPrompt,
+		Candidate: mutated,
+	}}); reason != "" {
+		result.MutatedPrompt = originalPrompt
+		result.RejectedReason = reason
+	}
+
+	return result, nil
 }
 
 const policyMutationSystemPrompt = `You are the v100 Policy Optimizer.
@@ -160,15 +263,16 @@ MUTATED POLICY: <new system policy text>
 RATIONALE: <why each change prevents the detected failure>`
 
 // MutatePolicy analyzes a run and suggests an improved system policy.
-func MutatePolicy(ctx context.Context, prov providers.Provider, model string, currentPolicy string, events []core.Event) (PolicyMutationResult, error) {
+func MutatePolicy(ctx context.Context, prov providers.Provider, model string, budgets MutationBudgets, currentPolicy string, events []core.Event) (PolicyMutationResult, error) {
 	report := AnalyzeTrajectory(events)
 	stats := core.ComputeStats(events)
 
 	if len(report.Labels) == 0 && report.ToolErrors == 0 && stats.ToolFailures == 0 {
 		return PolicyMutationResult{
-			OriginalPolicy: currentPolicy,
-			MutatedPolicy:  currentPolicy,
-			Rationale:      "No behavioral issues or tool failures detected; current policy is likely fine.",
+			OriginalPolicy:  currentPolicy,
+			CandidatePolicy: currentPolicy,
+			MutatedPolicy:   currentPolicy,
+			Rationale:       "No behavioral issues or tool failures detected; current policy is likely fine.",
 		}, nil
 	}
 
@@ -219,9 +323,21 @@ func MutatePolicy(ctx context.Context, prov providers.Provider, model string, cu
 		}
 	}
 
-	return PolicyMutationResult{
-		OriginalPolicy: currentPolicy,
-		MutatedPolicy:  mutated,
-		Rationale:      rationale,
-	}, nil
+	result := PolicyMutationResult{
+		OriginalPolicy:  currentPolicy,
+		CandidatePolicy: mutated,
+		MutatedPolicy:   mutated,
+		Rationale:       rationale,
+	}
+	if reason := validateMutationBudgets(budgets, []mutationSection{{
+		Kind:      mutationSectionPrompt,
+		Name:      "mutated policy",
+		Original:  currentPolicy,
+		Candidate: mutated,
+	}}); reason != "" {
+		result.MutatedPolicy = currentPolicy
+		result.RejectedReason = reason
+	}
+
+	return result, nil
 }

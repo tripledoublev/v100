@@ -89,6 +89,7 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 		traceID      string
 		evalType     string
 		rubric       string
+		budgets      eval.MutationBudgets
 	)
 
 	cmd := &cobra.Command{
@@ -150,11 +151,16 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 
 			// Mutate policy
 			fmt.Printf("%s  Mutating policy based on trace %s...\n", ui.Info("evolve"), traceID)
-			mutation, err := eval.MutatePolicy(ctx, prov, model, pol.SystemPrompt, events)
+			mutation, err := eval.MutatePolicy(ctx, prov, model, budgets, pol.SystemPrompt, events)
 			if err != nil {
 				return fmt.Errorf("mutate policy: %w", err)
 			}
 
+			if mutation.RejectedReason != "" {
+				fmt.Printf("%s  Mutation rejected: %s\n", ui.Warn("reject"), mutation.RejectedReason)
+				fmt.Printf("%s  Candidate size: %d chars (current %d)\n", ui.Info("size"), len(mutation.CandidatePolicy), len(mutation.OriginalPolicy))
+				return nil
+			}
 			if mutation.MutatedPolicy == mutation.OriginalPolicy {
 				fmt.Printf("%s  No issues detected — policy unchanged\n", ui.OK("done"))
 				return nil
@@ -304,6 +310,7 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&traceID, "trace", "", "source run ID whose failures inform mutation (required)")
 	cmd.Flags().StringVar(&evalType, "eval", "reflective", "scorer type")
 	cmd.Flags().StringVar(&rubric, "rubric", "", "override rubric for all prompts")
+	bindMutationBudgetFlags(cmd, &budgets)
 	return cmd
 }
 
