@@ -26,6 +26,9 @@ func TestDefault(t *testing.T) {
 	if !strings.Contains(p.SystemPrompt, "save files into the workspace") {
 		t.Error("expected default system prompt to disclose workspace-save constraint")
 	}
+	if !strings.Contains(p.SystemPrompt, "Do not claim you cannot see images") {
+		t.Error("expected default system prompt to include direct image-inspection guidance")
+	}
 	if !strings.Contains(p.SystemPrompt, "minimal sanitized environment") {
 		t.Error("expected default system prompt to disclose sanitized shell environment")
 	}
@@ -74,5 +77,30 @@ func TestLoadDefaultMaxToolCalls(t *testing.T) {
 	}
 	if p.MaxToolCallsPerStep != 20 {
 		t.Errorf("expected default 20, got %d", p.MaxToolCallsPerStep)
+	}
+}
+
+func TestLoadMigratesLegacyDefaultPrompt(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "default.md")
+	if err := os.WriteFile(promptFile, []byte(LegacyDefaultSystemPrompt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := Load("default", config.PolicyConfig{
+		SystemPromptPath: promptFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SystemPrompt != DefaultSystemPrompt {
+		t.Fatal("expected legacy prompt to migrate to current default")
+	}
+	data, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != DefaultSystemPrompt {
+		t.Fatal("expected migrated prompt to be written back to disk")
 	}
 }

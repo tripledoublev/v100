@@ -92,12 +92,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		for _, ts := range toolSpecs {
 			toolNames = append(toolNames, ts.Name)
 		}
-		_, _ = l.emit(EventModelCall, stepID, ModelCallPayload{
-			Model:        "",
-			Messages:     msgs,
-			ToolNames:    toolNames,
-			MaxToolCalls: maxToolCalls - toolCallsUsed,
-		})
+		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, l.Provider))
 
 		var (
 			assistantText strings.Builder

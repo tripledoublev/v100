@@ -31,12 +31,16 @@ func (t *mockDangerousDeniedTool) Exec(ctx context.Context, call tools.ToolCallC
 type MockProvider struct {
 	Responses []providers.CompleteResponse
 	Requests  []providers.CompleteRequest
+	Caps      providers.Capabilities
 	idx       int
 }
 
 func (p *MockProvider) Name() string { return "mock" }
 func (p *MockProvider) Capabilities() providers.Capabilities {
-	return providers.Capabilities{ToolCalls: true}
+	if p.Caps == (providers.Capabilities{}) {
+		return providers.Capabilities{ToolCalls: true}
+	}
+	return p.Caps
 }
 func (p *MockProvider) Complete(ctx context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
 	p.Requests = append(p.Requests, req)
@@ -98,6 +102,58 @@ func TestReactSolver(t *testing.T) {
 	if !contains(res.FinalText, "Task complete") {
 		t.Errorf("Final text mismatch: %s", res.FinalText)
 	}
+}
+
+func TestReactSolverModelCallTracksImageAudit(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Caps:      providers.Capabilities{ToolCalls: true, Images: true},
+		Responses: []providers.CompleteResponse{{AssistantText: "done"}},
+	}
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+	l := &Loop{
+		Run:      &Run{ID: "test-run", Dir: runDir},
+		Provider: p,
+		Tools:    tools.NewRegistry(nil),
+		Trace:    trace,
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:   &ReactSolver{},
+		Policy:   policy.Default(),
+		Mapper:   NewPathMapper(runDir, runDir),
+	}
+	err := l.StepWithImages(ctx, "what do you see", []providers.ImageAttachment{{MIMEType: "image/png", Data: []byte("fake")}})
+	if err != nil {
+		t.Fatalf("StepWithImages failed: %v", err)
+	}
+	events, err := ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type != EventModelCall {
+			continue
+		}
+		var payload ModelCallPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.ImageCount != 1 {
+			t.Fatalf("image_count = %d, want 1", payload.ImageCount)
+		}
+		if !payload.ProviderSupportsImage {
+			t.Fatal("expected provider_supports_image=true")
+		}
+		if len(payload.MessageImageCounts) != len(payload.Messages) {
+			t.Fatalf("message_image_counts length = %d, want %d", len(payload.MessageImageCounts), len(payload.Messages))
+		}
+		if payload.MessageImageCounts[len(payload.MessageImageCounts)-1] != 1 {
+			t.Fatalf("message_image_counts = %v, want trailing 1", payload.MessageImageCounts)
+		}
+		return
+	}
+	t.Fatal("expected model.call event")
 }
 
 func TestPlanExecuteSolver(t *testing.T) {

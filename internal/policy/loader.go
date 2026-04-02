@@ -27,7 +27,12 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 		promptPath := expandHome(cfg.SystemPromptPath)
 		data, err := os.ReadFile(promptPath)
 		if err == nil {
-			p.SystemPrompt = string(data)
+			prompt := string(data)
+			if migrated, ok := migrateLegacyDefaultPrompt(prompt); ok {
+				prompt = migrated
+				_ = os.WriteFile(promptPath, []byte(prompt), 0o644)
+			}
+			p.SystemPrompt = prompt
 			return p, nil
 		}
 		if !os.IsNotExist(err) {
@@ -73,4 +78,16 @@ func expandHome(path string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
+}
+
+func migrateLegacyDefaultPrompt(prompt string) (string, bool) {
+	if normalizePrompt(prompt) != normalizePrompt(LegacyDefaultSystemPrompt) {
+		return "", false
+	}
+	return DefaultSystemPrompt, true
+}
+
+func normalizePrompt(prompt string) string {
+	prompt = strings.ReplaceAll(prompt, "\r\n", "\n")
+	return strings.TrimSpace(prompt)
 }

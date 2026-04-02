@@ -88,12 +88,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		}
 
 		// Turn start
-		_, _ = l.emit(EventModelCall, stepID, ModelCallPayload{
-			Model:        "",
-			Messages:     msgs,
-			ToolNames:    toolNames,
-			MaxToolCalls: maxToolCalls - toolCallsUsed,
-		})
+		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, currentProv))
 
 		var (
 			assistantText strings.Builder

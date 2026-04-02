@@ -136,10 +136,32 @@ type UserMsgPayload struct {
 
 // ModelCallPayload is the Payload for EventModelCall.
 type ModelCallPayload struct {
-	Model        string              `json:"model,omitempty"`
-	Messages     []providers.Message `json:"messages"`
-	ToolNames    []string            `json:"tool_names,omitempty"`
-	MaxToolCalls int                 `json:"max_tool_calls,omitempty"`
+	Model                 string              `json:"model,omitempty"`
+	Messages              []providers.Message `json:"messages"`
+	ToolNames             []string            `json:"tool_names,omitempty"`
+	MaxToolCalls          int                 `json:"max_tool_calls,omitempty"`
+	ImageCount            int                 `json:"image_count,omitempty"`
+	MessageImageCounts    []int               `json:"message_image_counts,omitempty"`
+	ProviderSupportsImage bool                `json:"provider_supports_image,omitempty"`
+}
+
+func newModelCallPayload(model string, msgs []providers.Message, toolNames []string, maxToolCalls int, prov providers.Provider) ModelCallPayload {
+	payload := ModelCallPayload{
+		Model:                 model,
+		Messages:              msgs,
+		ToolNames:             toolNames,
+		MaxToolCalls:          maxToolCalls,
+		ProviderSupportsImage: prov != nil && prov.Capabilities().Images,
+	}
+	for _, msg := range msgs {
+		count := len(msg.Images)
+		payload.ImageCount += count
+		payload.MessageImageCounts = append(payload.MessageImageCounts, count)
+	}
+	if payload.ImageCount == 0 {
+		payload.MessageImageCounts = nil
+	}
+	return payload
 }
 
 // ModelRespPayload is the Payload for EventModelResp.
