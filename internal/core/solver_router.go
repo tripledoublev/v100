@@ -65,6 +65,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 	}
 	toolCallsUsed := 0
 	var finalText string
+	toolsStopped := false
 
 	// Current provider for this turn
 	currentProv := s.Cheap
@@ -81,7 +82,10 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		}
 
 		msgs := l.buildMessagesForStep(stepID)
-		toolSpecs := l.Tools.Specs()
+		var toolSpecs []providers.ToolSpec
+		if !toolsStopped {
+			toolSpecs = l.Tools.Specs()
+		}
 		toolNames := make([]string, 0, len(toolSpecs))
 		for _, ts := range toolSpecs {
 			toolNames = append(toolNames, ts.Name)
@@ -189,29 +193,24 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		modelCalls++
 
 		// ── Intervention Hooks ──────────────────────────────────────────
-		if hres := l.runHooks(stepID); hres.Action != HookContinue {
-			switch hres.Action {
-			case HookInjectMessage:
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "user",
-					Content: hres.Message,
-				})
-				continue
-			case HookTerminate:
-				return SolveResult{FinalText: finalText, Steps: 1}, fmt.Errorf("hook terminated: %s", hres.Reason)
-			case HookForceReplan:
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "user",
-					Content: "System intervention: please discard your current plan and reassess.",
-				})
+		if hres := l.runHooks(stepID, HookStageModelResponse); hres.Action != HookContinue {
+			restartLoop, err := l.applyHookResult(hres, "user", &toolsStopped)
+			if err != nil {
+				return SolveResult{FinalText: finalText, Steps: 1}, err
+			}
+			if restartLoop {
 				continue
 			}
 		}
 
+		if toolsStopped {
+			toolCalls = nil
+		}
 		if len(toolCalls) == 0 {
 			break
 		}
 
+		postToolRestart := false
 		for _, tc := range toolCalls {
 			if toolCallsUsed >= maxToolCalls {
 				break
@@ -220,6 +219,19 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 				return SolveResult{}, err
 			}
 			toolCallsUsed++
+			if hres := l.runHooks(stepID, HookStageToolResult); hres.Action != HookContinue {
+				restartLoop, err := l.applyHookResult(hres, "system", &toolsStopped)
+				if err != nil {
+					return SolveResult{FinalText: finalText, Steps: 1}, err
+				}
+				if restartLoop {
+					postToolRestart = true
+					break
+				}
+			}
+		}
+		if postToolRestart {
+			continue
 		}
 		if toolCallsUsed >= maxToolCalls {
 			break

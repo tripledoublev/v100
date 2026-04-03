@@ -435,6 +435,9 @@ func runBenchWithPolicy(
 			Snapshots:   buildSnapshotManager(cfg, sWorkspace),
 		}
 
+		loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))
+		loop.Hooks = append(loop.Hooks, core.DeduplicationHook(2))
+
 		metadata := resolveProviderMetadata(ctx, prov, runModel, providers.ModelMetadata{})
 		loop.ModelMetadata = metadata
 		persistRunSelection(runDir, prov.Name(), runModel, metadata, false)

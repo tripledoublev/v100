@@ -216,30 +216,12 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		modelCalls++
 
 		// ── Intervention Hooks ──────────────────────────────────────────
-		if hres := l.runHooks(stepID); hres.Action != HookContinue {
-			switch hres.Action {
-			case HookInjectMessage:
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "system",
-					Content: hres.Message,
-				})
-				// Continue the loop to let the model respond to the injected message
-				continue
-			case HookStopTools:
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "system",
-					Content: hres.Message,
-				})
-				toolsStopped = true
-				continue
-			case HookTerminate:
-				return SolveResult{FinalText: finalText, Steps: 1}, fmt.Errorf("hook terminated: %s", hres.Reason)
-			case HookForceReplan:
-				// React doesn't have a plan-specific state, but we could inject a "replan" instruction
-				l.Messages = append(l.Messages, providers.Message{
-					Role:    "system",
-					Content: "System intervention: please discard your current plan and reassess.",
-				})
+		if hres := l.runHooks(stepID, HookStageModelResponse); hres.Action != HookContinue {
+			restartLoop, err := l.applyHookResult(hres, "system", &toolsStopped)
+			if err != nil {
+				return SolveResult{FinalText: finalText, Steps: 1}, err
+			}
+			if restartLoop {
 				continue
 			}
 		}
@@ -257,6 +239,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 
 		denialLoopBreak := false
 		denialStopTools := false
+		postToolRestart := false
 		for _, tc := range toolCalls {
 			if isInspectionTool(tc.Name) {
 				inspectionToolCalls++
@@ -326,12 +309,28 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 					break
 				}
 			}
+			if hres := l.runHooks(stepID, HookStageToolResult); hres.Action != HookContinue {
+				restartLoop, err := l.applyHookResult(hres, "system", &toolsStopped)
+				if err != nil {
+					return SolveResult{FinalText: finalText, Steps: 1}, err
+				}
+				if restartLoop {
+					postToolRestart = true
+					break
+				}
+			}
+			if denialLoopBreak {
+				break
+			}
 		}
 		if denialLoopBreak {
 			if denialStopTools {
 				continue
 			}
 			break
+		}
+		if postToolRestart {
+			continue
 		}
 		if toolCallsUsed >= maxToolCalls {
 			break

@@ -420,6 +420,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
 
+	// Register default hooks for behavioral safety.
+	loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))
+	loop.Hooks = append(loop.Hooks, core.DeduplicationHook(2))
+
 	// Override workspace for tool execution
 	run.Dir = workspace
 

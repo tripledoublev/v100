@@ -54,6 +54,8 @@ type Loop struct {
 
 	lastToolOK     bool
 	lastToolOutput string
+	lastToolName   string
+	lastToolArgs   string
 
 	memoryStepID       string
 	memoryStepMessage  string
@@ -67,17 +69,20 @@ const (
 	budgetCompressionLookaheadSteps   = 4
 )
 
-func (l *Loop) runHooks(stepID string) HookResult {
+func (l *Loop) runHooks(stepID string, stage HookStage) HookResult {
 	if len(l.Hooks) == 0 {
 		return HookResult{Action: HookContinue}
 	}
 
 	state := LoopState{
 		RunID:           l.Run.ID,
+		Stage:           stage,
 		StepCount:       l.stepCount,
 		MessageCount:    len(l.Messages),
 		LastToolOK:      l.lastToolOK,
 		LastToolOutput:  l.lastToolOutput,
+		LastToolName:    l.lastToolName,
+		LastToolArgs:    l.lastToolArgs,
 		BudgetRemaining: l.Budget.Budget(),
 		// CompressionCount could be tracked if needed, using stats for now
 	}
@@ -106,6 +111,48 @@ func (l *Loop) runHooks(stepID string) HookResult {
 	}
 
 	return HookResult{Action: HookContinue}
+}
+
+func (l *Loop) applyHookResult(hres HookResult, injectRole string, toolsStopped *bool) (bool, error) {
+	switch hres.Action {
+	case HookContinue:
+		return false, nil
+	case HookInjectMessage:
+		if strings.TrimSpace(hres.Message) != "" {
+			l.Messages = append(l.Messages, providers.Message{
+				Role:    injectRole,
+				Content: hres.Message,
+			})
+		}
+		return true, nil
+	case HookStopTools:
+		msg := strings.TrimSpace(hres.Message)
+		if msg == "" {
+			msg = "System intervention: tool use is now disabled for the remainder of this step."
+		}
+		l.Messages = append(l.Messages, providers.Message{
+			Role:    injectRole,
+			Content: msg,
+		})
+		if toolsStopped != nil {
+			*toolsStopped = true
+		}
+		return true, nil
+	case HookForceReplan:
+		msg := strings.TrimSpace(hres.Message)
+		if msg == "" {
+			msg = "System intervention: please discard your current plan and reassess."
+		}
+		l.Messages = append(l.Messages, providers.Message{
+			Role:    injectRole,
+			Content: msg,
+		})
+		return true, nil
+	case HookTerminate:
+		return false, fmt.Errorf("hook terminated: %s", hres.Reason)
+	default:
+		return false, nil
+	}
 }
 
 // Step processes a single user input through the full model + tool execution cycle.
@@ -468,6 +515,8 @@ func (l *Loop) snapshotManager() SnapshotManager {
 func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools.ToolResult) error {
 	l.lastToolOK = result.OK
 	l.lastToolOutput = result.Output
+	l.lastToolName = tc.Name
+	l.lastToolArgs = string(tc.Args)
 
 	_, err := l.emit(EventToolResult, stepID, ToolResultPayload{
 		CallID:     tc.ID,
@@ -1022,6 +1071,9 @@ func newID() string {
 func ThresholdHook(maxFailures int) PolicyHook {
 	consecutiveFailures := 0
 	return func(state LoopState) HookResult {
+		if state.Stage != HookStageToolResult {
+			return HookResult{Action: HookContinue}
+		}
 		if state.LastToolOK {
 			consecutiveFailures = 0
 			return HookResult{Action: HookContinue}
@@ -1042,6 +1094,41 @@ func LogHook(w io.Writer) PolicyHook {
 	return func(state LoopState) HookResult {
 		b, _ := json.Marshal(state)
 		_, _ = w.Write(append(b, '\n'))
+		return HookResult{Action: HookContinue}
+	}
+}
+
+// DeduplicationHook returns a hook that injects a warning when the agent
+// repeats an identical tool call (same name + args) within a single step.
+// After maxRepeats identical calls, it injects a system message telling the
+// agent to use the existing result instead of re-calling.
+func DeduplicationHook(maxRepeats int) PolicyHook {
+	seen := make(map[string]int)
+	lastStep := -1
+	return func(state LoopState) HookResult {
+		if state.Stage != HookStageToolResult {
+			return HookResult{Action: HookContinue}
+		}
+		if state.LastToolName == "" {
+			return HookResult{Action: HookContinue}
+		}
+		// Reset seen map on new step.
+		if state.StepCount != lastStep {
+			seen = make(map[string]int)
+			lastStep = state.StepCount
+		}
+		key := state.LastToolName + "\x00" + state.LastToolArgs
+		seen[key]++
+		if seen[key] >= maxRepeats {
+			output := state.LastToolOutput
+			if len(output) > 200 {
+				output = output[:200] + "..."
+			}
+			return HookResult{
+				Action:  HookInjectMessage,
+				Message: fmt.Sprintf("DEDUPLICATION WARNING: You already called %s with identical arguments %d times this step. Use the existing result instead of re-calling. Previous output: %s", state.LastToolName, seen[key], output),
+			}
+		}
 		return HookResult{Action: HookContinue}
 	}
 }

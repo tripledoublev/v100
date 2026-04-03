@@ -42,10 +42,18 @@ type HookAction int
 
 const (
 	HookContinue      HookAction = iota
-	HookInjectMessage            // inject a user message before next model call
+	HookInjectMessage            // inject a follow-up message before next model call
 	HookForceReplan              // trigger solver replan
 	HookStopTools                // prevent further tool calls in current step
 	HookTerminate                // end run with reason "hook_terminated"
+)
+
+// HookStage identifies where in the loop a hook is running.
+type HookStage string
+
+const (
+	HookStageModelResponse HookStage = "model_response"
+	HookStageToolResult    HookStage = "tool_result"
 )
 
 // HookResult is the outcome of a policy hook execution.
@@ -58,15 +66,18 @@ type HookResult struct {
 // LoopState provides a snapshot of the agent's current progress for hooks.
 type LoopState struct {
 	RunID            string
+	Stage            HookStage
 	StepCount        int
 	MessageCount     int
 	LastToolOK       bool
 	LastToolOutput   string
+	LastToolName     string
+	LastToolArgs     string
 	BudgetRemaining  Budget
 	CompressionCount int
 }
 
-// PolicyHook is a callback invoked after every model response to observe or intervene.
+// PolicyHook is a callback invoked at loop checkpoints to observe or intervene.
 type PolicyHook func(state LoopState) HookResult
 
 // Event is a single entry in the trace log.

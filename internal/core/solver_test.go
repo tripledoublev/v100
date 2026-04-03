@@ -104,6 +104,101 @@ func TestReactSolver(t *testing.T) {
 	}
 }
 
+func TestReactSolverThresholdHookIgnoresToolFreeTurn(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{AssistantText: "Answer without tools."},
+		},
+	}
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:      &Run{ID: "test-run", Dir: runDir},
+		Provider: p,
+		Tools:    tools.NewRegistry(nil),
+		Trace:    trace,
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:   &ReactSolver{},
+		Mapper:   NewPathMapper(runDir, runDir),
+		Hooks:    []PolicyHook{ThresholdHook(1)},
+	}
+
+	res, err := l.Solver.Solve(ctx, l, "Say hi")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !contains(res.FinalText, "without tools") {
+		t.Fatalf("unexpected final text: %q", res.FinalText)
+	}
+}
+
+func TestReactSolverDeduplicationHookWarnsBeforeThirdRequest(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{
+				AssistantText: "List the workspace.",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_1", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				},
+			},
+			{
+				AssistantText: "List it again.",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_2", Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)},
+				},
+			},
+			{
+				AssistantText: "I already have the listing.",
+			},
+		},
+	}
+
+	reg := tools.NewRegistry([]string{"fs_list"})
+	reg.Register(tools.FSList())
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:      &Run{ID: "test-run", Dir: runDir},
+		Provider: p,
+		Tools:    reg,
+		Trace:    trace,
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:   &ReactSolver{},
+		Mapper:   NewPathMapper(runDir, runDir),
+		Hooks:    []PolicyHook{DeduplicationHook(2)},
+	}
+
+	res, err := l.Solver.Solve(ctx, l, "inspect")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !contains(res.FinalText, "already have the listing") {
+		t.Fatalf("unexpected final text: %q", res.FinalText)
+	}
+	if len(p.Requests) != 3 {
+		t.Fatalf("provider requests = %d, want 3", len(p.Requests))
+	}
+
+	foundWarning := false
+	for _, msg := range p.Requests[2].Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "DEDUPLICATION WARNING") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected dedup warning in third request, got %+v", p.Requests[2].Messages)
+	}
+}
+
 func TestReactSolverModelCallTracksImageAudit(t *testing.T) {
 	ctx := context.Background()
 	p := &MockProvider{

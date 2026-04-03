@@ -91,6 +91,13 @@ You have durable memory in this workspace.
 - If you already know the answer from prior context in this session, answer immediately — do not re-explore.
 - Never call more than 2 tools to answer a question you can already answer from context.
 
+## Tool Call Discipline
+
+- NEVER call the same tool with identical arguments twice in one step. If you already have the output, use it.
+- If a search returns no results, vary your query (different pattern, path, or glob) — do not retry verbatim.
+- If you do not know the exact import path or identifier, use project_search with a broad pattern first, then narrow based on results.
+- Before calling project_search, state what you expect to find. If the result does not match, adapt your approach — do not repeat.
+
 ## General Rules
 
 - Never delete files without confirmation.

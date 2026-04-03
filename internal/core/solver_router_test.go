@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/providers"
@@ -144,5 +145,77 @@ func TestRouterSolverEscalatesRealMutatingTool(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(loop.Run.Dir, "note.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected fs_write not to run before escalation, stat err = %v", err)
+	}
+}
+
+func TestRouterSolverThresholdHookIgnoresToolFreeTurn(t *testing.T) {
+	ctx := context.Background()
+	cheap := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{AssistantText: "No tools needed."},
+		},
+	}
+	smart := &MockProvider{}
+	loop := newRouterTestLoop(t, cheap, smart, nil)
+	loop.Hooks = append(loop.Hooks, ThresholdHook(1))
+
+	res, err := loop.Solver.Solve(ctx, loop, "Say hi")
+	if err != nil {
+		t.Fatalf("Solve() error = %v", err)
+	}
+	if res.FinalText != "No tools needed." {
+		t.Fatalf("FinalText = %q, want no-tool response", res.FinalText)
+	}
+	if len(cheap.Requests) != 1 {
+		t.Fatalf("cheap requests = %d, want 1", len(cheap.Requests))
+	}
+}
+
+func TestRouterSolverDeduplicationHookWarnsBeforeThirdRequest(t *testing.T) {
+	ctx := context.Background()
+	cheap := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{
+				AssistantText: "Create the directory.",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_1", Name: "fs_mkdir", Args: json.RawMessage(`{"path":"subdir"}`)},
+				},
+			},
+			{
+				AssistantText: "Create it again.",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_2", Name: "fs_mkdir", Args: json.RawMessage(`{"path":"subdir"}`)},
+				},
+			},
+			{AssistantText: "I already created it."},
+		},
+	}
+	smart := &MockProvider{}
+	loop := newRouterTestLoop(t, cheap, smart, []string{"fs_mkdir"})
+	loop.Hooks = append(loop.Hooks, DeduplicationHook(2))
+
+	res, err := loop.Solver.Solve(ctx, loop, "Create subdir")
+	if err != nil {
+		t.Fatalf("Solve() error = %v", err)
+	}
+	if res.FinalText != "I already created it." {
+		t.Fatalf("FinalText = %q, want dedup-aware response", res.FinalText)
+	}
+	if len(cheap.Requests) != 3 {
+		t.Fatalf("cheap requests = %d, want 3", len(cheap.Requests))
+	}
+	if len(smart.Requests) != 0 {
+		t.Fatalf("smart requests = %d, want 0", len(smart.Requests))
+	}
+
+	foundWarning := false
+	for _, msg := range cheap.Requests[2].Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "DEDUPLICATION WARNING") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected dedup warning in third request, got %+v", cheap.Requests[2].Messages)
 	}
 }
