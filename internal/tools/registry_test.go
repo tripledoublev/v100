@@ -103,6 +103,7 @@ func TestRegistryEffects(t *testing.T) {
 		"blackboard_write",
 		"curl_fetch",
 		"web_extract",
+		"news_fetch",
 		"git_push",
 		"sh",
 	})
@@ -110,6 +111,7 @@ func TestRegistryEffects(t *testing.T) {
 	reg.Register(tools.BlackboardWrite())
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.WebExtract())
+	reg.Register(tools.NewsFetch())
 	reg.Register(tools.GitPush())
 	reg.Register(tools.Sh())
 
@@ -124,6 +126,9 @@ func TestRegistryEffects(t *testing.T) {
 	}
 	if eff := reg.Effects("web_extract"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("web_extract effects = %+v, want network + external side effect", eff)
+	}
+	if eff := reg.Effects("news_fetch"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
+		t.Fatalf("news_fetch effects = %+v, want network + external side effect", eff)
 	}
 	if eff := reg.Effects("git_push"); !eff.MutatesWorkspace || !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("git_push effects = %+v, want workspace mutation + network + external side effect", eff)
@@ -184,12 +189,12 @@ type badTool struct {
 	in   string
 }
 
-func (b *badTool) Name() string                     { return b.name }
-func (b *badTool) Description() string              { return b.desc }
-func (b *badTool) InputSchema() json.RawMessage     { return json.RawMessage(b.in) }
-func (b *badTool) OutputSchema() json.RawMessage    { return nil }
-func (b *badTool) DangerLevel() tools.DangerLevel   { return tools.Safe }
-func (b *badTool) Effects() tools.ToolEffects       { return tools.ToolEffects{} }
+func (b *badTool) Name() string                   { return b.name }
+func (b *badTool) Description() string            { return b.desc }
+func (b *badTool) InputSchema() json.RawMessage   { return json.RawMessage(b.in) }
+func (b *badTool) OutputSchema() json.RawMessage  { return nil }
+func (b *badTool) DangerLevel() tools.DangerLevel { return tools.Safe }
+func (b *badTool) Effects() tools.ToolEffects     { return tools.ToolEffects{} }
 func (b *badTool) Exec(context.Context, tools.ToolCallContext, json.RawMessage) (tools.ToolResult, error) {
 	return tools.ToolResult{}, nil
 }

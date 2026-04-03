@@ -17,6 +17,12 @@ import (
 
 type curlFetchTool struct{}
 
+type fetchedHTTPResponse struct {
+	status      int
+	contentType string
+	body        []byte
+}
+
 type fetchedHTTPBody struct {
 	status      int
 	contentType string
@@ -96,8 +102,23 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 }
 
 func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPBody, *ToolResult, error) {
+	resp, fail, err := fetchHTTP(ctx, call, start, url, maxBytes)
+	if err != nil {
+		return fetchedHTTPBody{}, nil, err
+	}
+	if fail != nil {
+		return fetchedHTTPBody{}, fail, nil
+	}
+	return fetchedHTTPBody{
+		status:      resp.status,
+		contentType: resp.contentType,
+		text:        describeHTTPBody(resp.contentType, resp.body),
+	}, nil, nil
+}
+
+func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPResponse, *ToolResult, error) {
 	if call.Session != nil && call.Session.Type() == "docker" {
-		return fetchHTTPBodyInSession(ctx, call, start, url, maxBytes)
+		return fetchHTTPInSession(ctx, call, start, url, maxBytes)
 	}
 
 	timeout := 20 * time.Second
@@ -110,32 +131,32 @@ func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, u
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		res := failResult(start, "request build failed: "+err.Error())
-		return fetchedHTTPBody{}, &res, nil
+		return fetchedHTTPResponse{}, &res, nil
 	}
 	req.Header.Set("User-Agent", "v100/1.0 (+https://github.com/tripledoublev/v100)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		res := failResult(start, "request failed: "+err.Error())
-		return fetchedHTTPBody{}, &res, nil
+		return fetchedHTTPResponse{}, &res, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	if err != nil {
 		res := failResult(start, "read body: "+err.Error())
-		return fetchedHTTPBody{}, &res, nil
+		return fetchedHTTPResponse{}, &res, nil
 	}
 
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	return fetchedHTTPBody{
+	return fetchedHTTPResponse{
 		status:      resp.StatusCode,
 		contentType: contentType,
-		text:        describeHTTPBody(contentType, body),
+		body:        body,
 	}, nil, nil
 }
 
-func fetchHTTPBodyInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPBody, *ToolResult, error) {
+func fetchHTTPInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPResponse, *ToolResult, error) {
 	timeout := 20 * time.Second
 	if call.TimeoutMS > 0 {
 		timeout = time.Duration(call.TimeoutMS) * time.Millisecond
@@ -169,7 +190,7 @@ head -c "$V100_MAX_BYTES" "$body"
 	})
 	if err != nil {
 		res := failResult(start, "request failed: "+err.Error())
-		return fetchedHTTPBody{}, &res, nil
+		return fetchedHTTPResponse{}, &res, nil
 	}
 	if res.ExitCode != 0 {
 		out := strings.TrimSpace(res.Stderr)
@@ -177,18 +198,18 @@ head -c "$V100_MAX_BYTES" "$body"
 			out = strings.TrimSpace(res.Stdout)
 		}
 		fail := failResult(start, "request failed: "+out)
-		return fetchedHTTPBody{}, &fail, nil
+		return fetchedHTTPResponse{}, &fail, nil
 	}
 
 	status, contentType, text, err := parseCurlSessionOutput(res.Stdout, bodyMarker)
 	if err != nil {
 		fail := failResult(start, "parse failed: "+err.Error())
-		return fetchedHTTPBody{}, &fail, nil
+		return fetchedHTTPResponse{}, &fail, nil
 	}
-	return fetchedHTTPBody{
+	return fetchedHTTPResponse{
 		status:      status,
 		contentType: contentType,
-		text:        describeHTTPBody(contentType, []byte(text)),
+		body:        []byte(text),
 	}, nil, nil
 }
 

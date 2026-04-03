@@ -479,6 +479,8 @@ func toolGlyph(name string) string {
 		return "g^"
 	case "curl_fetch":
 		return " @"
+	case "news_fetch":
+		return " n"
 	case "sh":
 		return " $"
 	case "agent":

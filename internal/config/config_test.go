@@ -55,6 +55,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !shEnabled {
 		t.Error("expected sh tool to be enabled by default")
 	}
+	if !containsString(cfg.Tools.Enabled, "news_fetch") {
+		t.Error("expected news_fetch tool to be enabled by default")
+	}
 
 	shDangerous := false
 	for _, tool := range cfg.Tools.Dangerous {
@@ -123,6 +126,9 @@ budget_steps = 25
 	}
 	if !shEnabled {
 		t.Error("expected sh tool to be enabled after migration")
+	}
+	if !containsString(cfg.Tools.Enabled, "news_fetch") {
+		t.Error("expected news_fetch tool to be enabled after migration")
 	}
 }
 
