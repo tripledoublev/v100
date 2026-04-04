@@ -41,7 +41,7 @@ func ComputeStats(events []Event) RunStats {
 	var firstTS, lastTS int64
 	var pendingRetryTool string
 	var pendingRetryStep string
-	seenCallKeys := make(map[string]bool)
+	var sawToolResult bool
 
 	for _, ev := range events {
 		ts := ev.TS.UnixMilli()
@@ -72,27 +72,15 @@ func ComputeStats(events []Event) RunStats {
 				s.ModelLatencyMS = append(s.ModelLatencyMS, p.DurationMS)
 			}
 
-		case EventToolCall:
-			var p ToolCallPayload
+		case EventToolResult:
+			var p ToolResultPayload
 			_ = json.Unmarshal(ev.Payload, &p)
-			callKey := ev.StepID + ":" + p.CallID
-			if p.CallID != "" && seenCallKeys[callKey] {
-				continue
-			}
-			if p.CallID != "" {
-				seenCallKeys[callKey] = true
-			}
+			sawToolResult = true
 			s.ToolCalls++
 			s.ToolUsage[p.Name]++
 			if pendingRetryTool != "" && ev.StepID == pendingRetryStep && p.Name == pendingRetryTool {
 				s.ToolRetries++
 			}
-			pendingRetryTool = ""
-			pendingRetryStep = ""
-
-		case EventToolResult:
-			var p ToolResultPayload
-			_ = json.Unmarshal(ev.Payload, &p)
 			if !p.OK {
 				s.ToolFailures++
 				pendingRetryTool = p.Name
@@ -128,6 +116,13 @@ func ComputeStats(events []Event) RunStats {
 		}
 	}
 
+	if !sawToolResult {
+		for _, call := range dedupedToolCalls(events) {
+			s.ToolCalls++
+			s.ToolUsage[call.Name]++
+		}
+	}
+
 	s.WallClockMS = lastTS - firstTS
 
 	// If no step.summary events were emitted (aborted/errored runs),
@@ -138,6 +133,76 @@ func ComputeStats(events []Event) RunStats {
 
 	sort.Slice(s.ModelLatencyMS, func(i, j int) bool { return s.ModelLatencyMS[i] < s.ModelLatencyMS[j] })
 	return s
+}
+
+type toolCallRecord struct {
+	StepID string
+	CallID string
+	Name   string
+}
+
+func dedupedToolCalls(events []Event) []toolCallRecord {
+	seenCallKeys := make(map[string]bool)
+	var calls []toolCallRecord
+	for _, ev := range events {
+		if ev.Type != EventToolCall {
+			continue
+		}
+		var p ToolCallPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if strings.TrimSpace(p.Name) == "" {
+			continue
+		}
+		callKey := ev.StepID + ":" + p.CallID
+		if p.CallID != "" && seenCallKeys[callKey] {
+			continue
+		}
+		if p.CallID != "" {
+			seenCallKeys[callKey] = true
+		}
+		calls = append(calls, toolCallRecord{
+			StepID: ev.StepID,
+			CallID: p.CallID,
+			Name:   p.Name,
+		})
+	}
+	return calls
+}
+
+func executedToolNameSequence(events []Event) []string {
+	var seq []string
+	for _, ev := range events {
+		if ev.Type != EventToolResult {
+			continue
+		}
+		var p ToolResultPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if strings.TrimSpace(p.Name) != "" {
+			seq = append(seq, p.Name)
+		}
+	}
+	if len(seq) > 0 {
+		return seq
+	}
+	for _, call := range dedupedToolCalls(events) {
+		seq = append(seq, call.Name)
+	}
+	return seq
+}
+
+func runErrorMessages(events []Event) []string {
+	var msgs []string
+	for _, ev := range events {
+		if ev.Type != EventRunError {
+			continue
+		}
+		var p RunErrorPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if strings.TrimSpace(p.Error) != "" {
+			msgs = append(msgs, p.Error)
+		}
+	}
+	return msgs
 }
 
 // Percentile returns the p-th percentile from a sorted int64 slice.
@@ -323,7 +388,7 @@ type DigestStep struct {
 func ComputeDigest(events []Event) RunDigest {
 	d := RunDigest{}
 	toolCounts := map[string]int{}
-	seenCallKeys := make(map[string]bool)
+	var sawToolResult bool
 
 	for _, ev := range events {
 		switch ev.Type {
@@ -357,21 +422,11 @@ func ComputeDigest(events []Event) RunDigest {
 				}
 			}
 
-		case EventToolCall:
-			var p ToolCallPayload
-			_ = json.Unmarshal(ev.Payload, &p)
-			callKey := ev.StepID + ":" + p.CallID
-			if p.CallID != "" && seenCallKeys[callKey] {
-				continue
-			}
-			if p.CallID != "" {
-				seenCallKeys[callKey] = true
-			}
-			toolCounts[p.Name]++
-
 		case EventToolResult:
 			var p ToolResultPayload
 			_ = json.Unmarshal(ev.Payload, &p)
+			sawToolResult = true
+			toolCounts[p.Name]++
 			if !p.OK {
 				out := p.Output
 				if len(out) > 120 {
@@ -379,6 +434,12 @@ func ComputeDigest(events []Event) RunDigest {
 				}
 				d.ToolFailures = append(d.ToolFailures, DigestToolFailure{Name: p.Name, Output: out})
 			}
+		}
+	}
+
+	if !sawToolResult {
+		for _, call := range dedupedToolCalls(events) {
+			toolCounts[call.Name]++
 		}
 	}
 

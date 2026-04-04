@@ -88,3 +88,44 @@ func TestClassifyRunToolLoop(t *testing.T) {
 		t.Fatalf("expected tool_loop, got %q", c.Label)
 	}
 }
+
+func TestComputeMetricsUsesExecutedToolSequence(t *testing.T) {
+	now := time.Now().UTC()
+	events := []Event{
+		ev(t, now, EventRunStart, "s1", RunStartPayload{}),
+		// Placeholder + executed first call.
+		ev(t, now.Add(1*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "fs_list", CallID: "c1"}),
+		ev(t, now.Add(2*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "fs_list", CallID: "c1"}),
+		ev(t, now.Add(3*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "fs_list", CallID: "c1", OK: true}),
+		// Started but never executed.
+		ev(t, now.Add(4*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "project_search", CallID: "c2"}),
+		// Executed retried tool twice.
+		ev(t, now.Add(5*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "project_search", CallID: "c3"}),
+		ev(t, now.Add(6*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c3", OK: true}),
+		ev(t, now.Add(7*time.Millisecond), EventToolCall, "s1", ToolCallPayload{Name: "project_search", CallID: "c4"}),
+		ev(t, now.Add(8*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c4", OK: true}),
+	}
+
+	m := ComputeMetrics(events)
+	if m.ToolRetryRate != 1.0/3.0 {
+		t.Fatalf("ToolRetryRate = %.4f, want %.4f", m.ToolRetryRate, 1.0/3.0)
+	}
+}
+
+func TestClassifyRunToolBudgetCap(t *testing.T) {
+	now := time.Now().UTC()
+	events := []Event{
+		ev(t, now, EventRunStart, "s1", RunStartPayload{}),
+		ev(t, now.Add(1*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "fs_list", CallID: "c1", OK: true}),
+		ev(t, now.Add(2*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c2", OK: true}),
+		ev(t, now.Add(3*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c3", OK: true}),
+		ev(t, now.Add(4*time.Millisecond), EventToolResult, "s1", ToolResultPayload{Name: "project_search", CallID: "c4", OK: true}),
+		ev(t, now.Add(5*time.Millisecond), EventRunError, "s1", RunErrorPayload{Error: "max tool calls per step reached (4)"}),
+		ev(t, now.Add(6*time.Millisecond), EventRunEnd, "s1", RunEndPayload{Reason: "prompt_exit"}),
+	}
+
+	c := ClassifyRun(events)
+	if c.Label != "tool_budget_cap" {
+		t.Fatalf("expected tool_budget_cap, got %q", c.Label)
+	}
+}

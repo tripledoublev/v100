@@ -172,6 +172,41 @@ func TestComputeStatsDoesNotDeduplicateCallIDsAcrossSteps(t *testing.T) {
 	}
 }
 
+func TestComputeStatsCountsExecutedToolsFromResults(t *testing.T) {
+	now := time.Now()
+	mkToolCall := func(stepID, callID, name string) Event {
+		p, _ := json.Marshal(ToolCallPayload{CallID: callID, Name: name})
+		return Event{TS: now, StepID: stepID, Type: EventToolCall, Payload: p}
+	}
+	mkToolResult := func(stepID, callID, name string, ok bool) Event {
+		p, _ := json.Marshal(ToolResultPayload{CallID: callID, Name: name, OK: ok})
+		return Event{TS: now, StepID: stepID, Type: EventToolResult, Payload: p}
+	}
+
+	events := []Event{
+		// Streamed placeholder call plus executed call for the same ID.
+		mkToolCall("s1", "call-1", "fs_list"),
+		mkToolCall("s1", "call-1", "fs_list"),
+		mkToolResult("s1", "call-1", "fs_list", true),
+		// Started but never executed due later loop cutoff.
+		mkToolCall("s1", "call-2", "project_search"),
+		// Executed second tool.
+		mkToolCall("s1", "call-3", "project_search"),
+		mkToolResult("s1", "call-3", "project_search", true),
+	}
+
+	s := ComputeStats(events)
+	if s.ToolCalls != 2 {
+		t.Fatalf("ToolCalls = %d, want 2 executed calls", s.ToolCalls)
+	}
+	if s.ToolUsage["fs_list"] != 1 {
+		t.Fatalf("ToolUsage[fs_list] = %d, want 1", s.ToolUsage["fs_list"])
+	}
+	if s.ToolUsage["project_search"] != 1 {
+		t.Fatalf("ToolUsage[project_search] = %d, want 1", s.ToolUsage["project_search"])
+	}
+}
+
 func TestComputeDigestDoesNotDeduplicateCallIDsAcrossSteps(t *testing.T) {
 	now := time.Now()
 	mkToolCall := func(stepID, callID, name string) Event {
@@ -191,5 +226,32 @@ func TestComputeDigestDoesNotDeduplicateCallIDsAcrossSteps(t *testing.T) {
 	}
 	if d.RetryCluster[0].Name != "fs_read" || d.RetryCluster[0].Count != 3 {
 		t.Fatalf("RetryCluster[0] = %+v, want fs_read x3", d.RetryCluster[0])
+	}
+}
+
+func TestComputeDigestRetryClusterUsesExecutedTools(t *testing.T) {
+	now := time.Now()
+	mkToolCall := func(stepID, callID, name string) Event {
+		p, _ := json.Marshal(ToolCallPayload{CallID: callID, Name: name})
+		return Event{TS: now, StepID: stepID, Type: EventToolCall, Payload: p}
+	}
+	mkToolResult := func(stepID, callID, name string) Event {
+		p, _ := json.Marshal(ToolResultPayload{CallID: callID, Name: name, OK: true})
+		return Event{TS: now, StepID: stepID, Type: EventToolResult, Payload: p}
+	}
+
+	events := []Event{
+		mkToolCall("s1", "call-1", "project_search"),
+		mkToolCall("s1", "call-1", "project_search"),
+		mkToolResult("s1", "call-1", "project_search"),
+		mkToolCall("s1", "call-2", "project_search"),
+		mkToolResult("s1", "call-2", "project_search"),
+		// Started but never executed; should not create a hotspot by itself.
+		mkToolCall("s1", "call-3", "project_search"),
+	}
+
+	d := ComputeDigest(events)
+	if len(d.RetryCluster) != 0 {
+		t.Fatalf("RetryCluster = %+v, want none for only 2 executed calls", d.RetryCluster)
 	}
 }

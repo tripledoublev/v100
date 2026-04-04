@@ -56,8 +56,6 @@ func ComputeMetrics(events []Event) RunMetrics {
 	var (
 		toolResultCount     int
 		toolResultSuccess   int
-		retryTransitions    int
-		prevTool            string
 		compressBeforeSum   int
 		stepDurationSum     int64
 		stepDurationCount   int
@@ -87,13 +85,6 @@ func ComputeMetrics(events []Event) RunMetrics {
 				role = "anonymous"
 			}
 			m.DispatchByRole[role]++
-		case EventToolCall:
-			var p ToolCallPayload
-			_ = json.Unmarshal(ev.Payload, &p)
-			if prevTool == p.Name && p.Name != "" {
-				retryTransitions++
-			}
-			prevTool = p.Name
 		case EventToolResult:
 			var p ToolResultPayload
 			_ = json.Unmarshal(ev.Payload, &p)
@@ -154,6 +145,16 @@ func ComputeMetrics(events []Event) RunMetrics {
 		m.AutonomousHorizonSteps = currentStep
 	}
 
+	seq := executedToolNameSequence(events)
+	retryTransitions := 0
+	prevTool := ""
+	for _, name := range seq {
+		if prevTool == name && name != "" {
+			retryTransitions++
+		}
+		prevTool = name
+	}
+
 	if toolResultCount > 0 {
 		m.ToolCallSuccessRate = float64(toolResultSuccess) / float64(toolResultCount)
 	}
@@ -210,7 +211,7 @@ func computeEfficiencyScore(s RunStats, m RunMetrics) float64 {
 func ClassifyRun(events []Event) RunClassification {
 	s := ComputeStats(events)
 	m := ComputeMetrics(events)
-	callSeq := toolCallSequence(events)
+	callSeq := executedToolNameSequence(events)
 
 	if strings.HasPrefix(s.EndReason, "budget_") {
 		return RunClassification{
@@ -219,6 +220,19 @@ func ClassifyRun(events []Event) RunClassification {
 				fmt.Sprintf("run ended with reason=%s", s.EndReason),
 				fmt.Sprintf("steps=%d tool_calls=%d", s.TotalSteps, s.ToolCalls),
 			},
+		}
+	}
+
+	for _, msg := range runErrorMessages(events) {
+		if strings.Contains(msg, "max tool calls per step reached") {
+			return RunClassification{
+				Label: "tool_budget_cap",
+				Evidence: []string{
+					msg,
+					fmt.Sprintf("tool_calls=%d", s.ToolCalls),
+					fmt.Sprintf("retry_rate=%.2f", m.ToolRetryRate),
+				},
+			}
 		}
 	}
 
@@ -290,21 +304,6 @@ func ClassifyRun(events []Event) RunClassification {
 			fmt.Sprintf("tool_success_rate=%.2f", m.ToolCallSuccessRate),
 		},
 	}
-}
-
-func toolCallSequence(events []Event) []string {
-	var seq []string
-	for _, ev := range events {
-		if ev.Type != EventToolCall {
-			continue
-		}
-		var p ToolCallPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		if strings.TrimSpace(p.Name) != "" {
-			seq = append(seq, p.Name)
-		}
-	}
-	return seq
 }
 
 func hasToolLoop(seq []string) bool {
