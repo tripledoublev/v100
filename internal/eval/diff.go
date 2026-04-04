@@ -48,39 +48,24 @@ func eventsMatch(a, b core.Event) (bool, string, string) {
 	return true, "", ""
 }
 
+func traceDiffFromSync(sd SyncDiff) TraceDiff {
+	diff := TraceDiff{
+		RunA:         sd.RunA,
+		RunB:         sd.RunB,
+		DivergeType:  sd.DivergeType,
+		CommonPrefix: len(sd.CommonPrefix()),
+		DiffEvidence: sd.DiffEvidence,
+	}
+	if sd.DivergeIndex >= 0 {
+		diff.DivergeStep = sd.DivergeIndex
+	}
+	if diff.DivergeType == "none" {
+		diff.DiffEvidence = ""
+	}
+	return diff
+}
+
 // DiffTraces compares two trajectories to find the first meaningful divergence.
 func DiffTraces(runA, runB string, eventsA, eventsB []core.Event) TraceDiff {
-	diff := TraceDiff{
-		RunA:        runA,
-		RunB:        runB,
-		DivergeType: "none",
-	}
-
-	maxLen := len(eventsA)
-	if len(eventsB) < maxLen {
-		maxLen = len(eventsB)
-	}
-
-	for i := 0; i < maxLen; i++ {
-		match, dtype, evidence := eventsMatch(eventsA[i], eventsB[i])
-		if !match {
-			diff.DivergeStep = i
-			diff.DivergeType = dtype
-			if dtype == "event_type_mismatch" {
-				diff.DiffEvidence = fmt.Sprintf("Event %d: %s", i, evidence)
-			} else {
-				diff.DiffEvidence = evidence
-			}
-			return diff
-		}
-		diff.CommonPrefix++
-	}
-
-	if len(eventsA) != len(eventsB) {
-		diff.DivergeStep = maxLen
-		diff.DivergeType = "length_mismatch"
-		diff.DiffEvidence = fmt.Sprintf("Trace A has %d events, B has %d", len(eventsA), len(eventsB))
-	}
-
-	return diff
+	return traceDiffFromSync(SyncTraces(runA, runB, eventsA, eventsB))
 }

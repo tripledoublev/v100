@@ -52,3 +52,38 @@ func TestDiffTraces(t *testing.T) {
 		t.Errorf("expected plan_diff, got %s", diff.DivergeType)
 	}
 }
+
+func TestDiffTracesUsesSynchronizedAlignment(t *testing.T) {
+	runA := "run-a"
+	runB := "run-b"
+
+	eventsA := []core.Event{
+		{Type: core.EventRunStart},
+		{Type: core.EventToolCall, Payload: mustDiffJSON(t, core.ToolCallPayload{Name: "fs_read"})},
+		{Type: core.EventRunEnd},
+	}
+	eventsB := []core.Event{
+		{Type: core.EventRunStart},
+		{Type: core.EventRunEnd},
+	}
+
+	diff := DiffTraces(runA, runB, eventsA, eventsB)
+	if diff.DivergeType != "length_mismatch" {
+		t.Fatalf("expected length_mismatch, got %s", diff.DivergeType)
+	}
+	if diff.DivergeStep != 1 {
+		t.Fatalf("expected divergence at aligned step 1, got %d", diff.DivergeStep)
+	}
+	if diff.CommonPrefix != 1 {
+		t.Fatalf("expected common prefix 1, got %d", diff.CommonPrefix)
+	}
+}
+
+func mustDiffJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return b
+}

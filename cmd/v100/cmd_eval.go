@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/tripledoublev/v100/internal/core"
@@ -1120,6 +1121,7 @@ func evalCmd(cfgPath *string) *cobra.Command {
 func diffCmd() *cobra.Command {
 	var runDirFlag string
 	var format string
+	var useTUI bool
 	cmd := &cobra.Command{
 		Use:   "diff <run_id_a> <run_id_b>",
 		Short: "Find the point of divergence between two run traces",
@@ -1140,6 +1142,14 @@ func diffCmd() *cobra.Command {
 			}
 			eventsB, err := core.ReadAll(filepath.Join(runDir, runB, "trace.jsonl"))
 			if err != nil {
+				return err
+			}
+
+			if useTUI {
+				sd := eval.SyncTraces(runA, runB, eventsA, eventsB)
+				m := ui.NewDiffModel(sd)
+				p := tea.NewProgram(m, tea.WithAltScreen())
+				_, err := p.Run()
 				return err
 			}
 
@@ -1166,6 +1176,7 @@ func diffCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&runDirFlag, "run-dir", "", "base directory for runs (default: ./runs)")
 	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
+	cmd.Flags().BoolVar(&useTUI, "tui", false, "launch interactive side-by-side viewer")
 	return cmd
 }
 
