@@ -4,6 +4,12 @@ runs/
 /v100
 /v100_binary
 .gocache/
+/.cache/
+/.config/
+/.codex
+/go/
+/tmp/
+/ux-discovery.bench.toml
 *.local
 *.pdf
 /todos/roadmap.md
