@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.2.8 — 2026-04-04
+
+**Structured News, Persistent Memory, and Interactive Diffing**
+
+This patch release adds a source-aware news retrieval tool, introduces categorized persistent memory with expiry, and ships a side-by-side trace diff TUI, while tightening watchdog discipline, trace analytics, and interactive budget behavior.
+
+### Retrieval and Tooling
+
+- **`news_fetch` tool** — Added a dedicated structured news retrieval tool with feed-first collection, source-aware extraction, normalized headline items, and explicit partial-failure reporting for blocked or thin outlets.
+- **Image-aware Codex runs** — Codex provider flows now support image attachments, and policy defaults steer the agent toward direct image inspection when visual evidence is available.
+- **Shared blackboard state** — Blackboard memory flows are more useful across runs, with category-aware storage and better review/search behavior.
+
+### Memory and Autonomy
+
+- **Categorized persistent memory** — Durable memory now supports `fact`, `preference`, `constraint`, and `note` categories, plus note expiry/TTL and category-aware retrieval.
+- **Memory CLI and review upgrades** — `v100 memory` gained better remember/list/review ergonomics, and expired notes are pruned consistently from retrieval and operator views.
+- **Wake goal scanning** — Autonomous wake flows now mine TODOs, dirty files, recent failed runs, and failure artifacts to propose grounded next goals instead of relying on shallow workspace inspection.
+
+### Diffing and TUI
+
+- **Synchronized trace diff model** — Added an alignment-aware sync diff that can realign after mid-trace insertions or deletions, enabling reliable side-by-side comparison.
+- **Interactive `v100 diff --tui`** — New Bubble Tea diff viewer renders synchronized transcript panes, keeps scrolling aligned, and jumps directly to the first divergence.
+- **Panelized TUI layout** — Extracted panel rendering contracts and tightened pane sizing behavior, fixing status/trace allocation regressions and improving small-terminal behavior.
+
+### Reliability and Analysis
+
+- **Post-tool policy hooks** — Threshold and deduplication hooks now trigger on actual tool results, preventing tool-free turns from consuming failure budget and making repeated tool misuse visible at the right time.
+- **Trace analytics accuracy** — Stats and metrics now count executed tools from `tool.result`, classify tool-budget exhaustion more clearly, and avoid double-counting streamed tool-call placeholders.
+- **Budget continuation hardening** — Interactive budget continuation and compression telemetry are more explicit, with better handling when runs approach or exhaust token budgets.
+
 ## v0.2.7 — 2026-03-22
 
 **Autonomous Wake Hardening and Transcript Fixes**
