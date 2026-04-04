@@ -51,74 +51,44 @@ func (m *TUIModel) View() string {
 	}
 	layout := layoutPlan.panes
 
+	transcript := TranscriptPanel{m: m, viewportHeight: layout.transcriptHeight}
+
 	if m.showTrace {
-		leftSt := tuiPaneStyle
-		rightSt := tuiPaneStyle
-		if m.focus == focusTranscript {
-			leftSt = tuiActivePaneStyle
-		}
-		if m.focus == focusTrace {
-			rightSt = tuiActivePaneStyle
-		}
+		trace := TracePanel{m}
+		metrics := MetricsPanel{m}
+		status := StatusPanel{m: m, contentHeight: layout.maxStatusContentHeight}
 
 		// ── Height allocation ──────────────────────────────────────
-		// lipgloss .Height(n) sets CONTENT height (minimum); rendered = n + 2.
-		// Overflowing content expands the pane, so we render fixed panes
-		// first, measure their actual rendered height, then give the
-		// scrollable trace pane whatever is left.
+		// Render fixed-size panels first, measure their rendered height,
+		// then give the scrollable trace pane whatever is left.
 
-		// 1. Render metrics pane (fixed content, natural size)
 		var metricsPane string
 		var metricsRendered int
 		if m.showMetrics {
-			metricsView := LiveMetricDashboard(m.currentStep, m.maxSteps,
-				m.usedTokens, m.maxTokens, m.inputTokens, m.outputTokens,
-				m.usedCost, m.maxCost, m.lastStepMS, m.lastStepTools,
-				len(m.modelEvents), len(m.toolEvents), len(m.compressEvents),
-				m.statusMode, time.Since(m.lastEventAt), layout.rightWidth)
-			metricsPane = tuiPaneStyle.Width(layout.rightWidth).Render(metricsView)
+			metricsPane = m.renderPanel(metrics, layout.rightWidth, 0)
 			metricsRendered = lipgloss.Height(metricsPane)
 		}
 
-		// 2. Optionally render status pane (may wrap lines)
 		var statusPane string
 		var statusRendered int
 		if m.showStatus {
-			statusSt := tuiPaneStyle
-			if m.focus == focusStatus {
-				statusSt = tuiActivePaneStyle
-			}
-			statusPane = statusSt.Width(layout.rightWidth).Render(
-				m.statusView(layout.rightWidth, layout.maxStatusContentHeight))
+			statusPane = m.renderPanel(status, layout.rightWidth, 0)
 			statusRendered = lipgloss.Height(statusPane)
 		}
 
 		layout = layout.withRightColumnHeights(metricsRendered, statusRendered)
 
-		// Left column: content = remaining - 2 so rendered = remaining.
-		m.transcript.Width = layout.transcriptWidth
-		m.transcript.Height = layout.transcriptHeight
+		left := m.renderPanel(transcript, layout.leftWidth, layoutPlan.leftPaneHeight)
+		tracePane := m.renderPanel(trace, layout.rightWidth, layout.traceContentHeight)
 
-		// Trace viewport: content height minus 1 for the label line
-		m.traceView.Width = max(1, layout.rightWidth-4)
-		m.traceView.Height = layout.traceViewportHeight
-
-		left := leftSt.Width(layout.leftWidth).Height(layoutPlan.leftPaneHeight).Render(m.transcript.View())
-
-		tracePane := rightSt.Width(layout.rightWidth).Height(layout.traceContentHeight).Render(
-			tuiTraceLabelStyle.Render("trace") + "\n" + m.traceView.View(),
-		)
-
-		var rightCol string
-		var rightPanes []string
-		rightPanes = append(rightPanes, tracePane)
+		rightPanes := []string{tracePane}
 		if m.showMetrics {
 			rightPanes = append(rightPanes, metricsPane)
 		}
 		if m.showStatus {
 			rightPanes = append(rightPanes, statusPane)
 		}
-		rightCol = lipgloss.JoinVertical(lipgloss.Left, rightPanes...)
+		rightCol := lipgloss.JoinVertical(lipgloss.Left, rightPanes...)
 
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", rightCol)
 		view := lipgloss.JoinVertical(lipgloss.Left, header, panes, inputBox)
@@ -126,13 +96,8 @@ func (m *TUIModel) View() string {
 	}
 
 	// Single pane
-	tSt := tuiPaneStyle
-	if m.focus == focusTranscript {
-		tSt = tuiActivePaneStyle
-	}
-	m.transcript.Width = layoutPlan.inputWidth
-	m.transcript.Height = layoutPlan.leftPaneHeight
-	pane := tSt.Width(layoutPlan.inputWidth).Height(layoutPlan.singlePaneHeight).Render(m.transcript.View())
+	transcript.viewportHeight = layoutPlan.singlePaneHeight
+	pane := m.renderPanel(transcript, layoutPlan.inputWidth, layoutPlan.singlePaneHeight)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
 }
