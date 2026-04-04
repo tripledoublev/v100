@@ -127,6 +127,31 @@ func TestBuildWakePromptIncludesWorkspaceEntries(t *testing.T) {
 	}
 }
 
+func TestBuildWakePromptIncludesCandidateGoalsWithSourceAttribution(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "internal", "core", "goal.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package core\n// TODO: tighten wake lifecycle tests\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, err := buildWakePrompt(workspace, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "Candidate goals from local signals:") {
+		t.Fatalf("prompt missing candidate goal section: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Address TODO in internal/core/goal.go: tighten wake lifecycle tests") {
+		t.Fatalf("prompt missing candidate goal content: %q", prompt)
+	}
+	if !strings.Contains(prompt, "source: TODO signal at internal/core/goal.go:2") {
+		t.Fatalf("prompt missing source attribution: %q", prompt)
+	}
+}
+
 func TestExtractWakeGoalsParsesAssistantGoal(t *testing.T) {
 	goals := extractWakeGoals([]providers.Message{
 		{Role: "assistant", Content: "GOAL: Stabilize wake cycle startup reporting\nWHY: Startup lies are hard to debug."},

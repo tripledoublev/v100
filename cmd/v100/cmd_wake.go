@@ -906,15 +906,22 @@ func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, 
 	if err != nil {
 		return "", fmt.Errorf("scan workspace: %w", err)
 	}
+	candidates, err := core.ScanWorkspaceGoalCandidates(workspace)
+	if err != nil {
+		return "", fmt.Errorf("scan workspace goal candidates: %w", err)
+	}
+	candidateSection := formatWakeCandidateGoals(candidates)
 	if activeGoal != nil && strings.TrimSpace(activeGoal.Content) != "" {
 		return fmt.Sprintf(
 			"You are running an autonomous wake cycle for this workspace.\n"+
 				"Workspace: %s\n"+
 				"Observed workspace summary:\n%s\n\n"+
+				"%s"+
 				"Prior queued goal:\n%s\n\n"+
 				"Refine that queued goal into the single best immediate next-step engineering goal.\n"+
 				"Constraints:\n"+
 				"- Do not use tools.\n"+
+				"- Prefer a local candidate goal when it is clearly better grounded than the queued goal.\n"+
 				"- Keep continuity with the queued goal, but make the result more concrete and immediately actionable.\n"+
 				"- Respond using exactly this format:\n"+
 				"  GOAL: <one sentence>\n"+
@@ -925,6 +932,7 @@ func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, 
 				"  WHY: Workspace signals are currently too weak.\n",
 			workspace,
 			summary,
+			candidateSection,
 			activeGoal.Content,
 		), nil
 	}
@@ -933,9 +941,11 @@ func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, 
 		"You are running an autonomous wake cycle for this workspace.\n"+
 			"Workspace: %s\n"+
 			"Observed workspace summary:\n%s\n\n"+
+			"%s"+
 			"Produce exactly one concrete next-step engineering goal that would materially improve or advance this workspace.\n"+
 			"Constraints:\n"+
 			"- Do not use tools.\n"+
+			"- Ground the goal in the candidate list when one is already concrete enough.\n"+
 			"- Respond using exactly this format:\n"+
 			"  GOAL: <one sentence>\n"+
 			"  WHY: <one sentence>\n"+
@@ -945,7 +955,25 @@ func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, 
 			"  WHY: Workspace signals are currently too weak.\n",
 		workspace,
 		summary,
+		candidateSection,
 	), nil
+}
+
+func formatWakeCandidateGoals(candidates []core.GoalCandidate) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Candidate goals from local signals:\n")
+	for _, candidate := range candidates {
+		b.WriteString("- ")
+		b.WriteString(candidate.Content)
+		b.WriteString("\n  source: ")
+		b.WriteString(candidate.SourceAttribution)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 func extractWakeGoals(messages []providers.Message) []core.GeneratedGoal {
