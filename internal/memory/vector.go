@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -11,11 +12,13 @@ import (
 
 // MemoryItem is a single record in the vectorized blackboard.
 type MemoryItem struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
-	Embedding []float32 `json:"embedding,omitempty"`
-	Metadata  Metadata  `json:"metadata"`
-	TS        time.Time `json:"ts"`
+	ID        string     `json:"id"`
+	Content   string     `json:"content"`
+	Category  string     `json:"category,omitempty"` // fact, preference, constraint, note
+	Embedding []float32  `json:"embedding,omitempty"`
+	Metadata  Metadata   `json:"metadata"`
+	TS        time.Time  `json:"ts"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // Metadata holds extra context for a memory record.
@@ -85,11 +88,59 @@ func (s *VectorStore) Add(item MemoryItem) error {
 	return s.Save()
 }
 
+// Expired reports whether the item should no longer be surfaced.
+func (m MemoryItem) Expired(now time.Time) bool {
+	return m.ExpiresAt != nil && !m.ExpiresAt.After(now)
+}
+
 // Items returns a copy of the currently loaded items.
 func (s *VectorStore) Items() []MemoryItem {
-	out := make([]MemoryItem, len(s.items))
-	copy(out, s.items)
+	now := time.Now()
+	out := make([]MemoryItem, 0, len(s.items))
+	for _, item := range s.items {
+		if item.Expired(now) {
+			continue
+		}
+		out = append(out, item)
+	}
 	return out
+}
+
+// Remove deletes an item by ID and saves.
+func (s *VectorStore) Remove(id string) error {
+	kept := s.items[:0]
+	found := false
+	for _, item := range s.items {
+		if item.ID == id {
+			found = true
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if !found {
+		return fmt.Errorf("memory entry %q not found", id)
+	}
+	s.items = append([]MemoryItem(nil), kept...)
+	return s.Save()
+}
+
+// Prune removes expired items and saves if any were removed.
+func (s *VectorStore) Prune() int {
+	now := time.Now()
+	kept := s.items[:0]
+	removed := 0
+	for _, item := range s.items {
+		if item.Expired(now) {
+			removed++
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if removed > 0 {
+		s.items = append([]MemoryItem(nil), kept...)
+		_ = s.Save()
+	}
+	return removed
 }
 
 // Search returns top-k items sorted by cosine similarity to the query embedding.
@@ -99,7 +150,11 @@ func (s *VectorStore) Search(query []float32, k int) []SearchResult {
 	}
 
 	results := make([]SearchResult, 0, len(s.items))
+	now := time.Now()
 	for _, item := range s.items {
+		if item.Expired(now) {
+			continue
+		}
 		score := cosineSimilarity(query, item.Embedding)
 		results = append(results, SearchResult{Item: item, Score: score})
 	}

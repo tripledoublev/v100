@@ -93,3 +93,40 @@ func TestForgetAuditEntryRemovesManualMemoryLine(t *testing.T) {
 		t.Fatalf("manual memory removal corrupted remaining content: %q", string(data))
 	}
 }
+
+func TestLoadAuditEntriesPrunesExpiredWorkspaceMemory(t *testing.T) {
+	workspace := t.TempDir()
+	store := NewWorkspaceVectorStore(workspace)
+	past := time.Now().Add(-time.Hour)
+	if err := store.Add(MemoryItem{
+		ID:        "mem-expired",
+		Content:   "temporary note",
+		Category:  "note",
+		ExpiresAt: &past,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(MemoryItem{
+		ID:      "mem-live",
+		Content: "keep this fact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := LoadAuditEntries(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "mem-live" {
+		t.Fatalf("unexpected entries after prune: %+v", entries)
+	}
+
+	data, err := os.ReadFile(filepath.Join(workspace, "blackboard.vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "mem-expired") {
+		t.Fatalf("expired memory was not pruned from store: %s", text)
+	}
+}

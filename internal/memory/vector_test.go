@@ -4,6 +4,7 @@ import (
 	"math"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestVectorStore_AddAndLoad(t *testing.T) {
@@ -112,5 +113,87 @@ func TestCosineSimilarity(t *testing.T) {
 				t.Errorf("got %f, want %f", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestVectorStore_Remove(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &VectorStore{
+		runPath: filepath.Join(tmpDir, "bb.json"),
+		items: []MemoryItem{
+			{ID: "a", Content: "alpha"},
+			{ID: "b", Content: "beta"},
+			{ID: "c", Content: "gamma"},
+		},
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove("b"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(s.items))
+	}
+	if s.items[0].ID != "a" || s.items[1].ID != "c" {
+		t.Errorf("unexpected items: %v", s.items)
+	}
+	if err := s.Remove("missing"); err == nil {
+		t.Error("expected error for missing ID")
+	}
+}
+
+func TestVectorStore_Prune(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+	tmpDir := t.TempDir()
+	s := &VectorStore{
+		runPath: filepath.Join(tmpDir, "bb.json"),
+		items: []MemoryItem{
+			{ID: "expired", Content: "old note", Category: "note", ExpiresAt: &past},
+			{ID: "valid", Content: "still good", Category: "fact"},
+			{ID: "future", Content: "not yet", Category: "note", ExpiresAt: &future},
+		},
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	removed := s.Prune()
+	if removed != 1 {
+		t.Fatalf("expected 1 removed, got %d", removed)
+	}
+	if len(s.items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(s.items))
+	}
+	if s.items[0].ID != "valid" || s.items[1].ID != "future" {
+		t.Errorf("unexpected items after prune: %v", s.items)
+	}
+}
+
+func TestVectorStore_CategoryPersistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &VectorStore{
+		runPath: filepath.Join(tmpDir, "bb.json"),
+		items:   []MemoryItem{},
+	}
+	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	item := MemoryItem{
+		ID:       "cat-1",
+		Content:  "prefer postgres",
+		Category: "preference",
+		ExpiresAt: &exp,
+	}
+	if err := s.Add(item); err != nil {
+		t.Fatal(err)
+	}
+	s2 := &VectorStore{runPath: filepath.Join(tmpDir, "bb.json")}
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if s2.items[0].Category != "preference" {
+		t.Errorf("category not persisted: got %q", s2.items[0].Category)
+	}
+	if s2.items[0].ExpiresAt == nil || !s2.items[0].ExpiresAt.Equal(exp) {
+		t.Errorf("expires_at not persisted: got %v", s2.items[0].ExpiresAt)
 	}
 }

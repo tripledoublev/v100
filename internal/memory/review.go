@@ -13,12 +13,14 @@ import (
 type AuditEntry struct {
 	ID         string
 	Content    string
+	Category   string
 	Source     string
 	Provenance string
 	Scope      string
 	Origin     string
 	Confidence string
 	Timestamp  time.Time
+	ExpiresAt  *time.Time
 	Tags       map[string]string
 }
 
@@ -36,6 +38,7 @@ func LoadAuditEntries(workspaceDir string) ([]AuditEntry, error) {
 	if err := store.Load(); err != nil {
 		return nil, err
 	}
+	store.Prune()
 	for _, item := range store.Items() {
 		scope := item.Metadata.Tags["scope"]
 		if scope == "" {
@@ -52,12 +55,14 @@ func LoadAuditEntries(workspaceDir string) ([]AuditEntry, error) {
 		entries = append(entries, AuditEntry{
 			ID:         item.ID,
 			Content:    strings.TrimSpace(item.Content),
+			Category:   item.Category,
 			Source:     "workspace-memory",
 			Provenance: item.ID,
 			Scope:      scope,
 			Origin:     origin,
 			Confidence: confidence,
 			Timestamp:  item.TS,
+			ExpiresAt:  item.ExpiresAt,
 			Tags:       item.Metadata.Tags,
 		})
 	}
@@ -84,20 +89,7 @@ func ForgetAuditEntry(workspaceDir, id string) error {
 	if err := store.Load(); err != nil {
 		return err
 	}
-	kept := store.items[:0]
-	removed := false
-	for _, item := range store.items {
-		if item.ID == id {
-			removed = true
-			continue
-		}
-		kept = append(kept, item)
-	}
-	if !removed {
-		return fmt.Errorf("memory entry %q not found", id)
-	}
-	store.items = append([]MemoryItem(nil), kept...)
-	return store.Save()
+	return store.Remove(id)
 }
 
 func parseManualAuditEntries(text string) []AuditEntry {

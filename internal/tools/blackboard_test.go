@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tripledoublev/v100/internal/memory"
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
@@ -153,5 +155,56 @@ func TestBlackboardVectorStoreSharesWorkspaceAcrossRuns(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(workspace, "blackboard.vectors.json")); err != nil {
 		t.Fatalf("expected workspace vector store file: %v", err)
+	}
+}
+
+func TestBlackboardSearchSkipsExpiredWorkspaceMemory(t *testing.T) {
+	workspace := t.TempDir()
+	prov := &blackboardEmbeddingProvider{}
+	past := time.Now().Add(-time.Hour)
+	store := memory.NewWorkspaceVectorStore(workspace)
+	if err := store.Add(memory.MemoryItem{
+		ID:        "mem-expired",
+		Content:   "temporary replay note",
+		Embedding: []float32{1, 0},
+		Category:  "note",
+		ExpiresAt: &past,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(memory.MemoryItem{
+		ID:        "mem-live",
+		Content:   "durable replay convention",
+		Embedding: []float32{1, 0},
+		Category:  "fact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	searchArgs, err := json.Marshal(map[string]any{
+		"query": "replay",
+		"limit": 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	searchRes, err := BlackboardSearch().Exec(context.Background(), ToolCallContext{
+		RunID:            "run-search",
+		WorkspaceDir:     t.TempDir(),
+		HostWorkspaceDir: workspace,
+		Provider:         prov,
+	}, searchArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !searchRes.OK {
+		t.Fatalf("blackboard_search failed: %s", searchRes.Output)
+	}
+	if strings.Contains(searchRes.Output, "temporary replay note") {
+		t.Fatalf("expired memory should not be returned: %s", searchRes.Output)
+	}
+	if !strings.Contains(searchRes.Output, "durable replay convention") {
+		t.Fatalf("live memory missing from search output: %s", searchRes.Output)
 	}
 }

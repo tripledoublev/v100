@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/memory"
@@ -61,5 +64,68 @@ func TestMemoryRememberCmdStoresWorkspaceEntry(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMemoryListCmdOmitsExpiredEntries(t *testing.T) {
+	root := t.TempDir()
+	past := time.Now().Add(-time.Hour)
+	store := memory.NewWorkspaceVectorStore(root)
+	if err := store.Add(memory.MemoryItem{
+		ID:        "mem-expired",
+		Content:   "temporary debugging note",
+		Category:  "note",
+		ExpiresAt: &past,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(memory.MemoryItem{
+		ID:       "mem-live",
+		Content:  "durable workspace fact",
+		Category: "fact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := ""
+	if err := withWorkingDir(root, func() error {
+		out, err := captureStdout(func() error {
+			cmd := memoryCmd(&cfgPath)
+			cmd.SetArgs([]string{"list"})
+			return cmd.Execute()
+		})
+		if err != nil {
+			return err
+		}
+		if strings.Contains(out, "temporary debugging note") {
+			t.Fatalf("expired entry should not be listed:\n%s", out)
+		}
+		if !strings.Contains(out, "durable workspace fact") {
+			t.Fatalf("live entry missing from list:\n%s", out)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "blackboard.vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "mem-expired") {
+		t.Fatalf("expired entry should have been pruned from disk: %s", string(data))
+	}
+}
+
+func TestParseDurationRejectsMalformedDays(t *testing.T) {
+	if _, err := parseDuration("7xd"); err == nil {
+		t.Fatal("expected malformed day duration to fail")
+	}
+	d, err := parseDuration("7d")
+	if err != nil {
+		t.Fatalf("parseDuration(7d) error = %v", err)
+	}
+	if d != 7*24*time.Hour {
+		t.Fatalf("parseDuration(7d) = %v", d)
 	}
 }

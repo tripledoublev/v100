@@ -18,10 +18,12 @@ const (
 
 type memoryReferenceEntry struct {
 	Content    string
+	Category   string
 	Source     string
 	Provenance string
 	Confidence int
 	TS         time.Time
+	ExpiresAt  *time.Time
 	Tags       map[string]string
 	Order      int
 }
@@ -61,9 +63,11 @@ func (l *Loop) loadMemoryReferenceEntries() []memoryReferenceEntry {
 		for i, item := range items {
 			entries = append(entries, memoryReferenceEntry{
 				Content:    strings.TrimSpace(item.Content),
+				Category:   item.Category,
 				Source:     "workspace-memory",
 				Provenance: item.ID,
 				TS:         item.TS,
+				ExpiresAt:  item.ExpiresAt,
 				Tags:       item.Metadata.Tags,
 				Order:      i,
 			})
@@ -126,10 +130,22 @@ func selectMemoryReferenceEntries(entries []memoryReferenceEntry, query string, 
 		limit = defaultMemoryReferenceResultLimit
 	}
 
-	terms := memoryQueryTerms(query)
-	scored := make([]memoryReferenceEntry, 0, len(entries))
+	now := time.Now()
+	active := make([]memoryReferenceEntry, 0, len(entries))
 	for _, entry := range entries {
+		if entry.ExpiresAt != nil && !entry.ExpiresAt.After(now) {
+			continue
+		}
+		active = append(active, entry)
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	terms := memoryQueryTerms(query)
+	scored := make([]memoryReferenceEntry, 0, len(active))
+	for _, entry := range active {
 		score := scoreMemoryReferenceEntry(entry, query, terms)
+		score += categoryBoost(entry.Category, query)
 		if score == 0 && !always {
 			continue
 		}
@@ -140,8 +156,8 @@ func selectMemoryReferenceEntries(entries []memoryReferenceEntry, query string, 
 		if !always && !memoryLooksRelevant(query) {
 			return nil
 		}
-		scored = make([]memoryReferenceEntry, 0, len(entries))
-		scored = append(scored, entries...)
+		scored = make([]memoryReferenceEntry, 0, len(active))
+		scored = append(scored, active...)
 	}
 
 	sort.SliceStable(scored, func(i, j int) bool {
@@ -217,6 +233,21 @@ func scoreMemoryReferenceEntry(entry memoryReferenceEntry, query string, terms [
 		}
 	}
 	return score
+}
+
+func categoryBoost(category, query string) int {
+	switch strings.ToLower(category) {
+	case "constraint":
+		return 4 // constraints are always highly relevant
+	case "preference":
+		q := strings.ToLower(query)
+		for _, kw := range []string{"style", "tone", "format", "prefer", "convention", "how should"} {
+			if strings.Contains(q, kw) {
+				return 2
+			}
+		}
+	}
+	return 0
 }
 
 func buildRetrievedMemoryReferenceMessage(entries []memoryReferenceEntry, maxTokens int) string {

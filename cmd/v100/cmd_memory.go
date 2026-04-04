@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ func memoryCmd(cfgPath *string) *cobra.Command {
 }
 
 func memoryListCmd(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	var categoryFilter string
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List durable memory entries for the current workspace",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,6 +45,15 @@ func memoryListCmd(cfgPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if categoryFilter != "" {
+				filtered := entries[:0]
+				for _, e := range entries {
+					if strings.EqualFold(e.Category, categoryFilter) {
+						filtered = append(filtered, e)
+					}
+				}
+				entries = filtered
+			}
 			if len(entries) == 0 {
 				fmt.Println("No durable memory entries found in this workspace.")
 				return nil
@@ -53,6 +64,8 @@ func memoryListCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&categoryFilter, "category", "", "filter by category (fact, preference, constraint, note)")
+	return cmd
 }
 
 func memoryShowCmd(cfgPath *string) *cobra.Command {
@@ -83,6 +96,8 @@ func memoryShowCmd(cfgPath *string) *cobra.Command {
 
 func memoryRememberCmd(cfgPath *string) *cobra.Command {
 	var tagFlags []string
+	var category string
+	var expires string
 	cmd := &cobra.Command{
 		Use:   "remember <text>",
 		Short: "Store a durable memory entry in the current workspace",
@@ -117,21 +132,43 @@ func memoryRememberCmd(cfgPath *string) *cobra.Command {
 			if _, ok := tags["confidence"]; !ok {
 				tags["confidence"] = "manual"
 			}
+
+			var expiresAt *time.Time
+			if expires != "" {
+				d, parseErr := parseDuration(expires)
+				if parseErr != nil {
+					return fmt.Errorf("invalid --expires value %q: %w", expires, parseErr)
+				}
+				t := time.Now().UTC().Add(d)
+				expiresAt = &t
+			}
+
 			item := memory.MemoryItem{
 				ID:        fmt.Sprintf("mem-%x", time.Now().UnixNano()),
 				Content:   content,
+				Category:  category,
 				Embedding: emb.Embedding,
 				Metadata:  memory.Metadata{Tags: tags},
 				TS:        time.Now().UTC(),
+				ExpiresAt: expiresAt,
 			}
 			if err := store.Add(item); err != nil {
 				return err
 			}
-			fmt.Println("stored memory entry: " + item.ID)
+			label := "stored memory entry: " + item.ID
+			if category != "" {
+				label += " [" + category + "]"
+			}
+			if expiresAt != nil {
+				label += " (expires " + expiresAt.Format(time.RFC3339) + ")"
+			}
+			fmt.Println(label)
 			return nil
 		},
 	}
 	cmd.Flags().StringArrayVar(&tagFlags, "tag", nil, "memory tag in key=value form")
+	cmd.Flags().StringVar(&category, "category", "", "memory category (fact, preference, constraint, note)")
+	cmd.Flags().StringVar(&expires, "expires", "", "TTL duration (e.g. 1h, 7d, 30m)")
 	return cmd
 }
 
@@ -158,22 +195,48 @@ func memoryForgetCmd(cfgPath *string) *cobra.Command {
 func printAuditEntry(entry memory.AuditEntry) {
 	meta := []string{
 		"id=" + entry.ID,
-		"source=" + entry.Source,
-		"scope=" + entry.Scope,
-		"origin=" + entry.Origin,
-		"confidence=" + entry.Confidence,
 	}
+	if entry.Category != "" {
+		meta = append(meta, "category="+entry.Category)
+	}
+	meta = append(meta,
+		"source="+entry.Source,
+		"scope="+entry.Scope,
+		"origin="+entry.Origin,
+		"confidence="+entry.Confidence,
+	)
 	if entry.Provenance != "" {
 		meta = append(meta, "provenance="+entry.Provenance)
 	}
 	if !entry.Timestamp.IsZero() {
 		meta = append(meta, "ts="+entry.Timestamp.UTC().Format("2006-01-02T15:04:05Z"))
 	}
+	if entry.ExpiresAt != nil {
+		meta = append(meta, "expires="+entry.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"))
+	}
 	if len(entry.Tags) > 0 {
 		meta = append(meta, "tags="+formatAuditTags(entry.Tags))
 	}
 	fmt.Println(strings.Join(meta, " "))
 	fmt.Println("  " + entry.Content)
+}
+
+// parseDuration parses a duration string supporting "d" for days in addition
+// to standard Go durations (h, m, s).
+func parseDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(strings.ToLower(s), "d") {
+		daysText := strings.TrimSuffix(strings.ToLower(s), "d")
+		if daysText == "" {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		days, err := strconv.Atoi(daysText)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
 }
 
 func formatAuditTags(tags map[string]string) string {

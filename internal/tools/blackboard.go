@@ -165,6 +165,7 @@ func (t *blackboardSearchTool) Exec(ctx context.Context, call ToolCallContext, a
 	if err := s.Load(); err != nil {
 		return failResult(start, "load vector store: "+err.Error()), nil
 	}
+	s.Prune()
 
 	// 3. Search
 	results := s.Search(embResp.Embedding, a.Limit)
@@ -194,8 +195,9 @@ func (t *blackboardStoreTool) InputSchema() json.RawMessage {
 		"required": ["content"],
 		"properties": {
 			"content": {"type": "string"},
+			"category": {"type": "string", "enum": ["fact", "preference", "constraint", "note"], "description": "Memory category"},
 			"tags": {"type": "object", "additionalProperties": {"type": "string"}}
-		}
+}
 	}`)
 }
 func (t *blackboardStoreTool) OutputSchema() json.RawMessage {
@@ -204,8 +206,9 @@ func (t *blackboardStoreTool) OutputSchema() json.RawMessage {
 func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	start := time.Now()
 	var a struct {
-		Content string            `json:"content"`
-		Tags    map[string]string `json:"tags"`
+		Content  string            `json:"content"`
+		Category string            `json:"category"`
+		Tags     map[string]string `json:"tags"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
@@ -229,6 +232,7 @@ func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, ar
 	item := memory.MemoryItem{
 		ID:        fmt.Sprintf("mem-%x", time.Now().UnixNano()),
 		Content:   a.Content,
+		Category:  a.Category,
 		Embedding: embResp.Embedding,
 		Metadata: memory.Metadata{
 			AgentRole: "", // could be injected from context if available
