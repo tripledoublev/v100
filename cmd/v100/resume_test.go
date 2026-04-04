@@ -113,9 +113,15 @@ func TestResolveResumeProviderSelectionUsesExplicitModelOverride(t *testing.T) {
 
 func TestBuildProviderWithModelUsesExplicitSelection(t *testing.T) {
 	cfg := testConfig()
-	cfg.Providers["minimax"] = config.ProviderConfig{Type: "minimax", DefaultModel: "cfg-default"}
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	cfg.Providers["openai"] = config.ProviderConfig{
+		Type:         "openai",
+		DefaultModel: "cfg-default",
+		BaseURL:      "https://api.openai.com/v1",
+		Auth:         config.AuthConfig{Env: "OPENAI_API_KEY"},
+	}
 
-	prov, err := buildProviderWithModel(cfg, "minimax", "trace-model")
+	prov, err := buildProviderWithModel(cfg, "openai", "trace-model")
 	if err != nil {
 		t.Fatalf("buildProviderWithModel returned error: %v", err)
 	}
@@ -127,8 +133,8 @@ func TestBuildProviderWithModelUsesExplicitSelection(t *testing.T) {
 	if metadata.Model != "trace-model" {
 		t.Fatalf("metadata.Model = %q, want trace-model", metadata.Model)
 	}
-	if cfg.Providers["minimax"].DefaultModel != "cfg-default" {
-		t.Fatalf("buildProviderWithModel should not mutate config default, got %q", cfg.Providers["minimax"].DefaultModel)
+	if cfg.Providers["openai"].DefaultModel != "cfg-default" {
+		t.Fatalf("buildProviderWithModel should not mutate config default, got %q", cfg.Providers["openai"].DefaultModel)
 	}
 }
 

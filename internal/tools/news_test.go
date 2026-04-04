@@ -81,12 +81,13 @@ func TestNewsFetchExecParsesRSSAndFiltersFreshItems(t *testing.T) {
 }
 
 func TestNewsFetchExecExtractsJSONLDHeadlines(t *testing.T) {
+	now := time.Now().UTC()
 	pageURL := "https://fixture.example/frontpage"
 	session := &routingFakeDockerSession{
 		routes: map[string]executor.Result{
 			pageURL: {
 				ExitCode: 0,
-				Stdout: "200\ntext/html; charset=utf-8\n\n__V100_CURL_BODY__\n" + `<!doctype html>
+				Stdout: fmt.Sprintf("200\ntext/html; charset=utf-8\n\n__V100_CURL_BODY__\n"+`<!doctype html>
 <html>
   <head>
     <title>Example News | Latest Headlines</title>
@@ -98,14 +99,14 @@ func TestNewsFetchExecExtractsJSONLDHeadlines(t *testing.T) {
             "@type": "NewsArticle",
             "headline": "Quebec budget talks intensify ahead of deadline",
             "url": "https://fixture.example/story-1",
-            "datePublished": "2026-04-03T07:30:00Z",
+            "datePublished": "%s",
             "description": "Negotiations intensified overnight at the National Assembly."
           },
           {
             "@type": "NewsArticle",
             "headline": "Montreal prepares major spring street closures",
             "url": "https://fixture.example/story-2",
-            "datePublished": "2026-04-03T08:15:00Z",
+            "datePublished": "%s",
             "description": "Drivers are being warned about a new round of closures."
           }
         ]
@@ -116,6 +117,9 @@ func TestNewsFetchExecExtractsJSONLDHeadlines(t *testing.T) {
     <h1>Example News</h1>
   </body>
 </html>`,
+					now.Add(-2*time.Hour).Format(time.RFC3339),
+					now.Add(-90*time.Minute).Format(time.RFC3339),
+				),
 			},
 		},
 	}
