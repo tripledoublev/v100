@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -22,12 +23,17 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	var stepMode bool
 	var replaceModel string
 	var injectTool []string
+	var useTUI bool
 
 	cmd := &cobra.Command{
 		Use:   "replay <run_id>",
 		Short: "Pretty-print a run trace as a readable transcript",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateReplayFlags(deterministic, stepMode, strings.TrimSpace(replaceModel), injectTool, useTUI); err != nil {
+				return err
+			}
+
 			runID := args[0]
 			runDir, err := findRunDir(runID)
 			if err != nil {
@@ -55,6 +61,13 @@ func replayCmd(cfgPath *string) *cobra.Command {
 				})
 			}
 
+			if useTUI {
+				m := ui.NewScrubModel(runID, events)
+				p := tea.NewProgram(m, tea.WithAltScreen())
+				_, err := p.Run()
+				return err
+			}
+
 			for _, ev := range events {
 				ui.PrintReplayEvent(ev)
 			}
@@ -65,7 +78,29 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&stepMode, "step", false, "pause between deterministic replay events")
 	cmd.Flags().StringVar(&replaceModel, "replace-model", "", "run recorded model.call events against this model and show counterfactual responses")
 	cmd.Flags().StringArrayVar(&injectTool, "inject-tool", nil, "inject tool output during deterministic replay: name=output (repeatable)")
+	cmd.Flags().BoolVar(&useTUI, "tui", false, "launch interactive trace scrubber")
 	return cmd
+}
+
+func validateReplayFlags(deterministic, stepMode bool, replaceModel string, injectTool []string, useTUI bool) error {
+	if useTUI {
+		if deterministic || stepMode || replaceModel != "" || len(injectTool) > 0 {
+			return fmt.Errorf("--tui cannot be combined with deterministic replay flags")
+		}
+		return nil
+	}
+	if !deterministic {
+		if stepMode {
+			return fmt.Errorf("--step requires --deterministic")
+		}
+		if replaceModel != "" {
+			return fmt.Errorf("--replace-model requires --deterministic")
+		}
+		if len(injectTool) > 0 {
+			return fmt.Errorf("--inject-tool requires --deterministic")
+		}
+	}
+	return nil
 }
 
 type deterministicReplayOptions struct {
