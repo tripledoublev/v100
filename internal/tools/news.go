@@ -153,6 +153,9 @@ var newsSourcePresets = []newsSourcePreset{
 	{Key: "radio_canada_quebec", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/regions/quebec/", Kind: "page", Region: "quebec", Language: "fr", Section: "quebec"},
 	{Key: "ledevoir", Name: "Le Devoir", URL: "https://www.ledevoir.com/", Kind: "page", Region: "quebec", Language: "fr", Section: "actualites"},
 	{Key: "journaldemontreal", Name: "Journal de Montreal", URL: "https://www.journaldemontreal.com/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "montreal"},
+	{Key: "ars_technica", Name: "Ars Technica", URL: "https://arstechnica.com/?feed=rss2", Kind: "feed", Region: "world", Topic: "tech", Language: "en", Section: "technology"},
+	{Key: "ars_technica_science", Name: "Ars Technica", URL: "https://feeds.arstechnica.com/arstechnica/science", Kind: "feed", Region: "world", Topic: "science", Language: "en", Section: "science"},
+	{Key: "ars_technica_culture", Name: "Ars Technica", URL: "https://feeds.arstechnica.com/arstechnica/culture", Kind: "feed", Region: "world", Topic: "culture", Language: "en", Section: "culture"},
 }
 
 func NewsFetch() Tool { return &newsFetchTool{} }
@@ -447,11 +450,17 @@ func resolveNewsSourceRequests(a newsFetchArgs) []newsSourceRequest {
 		case "business", "markets":
 			wanted = append(wanted, "bbc_business")
 		case "tech", "technology":
-			wanted = append(wanted, "bbc_technology")
+			wanted = append(wanted, "bbc_technology", "ars_technica")
+		case "science":
+			wanted = append(wanted, "ars_technica_science")
+		case "culture":
+			wanted = append(wanted, "ars_technica_culture")
 		default:
 			wanted = append(wanted, "bbc_world")
 		}
-		wanted = append(wanted, "guardian_world")
+		if a.Topic == "general" || a.Topic == "" {
+			wanted = append(wanted, "guardian_world")
+		}
 	default:
 		wanted = append(wanted, "bbc_world", "cbc_canada", "ctv_canada")
 		if a.Language != "en" {
@@ -912,6 +921,8 @@ func newsItemMatchesTopic(item newsItem, topic string) bool {
 		"markets":    {"market", "stocks", "bond", "rates", "earnings", "trading", "economy", "jobs"},
 		"tech":       {"tech", "technology", "ai", "software", "chip", "app", "internet", "cyber"},
 		"technology": {"tech", "technology", "ai", "software", "chip", "app", "internet", "cyber"},
+		"science":    {"science", "research", "study", "space", "astronomy", "nasa", "physics", "biology", "climate", "medicine"},
+		"culture":    {"culture", "media", "film", "movie", "tv", "television", "music", "game", "gaming", "book", "art", "entertainment"},
 	}
 	for _, keyword := range keywords[topic] {
 		if strings.Contains(text, keyword) {

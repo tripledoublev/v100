@@ -241,6 +241,77 @@ func TestResolveNewsSourceRequestsMontrealFrench(t *testing.T) {
 	}
 }
 
+func TestResolveNewsSourceRequestsWorldTopics(t *testing.T) {
+	tests := []struct {
+		name    string
+		topic   string
+		wants   []string
+		rejects []string
+	}{
+		{
+			name:    "tech includes ars default",
+			topic:   "tech",
+			wants:   []string{"bbc_technology", "ars_technica"},
+			rejects: []string{"guardian_world"},
+		},
+		{
+			name:    "science uses science feed",
+			topic:   "science",
+			wants:   []string{"ars_technica_science"},
+			rejects: []string{"bbc_world", "guardian_world"},
+		},
+		{
+			name:    "culture uses culture feed",
+			topic:   "culture",
+			wants:   []string{"ars_technica_culture"},
+			rejects: []string{"bbc_world", "guardian_world"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reqs := resolveNewsSourceRequests(newsFetchArgs{
+				Region:   "world",
+				Language: "en",
+				Topic:    tc.topic,
+				MaxItems: 5,
+			})
+			got := make([]string, 0, len(reqs))
+			for _, req := range reqs {
+				got = append(got, req.Key)
+			}
+			for _, want := range tc.wants {
+				if !containsString(got, want) {
+					t.Fatalf("expected source %q in %v", want, got)
+				}
+			}
+			for _, reject := range tc.rejects {
+				if containsString(got, reject) {
+					t.Fatalf("did not expect source %q in %v", reject, got)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterItemsByTopicSupportsScienceAndCulture(t *testing.T) {
+	items := []newsItem{
+		{Headline: "NASA science team studies climate signals from deep space", Section: "science"},
+		{Headline: "Gaming studios prepare a major culture showcase this fall", Section: "culture"},
+		{Headline: "Parliament opens a new budget session", Section: "politics"},
+	}
+
+	science := filterItemsByTopic(items, "science")
+	if len(science) != 1 || !strings.Contains(strings.ToLower(science[0].Headline), "nasa") {
+		t.Fatalf("science filter returned %+v", science)
+	}
+
+	culture := filterItemsByTopic(items, "culture")
+	if len(culture) != 1 || !strings.Contains(strings.ToLower(culture[0].Headline), "gaming") {
+		t.Fatalf("culture filter returned %+v", culture)
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {
