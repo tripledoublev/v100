@@ -137,8 +137,14 @@ func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url s
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		res := failResult(start, "request failed: "+err.Error())
-		return fetchedHTTPResponse{}, &res, nil
+		// If direct HTTP fails and a session is available, try via the session.
+		// This handles environments where the Go HTTP client is blocked for specific
+		// hosts but shell curl can reach them (e.g. cbc.ca in some sandboxes).
+		if call.Session != nil {
+			return fetchHTTPInSession(ctx, call, start, url, maxBytes)
+		}
+		fail := failResult(start, "request failed: "+err.Error())
+		return fetchedHTTPResponse{}, &fail, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
