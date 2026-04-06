@@ -318,7 +318,8 @@ func runResearchLoop(
 		}
 
 		// Print summary
-		if decision == "keep" {
+		switch decision {
+		case "keep":
 			fmt.Printf("  %s  Metric: %s (improved from %s)\n", ui.OK("keep"), formatMetric(metric), formatMetric(bestMetric))
 			// Refresh targetContent for next round (agent needs current state)
 			if newContent, err := os.ReadFile(researchCfg.Target.File); err == nil {
@@ -326,9 +327,9 @@ func runResearchLoop(
 			} else {
 				fmt.Printf("  %s  Failed to refresh target file: %v\n", ui.Warn("warn"), err)
 			}
-		} else if decision == "crash" {
+		case "crash":
 			fmt.Printf("  %s  Crashed (metric: %s, mem: %.1f GB)\n", ui.Fail("crash"), formatMetric(metric), memGB)
-		} else {
+		default:
 			fmt.Printf("  %s  Metric: %s (no improvement, reverting)\n", ui.Warn("discard"), formatMetric(metric))
 		}
 
