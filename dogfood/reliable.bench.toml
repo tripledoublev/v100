@@ -1,0 +1,30 @@
+name = "dogfood-reliable-v1"
+
+[[prompts]]
+message = "Inspect internal/core/executor/factory.go. Does this repo support a docker sandbox backend? Answer yes or no."
+expected = "yes"
+scorer = "contains"
+
+[[prompts]]
+message = "Inspect internal/tools/tool.go and internal/core/path_mapper.go. Are subprocess tool outputs sanitized back to /workspace paths? Answer yes or no."
+expected = "yes"
+scorer = "contains"
+
+[[prompts]]
+message = "Inspect internal/core/workspace_applyback.go. What artifact filename records sandbox review results? Answer with the filename only."
+expected = "sandbox_apply_back.json"
+scorer = "contains"
+
+[[variants]]
+name = "codex-react"
+provider = "codex"
+model = "gpt-5.4"
+solver = "react"
+budget_steps = 4
+
+[[variants]]
+name = "minimax-react"
+provider = "minimax"
+model = "MiniMax-M2.7"
+solver = "react"
+budget_steps = 4
