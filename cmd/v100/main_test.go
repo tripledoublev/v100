@@ -284,7 +284,7 @@ default_model = "gpt-5.4"
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"codex", "gemini", "minimax", "anthropic", "openai", "ollama"} {
+	for _, name := range []string{"codex", "gemini", "minimax", "anthropic", "openai", "ollama", "llamacpp"} {
 		if _, ok := cfg.Providers[name]; !ok {
 			t.Fatalf("expected provider %q to be present after load", name)
 		}

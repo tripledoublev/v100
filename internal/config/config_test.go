@@ -44,6 +44,17 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected MiniMax-M2.7, got %s", cfg.Providers["minimax"].DefaultModel)
 	}
 
+	// Check that llamacpp provider exists in defaults
+	if _, ok := cfg.Providers["llamacpp"]; !ok {
+		t.Error("expected llamacpp provider in defaults")
+	}
+	if cfg.Providers["llamacpp"].Type != "llamacpp" {
+		t.Errorf("expected type llamacpp, got %s", cfg.Providers["llamacpp"].Type)
+	}
+	if cfg.Providers["llamacpp"].DefaultModel != "gemma-4-E2B-it-GGUF:Q8_0" {
+		t.Errorf("expected gemma-4-E2B-it-GGUF:Q8_0, got %s", cfg.Providers["llamacpp"].DefaultModel)
+	}
+
 	// Verify sh tool is enabled and dangerous by default
 	shEnabled := false
 	for _, tool := range cfg.Tools.Enabled {
@@ -82,6 +93,11 @@ default_model = "gpt-4o"
 base_url = "https://api.openai.com/v1"
 [providers.openai.auth]
 env = "OPENAI_API_KEY"
+
+[providers.llamacpp]
+type = "llamacpp"
+default_model = "gemma-4-E2B-it-GGUF:Q8_0"
+base_url = "http://127.0.0.1:19091/v1"
 
 [providers.anthropic]
 type = "anthropic"
@@ -190,6 +206,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "MiniMax-M2.7") {
 		t.Error("default TOML should reference MiniMax-M2.7 model")
+	}
+	if !contains(toml, "[providers.llamacpp]") {
+		t.Error("default TOML should contain llamacpp provider section")
+	}
+	if !contains(toml, "gemma-4-E2B-it-GGUF:Q8_0") {
+		t.Error("default TOML should reference the llamacpp default model")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

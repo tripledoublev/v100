@@ -27,7 +27,7 @@ The goal is to make agent behavior measurable and reproducible so different prom
 - **Budget enforcement** — hard limits on steps, tokens, and cost
 - **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
 - **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Six built-in providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, MiniMax, or local Ollama
+- **Seven built-in providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, MiniMax, local Ollama, or local llama.cpp
 - **Two UIs** — line-by-line CLI (default) or Bubble Tea "Mission Control" TUI (`--tui`)
 - **Dev supervisor** — restart on demand by creating `.v100-reload`
 
@@ -81,6 +81,9 @@ v100 run --provider minimax
 
 # Use local Ollama
 v100 run --provider ollama --model qwen3.5:9b
+
+# Use local llama.cpp
+v100 run --provider llamacpp --model gemma-4-E2B-it-GGUF:Q8_0
 
 # Use plan-execute solver with replanning
 v100 run --solver plan_execute --max-replans 3
@@ -194,6 +197,7 @@ v100 run --provider ollama --model qwen3.5:9b
 | `gemini` | OAuth (`v100 login --provider gemini`) | `gemini-2.5-flash` | yes | subscription-backed Gemini runs |
 | `minimax` | OAuth (`v100 login --provider minimax`) | `MiniMax-M2.7` | yes | high-fidelity research runs |
 | `ollama` | local daemon | `qwen3.5:2b` | yes | fully local runs |
+| `llamacpp` | local llama.cpp server | `gemma-4-E2B-it-GGUF:Q8_0` | yes | fully local runs with OpenAI-compatible endpoints |
 
 OAuth client config for subscription providers lives at `~/.config/v100/oauth_credentials.json`.
 
@@ -319,7 +323,7 @@ After a sandboxed run, changes can be merged back to the host workspace:
 ### `v100 run` flags
 
 ```
---provider string              Provider name (codex, gemini, openai, ollama, anthropic, minimax)
+--provider string              Provider name (codex, gemini, openai, ollama, llamacpp, anthropic, minimax)
 --model string                 Model override
 --solver string                Solver strategy: react (default), plan_execute
 --max-replans int              Max replans for plan_execute solver
@@ -422,6 +426,11 @@ env = "ANTHROPIC_API_KEY"
 type = "ollama"
 default_model = "qwen3.5:9b"
 base_url = "http://localhost:11434"
+
+[providers.llamacpp]
+type = "llamacpp"
+default_model = "gemma-4-E2B-it-GGUF:Q8_0"
+base_url = "http://127.0.0.1:19091/v1"
 
 [providers.gemini]
 type = "gemini"

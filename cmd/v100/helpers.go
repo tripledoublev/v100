@@ -140,6 +140,8 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 		raw, err = providers.NewOpenAIProvider(authEnv, pc.BaseURL, pc.DefaultModel)
 	case "ollama":
 		raw, err = providers.NewOllamaProvider(pc.BaseURL, pc.DefaultModel, pc.Auth.Username, pc.Auth.Password)
+	case "llamacpp", "llama.cpp", "llama-cpp":
+		raw, err = providers.NewLlamaCppProvider(pc.BaseURL, pc.DefaultModel)
 	case "gemini":
 		raw, err = providers.NewGeminiProvider("", pc.DefaultModel)
 	case "anthropic":

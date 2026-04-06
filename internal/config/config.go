@@ -131,6 +131,11 @@ func DefaultConfig() *Config {
 				DefaultModel: "qwen3.5:2b",
 				BaseURL:      "http://localhost:11434",
 			},
+			"llamacpp": {
+				Type:         "llamacpp",
+				DefaultModel: "gemma-4-E2B-it-GGUF:Q8_0",
+				BaseURL:      "http://127.0.0.1:19091/v1",
+			},
 			"gemini": {
 				Type:         "gemini",
 				DefaultModel: "gemini-2.5-flash",
@@ -241,6 +246,11 @@ env = "OPENAI_API_KEY"
 type = "ollama"
 default_model = "qwen3.5:2b"
 base_url = "http://localhost:11434"
+
+[providers.llamacpp]
+type = "llamacpp"
+default_model = "gemma-4-E2B-it-GGUF:Q8_0"
+base_url = "http://127.0.0.1:19091/v1"
 
 [providers.gemini]
 type = "gemini"

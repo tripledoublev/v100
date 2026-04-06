@@ -431,6 +431,35 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					} else {
 						providerIssue(name, fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode))
 					}
+				case "llamacpp", "llama.cpp", "llama-cpp":
+					baseURL := strings.TrimSpace(pc.BaseURL)
+					if baseURL == "" {
+						baseURL = "http://127.0.0.1:8080/v1"
+					}
+					envURL := os.Getenv("LLAMA_CPP_BASE_URL")
+					if envURL == "" {
+						envURL = os.Getenv("LLAMA_SERVER_URL")
+					}
+					if envURL == "" {
+						envURL = os.Getenv("LLAMA_BASE_URL")
+					}
+					if envURL != "" && envURL != baseURL {
+						fmt.Println(ui.Warn(fmt.Sprintf("Provider %s: env LLAMA_CPP_BASE_URL=%s differs from config base_url=%s (config wins)", name, envURL, baseURL)))
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+					resp, err := http.DefaultClient.Do(req)
+					cancel()
+					if err != nil {
+						providerIssue(name, fmt.Sprintf("Provider %s: cannot reach %s (%v)", name, baseURL, err))
+						break
+					}
+					_ = resp.Body.Close()
+					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: reachable at %s", name, baseURL)))
+					} else {
+						providerIssue(name, fmt.Sprintf("Provider %s: %s returned HTTP %d", name, baseURL, resp.StatusCode))
+					}
 				case "anthropic":
 					authEnv := pc.Auth.Env
 					if authEnv == "" {

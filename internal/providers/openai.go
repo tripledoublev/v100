@@ -19,6 +19,14 @@ type OpenAIProvider struct {
 	defaultModel string
 }
 
+func newOpenAIClient(apiKey, baseURL string) *openai.Client {
+	config := openai.DefaultConfig(apiKey)
+	if baseURL != "" {
+		config.BaseURL = baseURL
+	}
+	return openai.NewClientWithConfig(config)
+}
+
 func NewOpenAIProvider(authEnv, baseURL, model string) (*OpenAIProvider, error) {
 	if authEnv == "" {
 		authEnv = "OPENAI_API_KEY"
@@ -28,17 +36,11 @@ func NewOpenAIProvider(authEnv, baseURL, model string) (*OpenAIProvider, error) 
 		return nil, fmt.Errorf("openai: %s not set", authEnv)
 	}
 
-	config := openai.DefaultConfig(apiKey)
-	if baseURL != "" {
-		config.BaseURL = baseURL
-	}
-
-	client := openai.NewClientWithConfig(config)
 	if model == "" {
 		model = "gpt-4o"
 	}
 
-	return &OpenAIProvider{client: client, defaultModel: model}, nil
+	return &OpenAIProvider{client: newOpenAIClient(apiKey, baseURL), defaultModel: model}, nil
 }
 
 func (p *OpenAIProvider) Name() string { return "openai" }
