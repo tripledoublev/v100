@@ -153,9 +153,9 @@ var newsSourcePresets = []newsSourcePreset{
 	{Key: "radio_canada_quebec", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/regions/quebec/", Kind: "page", Region: "quebec", Language: "fr", Section: "quebec"},
 	{Key: "ledevoir", Name: "Le Devoir", URL: "https://www.ledevoir.com/", Kind: "page", Region: "quebec", Language: "fr", Section: "actualites"},
 	{Key: "journaldemontreal", Name: "Journal de Montreal", URL: "https://www.journaldemontreal.com/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "montreal"},
-	{Key: "ars_technica", Name: "Ars Technica", URL: "https://arstechnica.com/?feed=rss2", Kind: "feed", Region: "world", Topic: "tech", Language: "en", Section: "technology"},
-	{Key: "ars_technica_science", Name: "Ars Technica", URL: "https://feeds.arstechnica.com/arstechnica/science", Kind: "feed", Region: "world", Topic: "science", Language: "en", Section: "science"},
-	{Key: "ars_technica_culture", Name: "Ars Technica", URL: "https://feeds.arstechnica.com/arstechnica/culture", Kind: "feed", Region: "world", Topic: "culture", Language: "en", Section: "culture"},
+	{Key: "ars_technica", Name: "Ars Technica", URL: "https://arstechnica.com/feed/", Kind: "feed", Region: "world", Topic: "tech", Language: "en", Section: "technology"},
+	{Key: "ars_technica_science", Name: "Ars Technica", URL: "https://arstechnica.com/science/feed/", Kind: "feed", Region: "world", Topic: "science", Language: "en", Section: "science"},
+	{Key: "ars_technica_culture", Name: "Ars Technica", URL: "https://arstechnica.com/culture/feed/", Kind: "feed", Region: "world", Topic: "culture", Language: "en", Section: "culture"},
 }
 
 func NewsFetch() Tool { return &newsFetchTool{} }
@@ -462,9 +462,22 @@ func resolveNewsSourceRequests(a newsFetchArgs) []newsSourceRequest {
 			wanted = append(wanted, "guardian_world")
 		}
 	default:
-		wanted = append(wanted, "bbc_world", "cbc_canada", "ctv_canada")
-		if a.Language != "en" {
-			wanted = append(wanted, "lapresse_politique")
+		// "general" region or unknown: apply topic filtering like "world" does
+		switch a.Topic {
+		case "business", "markets":
+			wanted = append(wanted, "bbc_business")
+		case "tech", "technology":
+			wanted = append(wanted, "bbc_technology", "ars_technica")
+		case "science":
+			wanted = append(wanted, "ars_technica_science")
+		case "culture":
+			wanted = append(wanted, "ars_technica_culture")
+		default:
+			// No specific topic: include general news sources
+			wanted = append(wanted, "bbc_world", "cbc_canada", "ctv_canada")
+			if a.Language != "en" {
+				wanted = append(wanted, "lapresse_politique")
+			}
 		}
 	}
 
