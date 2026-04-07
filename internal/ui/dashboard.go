@@ -14,13 +14,21 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		return ""
 	}
 
-	// Define colors locally to avoid undefined global errors
+	// Define colors locally for the dashboard
 	colorPrimary := lipgloss.Color("#3B82F6")
 	colorInfo := lipgloss.Color("#06B6D4")
 	colorWarn := lipgloss.Color("#F59E0B")
 	colorDanger := lipgloss.Color("#EF4444")
 	colorCognition := lipgloss.Color("#A78BFA")
 	colorMoney := lipgloss.Color("#10B981")
+
+	// Create local styles for consistent rendering
+	styleBlue := lipgloss.NewStyle().Foreground(colorPrimary)
+	styleCyan := lipgloss.NewStyle().Foreground(colorInfo)
+	styleAmber := lipgloss.NewStyle().Foreground(colorWarn)
+	styleRed := lipgloss.NewStyle().Foreground(colorDanger)
+	styleViolet := lipgloss.NewStyle().Foreground(colorCognition)
+	styleGreen := lipgloss.NewStyle().Foreground(colorMoney)
 
 	w := width - 4
 	
@@ -37,11 +45,14 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		tokenPct = float64(usedTokens) / float64(maxTokens)
 	}
 	tokenColor := colorInfo
+	tokenStyle := styleCyan
 	if tokenPct > 0.7 {
 		tokenColor = colorWarn
+		tokenStyle = styleAmber
 	}
 	if tokenPct > 0.9 {
 		tokenColor = colorDanger
+		tokenStyle = styleRed
 	}
 	tokenBar := renderMiniBar("TOKEN", tokenPct, w, tokenColor)
 
@@ -63,7 +74,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	// 5. Radar/Heartbeat (Visual Flair)
 	pulse := currentStep % 8
 	heartbeat := "──" + strings.Repeat("·", pulse) + "Λ" + strings.Repeat("·", (7-pulse)) + "──"
-	heartbeat = styleMuted.Render("[") + styleInfo.Render(heartbeat) + styleMuted.Render("]")
+	heartbeat = styleMuted.Render("[") + styleCyan.Bold(true).Render(heartbeat) + styleMuted.Render("]")
 
 	tempo := "cool"
 	if recentToolCalls >= 6 || recentModelCalls >= 4 {
@@ -80,30 +91,89 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	case tokenPct >= 0.5 || recentToolCalls >= 4:
 		health = "warming"
 	}
-	velocityLine := fmt.Sprintf("velocity: %s  model:%d/30s  tools:%d/30s  compress:%d/30s",
-		tempo, recentModelCalls, recentToolCalls, recentCompresses)
-	pressureLine := fmt.Sprintf("health: %s  token:%s  io:%s",
-		health, percentLabel(tokenPct), percentLabel(ioRatio))
-	stateLine := fmt.Sprintf("state: %s  idle:%s", inspectorState(statusMode, idleFor), FormatDuration(idleFor.Milliseconds()))
-	lastStepLine := fmt.Sprintf("last step: %s  tools:%d", FormatDuration(lastStepMS), lastStepTools)
+	velocityColor := styleMuted
+	switch tempo {
+	case "hot":
+		velocityColor = styleRed
+	case "warm":
+		velocityColor = styleAmber
+	case "cool":
+		velocityColor = styleCyan
+	}
+
+	healthColor := styleMuted
+	switch health {
+	case "critical":
+		healthColor = styleRed
+	case "compression-pressure":
+		healthColor = styleAmber
+	case "warming":
+		healthColor = styleCyan
+	case "stable":
+		healthColor = styleGreen
+	}
+
+	stateColor := styleMuted
+	switch inspectorState(statusMode, idleFor) {
+	case "thinking":
+		stateColor = styleViolet
+	case "tooling":
+		stateColor = styleAmber
+	case "error":
+		stateColor = styleRed
+	case "ready":
+		stateColor = styleGreen
+	}
+
+	velocityLine := fmt.Sprintf("%s %s  %s%s/30s  %s%s/30s  %s%s/30s",
+		styleMuted.Render("velocity:"), velocityColor.Bold(true).Render(tempo),
+		styleMuted.Render("model:"), styleBlue.Bold(true).Render(fmt.Sprintf("%d", recentModelCalls)),
+		styleMuted.Render("tools:"), styleAmber.Bold(true).Render(fmt.Sprintf("%d", recentToolCalls)),
+		styleMuted.Render("compress:"), styleRed.Bold(true).Render(fmt.Sprintf("%d", recentCompresses)))
+
+	pressureLine := fmt.Sprintf("%s %s  %s%s  %s%s",
+		styleMuted.Render("health:"), healthColor.Bold(true).Render(health),
+		styleMuted.Render("token:"), tokenStyle.Bold(true).Render(percentLabel(tokenPct)),
+		styleMuted.Render("io:"), styleViolet.Bold(true).Render(percentLabel(ioRatio)))
+
+	stateLine := fmt.Sprintf("%s %s  %s%s",
+		styleMuted.Render("state:"), stateColor.Bold(true).Render(inspectorState(statusMode, idleFor)),
+		styleMuted.Render("idle:"), styleCyan.Bold(true).Render(FormatDuration(idleFor.Milliseconds())))
+
+	lastStepLine := fmt.Sprintf("%s %s  %s%s",
+		styleMuted.Render("last step:"), styleCyan.Bold(true).Render(FormatDuration(lastStepMS)),
+		styleMuted.Render("tools:"), styleAmber.Bold(true).Render(fmt.Sprintf("%d", lastStepTools)))
+
+	inspectorTitleStyle := lipgloss.NewStyle().
+		Foreground(colorCognition).
+		Italic(true).
+		Bold(true)
+
+	heartbeatLabelStyle := styleMuted
+	switch tempo {
+	case "hot":
+		heartbeatLabelStyle = styleRed
+	case "warm":
+		heartbeatLabelStyle = styleAmber
+	}
 
 	dashboard := lipgloss.JoinVertical(lipgloss.Left,
-		tuiStatusLabelStyle.Render("visual inspector"),
+		inspectorTitleStyle.Render("visual inspector"),
 		stepBar,
 		tokenBar,
 		ioBar,
 		costBar,
-		styleMuted.Render(velocityLine),
-		styleMuted.Render(pressureLine),
-		styleMuted.Render(stateLine),
-		styleMuted.Render(lastStepLine),
-		fmt.Sprintf("%s %s", styleMuted.Render("HEARTBEAT:"), heartbeat),
+		velocityLine,
+		pressureLine,
+		stateLine,
+		lastStepLine,
+		fmt.Sprintf("%s %s", heartbeatLabelStyle.Render("HEARTBEAT:"), heartbeat),
 	)
 
 	return dashboard
-}
+	}
 
-func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) string {
+	func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) string {
 	// Account for label, space, and trailing bracket
 	barWidth := width - lipgloss.Width(label) - 2
 	if barWidth < 5 {
@@ -119,17 +189,19 @@ func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) s
 	}
 
 	empty := barWidth - filled
-	
+
 	barStyle := lipgloss.NewStyle().Foreground(color)
-	
+	labelStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
+	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")) // very dark gray
+
 	return fmt.Sprintf("%s %s%s%s%s",
-		styleMuted.Render(label),
+		labelStyle.Render(label),
 		styleMuted.Render("["),
 		barStyle.Render(strings.Repeat("█", filled)),
-		styleMuted.Render(strings.Repeat("░", empty)),
+		emptyStyle.Render(strings.Repeat("·", empty)),
 		styleMuted.Render("]"),
 	)
-}
+	}
 
 func percentLabel(v float64) string {
 	if v < 0 {
