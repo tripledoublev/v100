@@ -1,10 +1,10 @@
+//go:build windows
 // +build windows
 
 package ui
 
 import (
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +19,7 @@ func readDeviceStatus(now time.Time) deviceStatus {
 	// wmic path Win32_Battery get EstimatedChargeRemaining, Status
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		`Get-WmiObject Win32_Battery | Select-Object EstimatedChargeRemaining,Status | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1`)
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return status

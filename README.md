@@ -1,607 +1,109 @@
-# v100
+# autoresearch
 
-v100 is an experimental agent harness for studying long-horizon LLM behavior.
+![teaser](progress.png)
 
-It provides a modular runtime for tool-using language model agents where every run is treated as an observable experiment. Model calls, tool execution, context compression, and delegation events are emitted as structured traces that can be replayed and analyzed.
+*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
 
-The goal is to make agent behavior measurable and reproducible so different prompting strategies, tool policies, and orchestration approaches can be systematically evaluated.
+The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org. The default `program.md` in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this [tweet](https://x.com/karpathy/status/2029701092347630069) and [this tweet](https://x.com/karpathy/status/2031135152349524125).
 
-## Features
+## How it works
 
-- **Durable traces** — every run is logged as append-only JSONL (`runs/<id>/trace.jsonl`) with 21 structured event types
-- **Three solvers** — ReAct (default), Plan-Execute with automatic replanning, and Router for cheap/smart provider escalation
-- **Sandbox execution** — Docker-based isolated containers with hardened security, snapshots, and apply-back
-- **Run metadata + scoring** — attach names/tags and score outcomes for later analysis
-- **Evaluation tooling** — per-run stats, run comparisons, experiments, and batch bench execution
-- **Trace-derived diagnostics** — efficiency/behavior metrics and automatic failure classification
-- **Phase 300 optimization** — autonomous agent refinement via reflective scoring and prompt mutation
-- **Self-evolution engine** — agents can distill trajectories and author new tools at runtime
-- **Delegated sub-agents** — `agent` tool can spawn bounded child loops
-- **Named specialist agents** — config-driven roles via `[agents.<name>]` and role dispatching
-- **Coordination patterns** — `orchestrate` tool supports `fanout` and `pipeline` execution
-- **Shared run state** — blackboard tools provide cross-agent coordination via vectorized memory
-- **Reflection turn** — agents perform an internal confidence-check before executing dangerous tools
-- **Streaming** — real-time token streaming from providers that support it
-- **Tool execution** — built-in tools for file system access, shell, git, patching, curl/web extraction, ripgrep search, semantic analysis, blackboard memory, reflection, and multi-agent coordination
-- **Dangerous tool confirmation** — CLI stdin prompt or TUI Ctrl+Y/Ctrl+N
-- **Budget enforcement** — hard limits on steps, tokens, and cost
-- **Build verification loop** — automatically runs `go build ./...` after every workspace mutation and injects compiler errors as a diagnostic alert
-- **Resume & replay** — pick up any run from its trace; pretty-print transcripts
-- **Seven built-in providers** — Codex (ChatGPT subscription), Gemini subscription, OpenAI API, Anthropic API, MiniMax, local Ollama, or local llama.cpp
-- **Two UIs** — line-by-line CLI (default) or Bubble Tea "Mission Control" TUI (`--tui`)
-- **Dev supervisor** — restart on demand by creating `.v100-reload`
+The repo is deliberately kept small and only really has three files that matter:
+
+- **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
+- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
+- **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
+
+By design, training runs for a **fixed 5-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
+
+If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) looks pretty good for a lot more context.
 
 ## Install
 
-```bash
-git clone https://github.com/tripledoublev/v100
-cd v100
-go build -o v100 ./cmd/v100/
-./v100 install
-```
+Prebuilt releases are published on GitHub for:
 
-`./v100 install` creates `~/.local/bin/v100` as a symlink to the repo-local `./v100`, so future `go build -o v100 ./cmd/v100/` rebuilds automatically update the shell-resolved `v100`.
+- Linux: `v100-linux-amd64`, `v100-linux-arm64`
+- macOS: `v100-darwin-amd64`, `v100-darwin-arm64`
+- Windows: `v100-windows-amd64.exe`, `v100-windows-arm64.exe`
 
-Requires Go 1.25.7+. Optional: `rg` (ripgrep) for `project_search`, `patch` for `patch_apply`, `docker` for sandbox execution, and `sem` for semantic diff/impact/blame tools.
+The release page also includes `checksums.txt` for verifying downloads.
 
-Pre-built binaries are available on the [releases page](https://github.com/tripledoublev/v100/releases).
+For most users, the easiest path is the installer script for your platform:
+
+- macOS / Linux: `curl -fsSL https://raw.githubusercontent.com/tripledoublev/v100/main/scripts/install.sh | bash`
+- Windows PowerShell: `irm https://raw.githubusercontent.com/tripledoublev/v100/main/scripts/install.ps1 | iex`
+
+If you want to build from source instead, use the quick start below.
 
 ## Quick start
 
-```bash
-# Initialize config
-v100 config init
-
-# Fill ~/.config/v100/oauth_credentials.json with your OAuth client values
-# (only needed for Codex/Gemini subscription providers)
-
-# Authenticate with ChatGPT subscription
-v100 login
-
-# Verify setup
-v100 doctor
-
-# Start a run (uses MiniMax by default)
-v100 run
-
-# Start a non-interactive run (executes prompt then exits)
-v100 run --exit "Summarize the project structure"
-
-# With a step budget
-v100 run --budget-steps 10
-
-# Use OpenAI API
-v100 run --provider openai
-
-# Use Anthropic API
-v100 run --provider anthropic
-
-# Use Minimax (MiniMax-M2.7)
-v100 run --provider minimax
-
-# Use local Ollama
-v100 run --provider ollama --model qwen3.5:9b
-
-# Use local llama.cpp
-v100 run --provider llamacpp --model gemma-4-E2B-it-GGUF:Q8_0
-
-# Use plan-execute solver with replanning
-v100 run --solver plan_execute --max-replans 3
-
-# Enable sandbox execution
-v100 run --sandbox
-
-# Enable "Mission Control" TUI
-v100 run --tui
-
-# Name and tag runs for later querying
-v100 run --name "parser refactor" --tag team=core --tag sprint=12
-```
-
-## Development checks
-
-Use the repo-local lint wrapper so local lint matches CI:
+**Requirements:** A single NVIDIA GPU (tested on H100), Python 3.10+, [uv](https://docs.astral.sh/uv/).
 
 ```bash
-GOCACHE="$PWD/.gocache" go test ./...
-GOCACHE="$PWD/.gocache" go build ./...
-GOCACHE="$PWD/.gocache" go vet ./...
-./scripts/lint.sh
+
+# 1. Install uv project manager (if you don't already have it)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Install dependencies
+uv sync
+
+# 3. Download data and train tokenizer (one-time, ~2 min)
+uv run prepare.py
+
+# 4. Manually run a single training experiment (~5 min)
+uv run train.py
 ```
 
-## Local Sandbox Image
+If the above commands all work ok, your setup is working and you can go into autonomous research mode.
 
-For Docker sandbox runs, build the repo-local image that includes the binaries the harness expects:
+## Running the agent
 
-```bash
-./scripts/build-sandbox-image.sh
-```
-
-That image installs Go, `git`, `patch`, `ripgrep`, and `curl`, which avoids the missing-`patch` failure seen with a plain `golang` base image.
-
-## Providers
-
-### ChatGPT subscription
-
-Uses your existing ChatGPT Plus/Pro plan — no separate API billing. Authenticate with `v100 login` after filling `~/.config/v100/oauth_credentials.json`:
-
-```bash
-v100 login   # opens browser → completes OAuth → saves token
-```
-
-Model: `gpt-5.4`
-
-This is not the built-in default provider. To use it by default, set `provider = "codex"` under `[defaults]`.
-
-### OpenAI API
-
-Standard pay-as-you-go API access.
-
-```bash
-export OPENAI_API_KEY=sk-...
-v100 run --provider openai --model gpt-4o
-```
-
-### Anthropic API
-
-Claude API access via API key.
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-v100 run --provider anthropic --model claude-sonnet-4-20250514
-```
-
-Or authenticate interactively:
-
-```bash
-v100 login --provider anthropic   # prompts for API key, saves to ~/.config/v100/anthropic_auth.json
-```
-
-### Gemini subscription
-
-Uses your existing Gemini Pro / Google One AI Premium plan — no separate API billing. Authenticate with `v100 login --provider gemini` after filling `~/.config/v100/oauth_credentials.json`:
-
-```bash
-v100 login --provider gemini
-v100 run --provider gemini
-v100 run --provider gemini --model gemini-2.5-pro
-```
-
-Models: `gemini-2.5-flash` (default), `gemini-2.5-pro`, `gemini-3-pro-preview`, `gemini-3-flash-preview`
-
-### Minimax
-
-Advanced model support via MiniMax-M2.7. This is the built-in default provider in the shipped config.
-
-```bash
-v100 login --provider minimax
-v100 run --provider minimax
-```
-
-### Ollama (local)
-
-Run fully local models via Ollama (no API key required).
-
-```bash
-ollama run qwen3.5:9b
-v100 run --provider ollama --model qwen3.5:9b
-```
-
-### Provider matrix
-
-| Provider | Auth | Default model | Streaming | Best for |
-|----------|------|---------------|-----------|----------|
-| `codex` | OAuth (`v100 login`) | `gpt-5.4` | yes | subscription-backed coding runs |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o` | yes | API-driven experiments |
-| `anthropic` | `ANTHROPIC_API_KEY` or `v100 login --provider anthropic` | `claude-sonnet-4-20250514` | yes | Claude API experiments |
-| `gemini` | OAuth (`v100 login --provider gemini`) | `gemini-2.5-flash` | yes | subscription-backed Gemini runs |
-| `minimax` | OAuth (`v100 login --provider minimax`) | `MiniMax-M2.7` | yes | high-fidelity research runs |
-| `ollama` | local daemon | `qwen3.5:2b` | yes | fully local runs |
-| `llamacpp` | local llama.cpp server | `gemma-4-E2B-it-GGUF:Q8_0` | yes | fully local runs with OpenAI-compatible endpoints |
-
-OAuth client config for subscription providers lives at `~/.config/v100/oauth_credentials.json`.
-
-### Known limitations
-
-- Provider behavior differs noticeably; the same prompt can produce very different tool-use patterns across providers.
-- Subscription providers require a local OAuth client config file before `v100 login` will work.
-- Underspecified prompts can still trigger over-eager exploration on some models. Use `--budget-steps`, `--budget-tokens`, and default dangerous-tool confirmation when evaluating a new provider or prompt style.
-
-## Solvers
-
-v100 supports three solver strategies that control how the agent loop processes tasks.
-
-### ReactSolver (default)
-
-Classic ReAct (Reasoning + Acting) loop. The model receives the conversation, produces reasoning and tool calls, observes results, and repeats until done.
-
-```bash
-v100 run --solver react
-```
-
-### PlanExecuteSolver
-
-Two-phase strategy: first generates a plan, then executes it with ReAct. If execution fails, the solver can replan and retry up to `--max-replans` times. Checkpoints are created before execution so the workspace can be restored on failure.
-
-```bash
-v100 run --solver plan_execute --max-replans 3
-```
-
-### RouterSolver
-
-Dual-provider strategy: use a cheaper provider for discovery and a smarter provider for harder synthesis/editing turns.
-
-```bash
-v100 run --solver router --provider minimax
-```
-
-## Sandbox
-
-v100 can execute tool operations inside an isolated Docker container instead of directly on the host.
-
-### Setup
-
-```bash
-v100 run --sandbox
-```
-
-### Security
-
-The Docker executor applies hardened security defaults:
-- `--cap-drop ALL` — drops all Linux capabilities
-- `--security-opt no-new-privileges` — prevents privilege escalation
-- `--pids-limit 64` — limits child processes
-- Seccomp profile blocking: mount, ptrace, kexec_load, and other sensitive syscalls
-- Network isolation configurable via `network_tier`
-
-### Configuration
-
-```toml
-[sandbox]
-enabled = false
-backend = "docker"              # "host" or "docker"
-image = "ubuntu:22.04"
-network_tier = "off"            # "off" (isolated) or "open" (bridge)
-memory_mb = 512
-cpus = 1.0
-apply_back = "manual"           # "manual", "on_success", or "never"
-```
-
-### Snapshots and restore
-
-During sandboxed runs, the solver can create workspace snapshots (checkpoints). These can be restored later:
-
-```bash
-# List checkpoints for a run
-v100 restore --list <run_id>
-
-# Restore to a specific checkpoint
-v100 restore <run_id> <checkpoint_id>
-
-# Resume from restored state
-v100 resume <run_id>
-```
-
-### Apply-back
-
-After a sandboxed run, changes can be merged back to the host workspace:
-- `on_success` — automatically apply changes when the run ends successfully
-- `manual` — prompt for confirmation
-- `never` — keep changes only in the sandbox
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `v100 run` | Start interactive agent run |
-| `v100 resume <run_id>` | Continue a run from its trace (`--auto --unsafe` supported) |
-| `v100 restore <run_id> [checkpoint_id]` | Restore sandbox checkpoint |
-| `v100 replay <run_id>` | Pretty-print run transcript |
-| `v100 runs [-n N] [--provider X] [--failed] [--all]` | List recent runs with optional filtering |
-| `v100 tools` | List registered tools |
-| `v100 providers` | List configured providers |
-| `v100 config init` | Write default config to `~/.config/v100/config.toml` |
-| `v100 doctor` | Check provider auth, tools, run dir |
-| `v100 login [--provider <name>]` | Authenticate via browser OAuth or API key |
-| `v100 logout [--provider <name>]` | Remove stored auth token |
-| `v100 score <run_id> <pass\|fail\|partial> [notes...]` | Score a completed run |
-| `v100 distill <run_id>` | Distill a run trace into ShareGPT format |
-| `v100 stats <run_id>` | Compute stats from trace events |
-| `v100 metrics <run_id>` | Compute trace-derived efficiency/behavior metrics |
-| `v100 compare <run_id> <run_id> [...]` | Compare multiple runs side-by-side |
-| `v100 bench <bench.toml>` | Batch-run prompt/provider/model variants |
-| `v100 experiment create <name>` | Create a new experiment |
-| `v100 experiment run <exp_id> --prompt <text>` | Execute all experiment variants |
-| `v100 experiment results <exp_id>` | Display statistical results |
-| `v100 analyze <run_id>` | Automated behavioral analysis |
-| `v100 digest <run_id>` | Compact failure digest for a completed run |
-| `v100 mutate <run_id>` | Suggest improved prompt based on failure analysis |
-| `v100 diff <run_a> <run_b>` | Find divergence point between traces |
-| `v100 query [--tag k=v ...] [--score <verdict>]` | Filter runs by metadata |
-| `v100 dev` | Rebuild/restart dev binary on `.v100-reload` |
-
-### `v100 run` flags
+Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
 
 ```
---provider string              Provider name (codex, gemini, openai, ollama, llamacpp, anthropic, minimax)
---model string                 Model override
---solver string                Solver strategy: react (default), plan_execute
---max-replans int              Max replans for plan_execute solver
---sandbox                      Enable isolated sandbox execution
---streaming                    Enable real-time token streaming (default: true)
---budget-steps int             Max steps before halting
---budget-tokens int            Max tokens before halting
---budget-cost float            Max cost in USD before halting
---max-tool-calls-per-step int  Max tool calls per step
---confirm-tools string         always | dangerous | never (default: dangerous)
---auto                         Auto-approve all tool calls
---unsafe                       Disable path guardrails
---workspace string             Workspace directory for tool operations
---name string                  Human-readable run name (meta.json)
---tag key=value                Repeatable run tags (meta.json)
---temperature float            Sampling temperature
---top-p float                  Nucleus sampling parameter
---top-k int                    Top-k sampling parameter
---max-tokens int               Max output tokens per model call
---seed int                     Random seed for reproducibility
---exit                         Finalize and exit after initial prompt completes
---tui                          Enable "Mission Control" TUI
---tui-no-alt                   Disable alternate screen
---tui-plain                    Force monochrome rendering
---tui-debug                    Write TUI debug log in run directory
+Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
 ```
 
-Default workspace is the current directory where `v100 run` is launched.
+The `program.md` file is essentially a super lightweight "skill".
 
-### Deterministic replay
-
-```bash
-v100 replay --deterministic <run_id>
-v100 replay --deterministic --step <run_id>
-v100 replay --deterministic --replace-model gpt-5.4 <run_id>
-v100 replay --deterministic --inject-tool project_search="parser.go:123" <run_id>
-```
-
-In deterministic mode, model responses and tool outputs are replayed from trace records.
-`--step` pauses between model/tool events for debugger-style inspection.
-`--replace-model` runs recorded `model.call` prompts against a different model and prints a counterfactual response.
-`--inject-tool` overrides recorded tool outputs in replayed prompts for what-if experiments.
-
-## Tools
-
-| Tool | Danger | Description |
-|------|--------|-------------|
-| `fs_read` | safe | Read file contents |
-| `fs_write` | **dangerous** | Write/append to file |
-| `fs_list` | safe | List directory entries |
-| `fs_mkdir` | safe | Create directory |
-| `fs_outline` | safe | Semantic outline of functions/types (Go only) |
-| `sh` | **dangerous** | Execute shell command |
-| `git_status` | safe | Git status |
-| `git_diff` | safe | Git diff |
-| `git_commit` | **dangerous** | Stage and commit |
-| `git_push` | **dangerous** | Push current branch |
-| `sem_diff` | safe | Semantic entity-level diffing |
-| `sem_impact` | safe | Impact analysis for specific code entities |
-| `sem_blame` | safe | Entity-level blame for a file |
-| `patch_apply` | **dangerous** | Apply unified diff |
-| `project_search` | safe | Ripgrep search |
-| `sql_search` | **dangerous** | Execute SQL against local SQLite |
-| `graphviz` | safe | Render DOT files to images |
-| `curl_fetch` | safe | Fetch URL content |
-| `web_extract` | safe | Fetch a web page and return compact extracted signal |
-| `agent` | **dangerous** | Spawn a bounded sub-agent run |
-| `dispatch` | **dangerous** | Dispatch a task to a named agent role |
-| `orchestrate` | **dangerous** | Coordinate multiple dispatches (fanout/pipeline) |
-| `blackboard_read` | safe | Read shared workspace blackboard |
-| `blackboard_write` | **dangerous** | Append/overwrite shared workspace blackboard |
-| `reflect` | safe | Meta-cognitive self-critique and plan evaluation |
-| `blackboard_search` | safe | Search vectorized blackboard memory |
-| `blackboard_store` | **dangerous** | Store a record in vectorized blackboard |
-
-Dangerous tools require confirmation unless `--auto` or `--confirm-tools never` is set.
-
-## Config
-
-Default location: `~/.config/v100/config.toml`
-
-```toml
-[providers.codex]
-type = "codex"
-default_model = "gpt-5.4"
-
-[providers.openai]
-type = "openai"
-default_model = "gpt-4o"
-[providers.openai.auth]
-env = "OPENAI_API_KEY"
-
-[providers.anthropic]
-type = "anthropic"
-default_model = "claude-sonnet-4-20250514"
-[providers.anthropic.auth]
-env = "ANTHROPIC_API_KEY"
-
-[providers.ollama]
-type = "ollama"
-default_model = "qwen3.5:9b"
-base_url = "http://localhost:11434"
-
-[providers.llamacpp]
-type = "llamacpp"
-default_model = "gemma-4-E2B-it-GGUF:Q8_0"
-base_url = "http://127.0.0.1:19091/v1"
-
-[providers.gemini]
-type = "gemini"
-default_model = "gemini-2.5-flash"
-
-[providers.minimax]
-type = "minimax"
-default_model = "MiniMax-M2.7"
-
-[sandbox]
-enabled = false
-backend = "docker"
-image = "ubuntu:22.04"
-network_tier = "off"
-apply_back = "manual"
-
-[agents.researcher]
-system_prompt = "You are a researcher agent. Find and read relevant code and return concise findings. Do not modify files."
-tools = ["fs_read", "fs_list", "project_search"]
-model = ""
-budget_steps = 15
-budget_tokens = 20000
-budget_cost_usd = 0.0
-
-[defaults]
-provider = "codex"
-solver = "react"
-confirm_tools = "dangerous"
-budget_steps = 50
-budget_tokens = 100000
-budget_cost_usd = 0.0
-tool_timeout_ms = 30000
-max_tool_calls_per_step = 50
-context_limit = 80000
-```
-
-## Run layout
+## Project structure
 
 ```
-runs/<run_id>/
-  trace.jsonl     # append-only event log (21 event types)
-  meta.json       # run metadata: name/tags/provider/model/score
-  artifacts/      # per-run artifact files
-  tui.debug.log   # optional, if --tui-debug
+prepare.py      — constants, data prep + runtime utilities (do not modify)
+train.py        — model, optimizer, training loop (agent modifies this)
+program.md      — agent instructions
+pyproject.toml  — dependencies
 ```
 
-The shared blackboard lives at `blackboard.md` in the active workspace root, so notes persist across runs in the same project.
+## Design choices
 
-## Evaluation workflow
+- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
+- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
+- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
 
-```bash
-# Score a run
-v100 score <run_id> pass "completed task without manual fixes"
+## Platform support
 
-# Inspect one run
-v100 stats <run_id>
-v100 metrics <run_id>
+This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
 
-# Compare several runs
-v100 compare <run_id> <run_id> [...]
+Seeing as there seems to be a lot of interest in tinkering with autoresearch on much smaller compute platforms than an H100, a few extra words. If you're going to try running autoresearch on smaller computers (Macbooks etc.), I'd recommend one of the forks below. On top of this, here are some recommendations for how to tune the defaults for much smaller models for aspiring forks:
 
-# Query by metadata
-v100 query --tag team=core --score pass
+1. To get half-decent results I'd use a dataset with a lot less entropy, e.g. this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean). These are GPT-4 generated short stories. Because the data is a lot narrower in scope, you will see reasonable results with a lot smaller models (if you try to sample from them after training).
+2. You might experiment with decreasing `vocab_size`, e.g. from 8192 down to 4096, 2048, 1024, or even - simply byte-level tokenizer with 256 possibly bytes after utf-8 encoding.
+3. In `prepare.py`, you'll want to lower `MAX_SEQ_LEN` a lot, depending on the computer even down to 256 etc. As you lower `MAX_SEQ_LEN`, you may want to experiment with increasing `DEVICE_BATCH_SIZE` in `train.py` slightly to compensate. The number of tokens per fwd/bwd pass is the product of these two.
+4. Also in `prepare.py`, you'll want to decrease `EVAL_TOKENS` so that your validation loss is evaluated on a lot less data.
+5. In `train.py`, the primary single knob that controls model complexity is the `DEPTH` (default 8, here). A lot of variables are just functions of this, so e.g. lower it down to e.g. 4.
+6. You'll want to most likely use `WINDOW_PATTERN` of just "L", because "SSSL" uses alternating banded attention pattern that may be very inefficient for you. Try it.
+7. You'll want to lower `TOTAL_BATCH_SIZE` a lot, but keep it powers of 2, e.g. down to `2**14` (~16K) or so even, hard to tell.
 
-# Automated behavioral analysis
-v100 analyze <run_id>
+I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
 
-# Find where two runs diverged
-v100 diff <run_a> <run_b>
-```
+## Notable forks
 
-### Batch benchmarks
-
-```bash
-v100 bench ./bench.toml
-```
-
-```toml
-name = "prompt-rewrite-v1"
-
-[[prompts]]
-message = "Refactor parser for streaming mode."
-
-[[variants]]
-name = "codex-default"
-provider = "codex"
-model = "gpt-5.4"
-budget_steps = 20
-```
-
-### Experiments
-
-```bash
-# Create an experiment with 3 repeats per variant
-v100 experiment create my-experiment --repeats 3 \
-  --variants gpt-4o:react --variants claude-sonnet-4-20250514:plan_execute
-
-# Run all trials
-v100 experiment run <exp_id> --prompt "Implement a linked list in Go"
-
-# View results with statistical analysis
-v100 experiment results <exp_id>
-```
-
-## Dogfooding
-
-For a concrete operator loop with ten runnable tasks, sandbox drills, and a starter bench file, see [`dogfood/README.md`](dogfood/README.md) and [`dogfood/smoke.bench.toml`](dogfood/smoke.bench.toml).
-
-## Multi-agent quick examples
-
-```bash
-v100 agents
-```
-
-```text
-Call dispatch with {"agent":"researcher","task":"Find replay implementation and list key files."}
-Call orchestrate with {"pattern":"fanout","tasks":[{"agent":"researcher","task":"Map replay"},{"agent":"reviewer","task":"List risks"}]}
-Call blackboard_read with {}
-```
-
-## Debugging a run
-
-```bash
-# Verify auth, provider setup, and local tools
-v100 doctor
-v100 providers
-
-# Inspect one run in more detail
-v100 stats <run_id>
-v100 metrics <run_id>
-v100 replay <run_id>
-v100 replay --deterministic <run_id>
-```
-
-## Dev mode
-
-`v100 dev` runs a supervisor that rebuilds/restarts the local binary when
-`.v100-reload` exists in the project root.
-
-```bash
-v100 dev
-touch .v100-reload
-```
-
-## TUI keybinds
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send message |
-| `Tab` | Cycle focus (input → transcript → trace → status) |
-| `Alt+R` | Open Radio Station Selector |
-| `Ctrl+M` | Toggle Visual Inspector Dashboard |
-| `Ctrl+T` | Toggle trace pane |
-| `Ctrl+S` | Toggle status pane |
-| `Ctrl+A` | Copy full plain-text transcript |
-| `Ctrl+Y` | Approve dangerous tool |
-| `Ctrl+N` | Deny dangerous tool |
-| `Ctrl+C` | Quit |
-
-## Files created
-
-`v100 config init` and the login flows create a small set of local files:
-
-- `~/.config/v100/config.toml` — main runtime config
-- `~/.config/v100/oauth_credentials.json` — local OAuth client config for Codex/Gemini
-- `~/.config/v100/auth.json` — Codex subscription token after `v100 login`
-- `~/.config/v100/gemini_auth.json` — Gemini subscription token after `v100 login --provider gemini`
-- `~/.config/v100/minimax_auth.json` — Minimax auth token after `v100 login --provider minimax`
-- `~/.config/v100/anthropic_auth.json` — Anthropic API key after `v100 login --provider anthropic`
-- `runs/<run_id>/` — trace, metadata, and artifacts for each run
+- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)
+- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (MacOS)
+- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
+- [andyluo7/autoresearch](https://github.com/andyluo7/autoresearch) (AMD)
 
 ## License
 
-[MIT](LICENSE)
+MIT

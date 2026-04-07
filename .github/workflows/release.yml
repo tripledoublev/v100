@@ -31,17 +31,31 @@ jobs:
           fi
 
       - name: Run tests
+        env:
+          GOWORK: off
         run: go test -race ./...
 
       - name: Build binaries
+        env:
+          GOWORK: off
         run: |
           LDFLAGS="-s -w -X main.version=${{ env.TAG }}"
           mkdir -p dist
 
-          # Tree-sitter support blocks Darwin cross-compilation from Ubuntu today.
-          # Release the Linux binary here; add native macOS build jobs when we
-          # want Darwin artifacts again.
-          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-linux-amd64 ./cmd/v100
+          # Cross-compile for all platforms
+          # Linux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-linux-amd64 ./cmd/v100
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/v100-linux-arm64 ./cmd/v100
+
+          # Windows
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-windows-amd64.exe ./cmd/v100
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/v100-windows-arm64.exe ./cmd/v100
+
+          # macOS (Intel)
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/v100-darwin-amd64 ./cmd/v100
+
+          # macOS (Apple Silicon)
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/v100-darwin-arm64 ./cmd/v100
 
       - name: Generate checksums
         run: |
