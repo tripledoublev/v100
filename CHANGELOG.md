@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.9 — 2026-04-07
+
+**Multi-Platform Release Flow**
+
+This patch release finishes the cross-platform release pipeline, ships platform-specific install scripts, and removes release-blocking platform dependencies from the build path.
+
+### Release and Packaging
+
+- **Multi-platform artifacts** — Release builds now publish Linux, macOS, and Windows binaries for both `amd64` and `arm64` where applicable.
+- **Checksum-verified installers** — The shell and PowerShell installers now download the exact release assets and verify them against `checksums.txt`.
+- **Release metadata aligned** — The README now documents the shipped binaries and installer entry points so operators can install without guessing asset names.
+
+### Build Compatibility
+
+- **`fs_outline` portability** — The semantic file outline tool now uses the Go AST on non-Windows platforms, removing the tree-sitter dependency from release builds.
+- **Windows CLI stubs** — Windows-specific wake and UI stubs keep the command surface and package builds consistent across targets.
+
 ## v0.2.8 — 2026-04-04
 
 **Structured News, Persistent Memory, and Interactive Diffing**
