@@ -16,6 +16,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
+export GOWORK=off
 TARGETS=(./cmd/... ./internal/...)
 
 if command -v golangci-lint >/dev/null 2>&1; then

@@ -1,6 +1,3 @@
-//go:build !linux && !darwin
-// +build !linux,!darwin
-
 package ui
 
 import (
@@ -17,6 +14,12 @@ func (m *TUIModel) refreshDeviceStatus(now time.Time) {
 	m.device = readDeviceStatus(now)
 }
 
+// deviceTickCmd sends a deviceTickMsg every 15 seconds to refresh battery status.
+// This stays separate from the platform-specific battery readers.
+func deviceTickCmd() tea.Cmd {
+	return tea.Tick(15*time.Second, func(time.Time) tea.Msg { return deviceTickMsg{} })
+}
+
 func (m *TUIModel) deviceStatusLine() string {
 	if !m.device.BatteryPresent {
 		return "device: no battery"
@@ -27,8 +30,4 @@ func (m *TUIModel) deviceStatusLine() string {
 	}
 	line += strconv.Itoa(m.device.Percent) + "%"
 	return line
-}
-
-func deviceTickCmd() tea.Cmd {
-	return tea.Tick(15*time.Second, func(time.Time) tea.Msg { return deviceTickMsg{} })
 }
