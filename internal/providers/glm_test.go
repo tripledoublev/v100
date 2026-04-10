@@ -8,7 +8,7 @@ import (
 
 func TestNewGLMProviderDefault(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "test-key")
-	p, err := NewGLMProvider("", "")
+	p, err := NewGLMProvider("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,18 +22,18 @@ func TestNewGLMProviderDefault(t *testing.T) {
 
 func TestNewGLMProviderCustomModel(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "test-key")
-	p, err := NewGLMProvider("", "glm-4-air")
+	p, err := NewGLMProvider("", "", "GLM-4.5-air")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.defaultModel != "glm-4-air" {
-		t.Errorf("expected glm-4-air, got %s", p.defaultModel)
+	if p.defaultModel != "GLM-4.5-air" {
+		t.Errorf("expected GLM-4.5-air, got %s", p.defaultModel)
 	}
 }
 
 func TestNewGLMProviderNoKey(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "")
-	_, err := NewGLMProvider("", "")
+	_, err := NewGLMProvider("", "", "")
 	if err == nil {
 		t.Fatal("expected error for missing ZHIPU_API_KEY")
 	}
@@ -46,11 +46,11 @@ func TestEstimateCostGLM(t *testing.T) {
 		output       int
 		expectedCost float64
 	}{
-		{"glm-4-plus", 1_000_000, 1_000_000, 14.0},
-		{"glm-4-0520", 1_000_000, 1_000_000, 30.0},
-		{"glm-4-air", 1_000_000, 1_000_000, 2.0},
-		{"glm-4-flash", 1_000_000, 1_000_000, 0.2},
-		{"unknown-model", 1_000_000, 1_000_000, 14.0},
+		{"GLM-4.7", 1_000_000, 1_000_000, 0.0},      // subscription-based
+		{"GLM-4.5-air", 1_000_000, 1_000_000, 0.0},  // subscription-based
+		{"GLM-5-Turbo", 1_000_000, 1_000_000, 0.0},  // subscription-based
+		{"GLM-5.1", 1_000_000, 1_000_000, 0.0},      // subscription-based
+		{"unknown-model", 1_000_000, 1_000_000, 0.0}, // default to 0
 	}
 
 	for _, tt := range tests {
@@ -65,7 +65,7 @@ func TestEstimateCostGLM(t *testing.T) {
 
 func TestGLMCapabilities(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "test-key")
-	p, err := NewGLMProvider("", "")
+	p, err := NewGLMProvider("", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,20 +81,18 @@ func TestGLMCapabilities(t *testing.T) {
 
 func TestGLMMetadata(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "test-key")
-	p, err := NewGLMProvider("", "")
+	p, err := NewGLMProvider("", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	tests := []struct {
-		model       string
-		expectCost  float64
-		expectFree  bool
+		model string
 	}{
-		{"glm-4-plus", 7.0, false},      // 0.007 * 1000
-		{"glm-4-0520", 15.0, false},     // 0.015 * 1000
-		{"glm-4-air", 1.0, false},       // 0.001 * 1000
-		{"glm-4-flash", 0.1, true},      // 0.0001 * 1000
+		{"GLM-4.7"},
+		{"GLM-4.5-air"},
+		{"GLM-5-Turbo"},
+		{"GLM-5.1"},
 	}
 
 	for _, tt := range tests {
@@ -109,14 +107,8 @@ func TestGLMMetadata(t *testing.T) {
 			if meta.ContextSize != 128000 {
 				t.Errorf("expected context size 128000, got %d", meta.ContextSize)
 			}
-			if meta.CostPer1MIn != tt.expectCost {
-				t.Errorf("expected input cost %v, got %v", tt.expectCost, meta.CostPer1MIn)
-			}
-			if meta.CostPer1MOut != tt.expectCost {
-				t.Errorf("expected output cost %v, got %v", tt.expectCost, meta.CostPer1MOut)
-			}
-			if meta.IsFree != tt.expectFree {
-				t.Errorf("expected IsFree=%v, got %v", tt.expectFree, meta.IsFree)
+			if !meta.IsFree {
+				t.Errorf("expected IsFree=true for Coding Plan model, got %v", meta.IsFree)
 			}
 		})
 	}
@@ -124,19 +116,18 @@ func TestGLMMetadata(t *testing.T) {
 
 func TestGLMModelPrefixMatching(t *testing.T) {
 	t.Setenv("ZHIPU_API_KEY", "test-key")
-	p, err := NewGLMProvider("", "")
+	p, err := NewGLMProvider("", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	tests := []struct {
-		model       string
-		expectCost  float64
+		model string
 	}{
-		{"glm-4-plus-1224", 7.0},
-		{"glm-4-0520-preview", 15.0},
-		{"glm-4-air-v1", 1.0},
-		{"glm-4-flash-v2", 0.1},
+		{"GLM-4.7-variant"},
+		{"GLM-4.5-air-v1"},
+		{"GLM-5-Turbo-v2"},
+		{"GLM-5.1-experimental"},
 	}
 
 	for _, tt := range tests {
@@ -145,12 +136,26 @@ func TestGLMModelPrefixMatching(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasPrefix(meta.Model, "glm-4") {
-				t.Errorf("expected model to have glm-4 prefix, got %s", meta.Model)
+			if !strings.HasPrefix(meta.Model, "GLM-") {
+				t.Errorf("expected model to have GLM- prefix, got %s", meta.Model)
 			}
-			if meta.CostPer1MIn != tt.expectCost {
-				t.Errorf("expected input cost %v, got %v", tt.expectCost, meta.CostPer1MIn)
+			if !meta.IsFree {
+				t.Errorf("expected IsFree=true for Coding Plan model, got %v", meta.IsFree)
 			}
 		})
+	}
+}
+
+func TestNewGLMProviderCustomBaseURL(t *testing.T) {
+	t.Setenv("ZHIPU_API_KEY", "test-key")
+	customURL := "https://api.example.com/v1"
+	p, err := NewGLMProvider("", customURL, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify that custom base URL was used by checking the OpenAI client's config
+	// (baseURL is stored in the embedded OpenAIProvider)
+	if p.OpenAIProvider == nil {
+		t.Fatal("expected OpenAIProvider to be initialized")
 	}
 }

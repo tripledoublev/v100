@@ -251,7 +251,7 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 		if authEnv == "" {
 			authEnv = "ZHIPU_API_KEY"
 		}
-		raw, err = providers.NewGLMProvider(authEnv, pc.DefaultModel)
+		raw, err = providers.NewGLMProvider(authEnv, pc.BaseURL, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
