@@ -40,7 +40,7 @@ func CheckLatest(ctx context.Context) (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // ignore close error
 
 	if resp.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("github api returned status %s", resp.Status)
@@ -65,7 +65,7 @@ func DownloadAsset(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // ignore close error
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download returned status %s", resp.Status)
@@ -75,7 +75,7 @@ func DownloadAsset(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }() // ignore close error
 
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return "", err
@@ -130,7 +130,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }() // ignore close error
 
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -141,7 +141,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }() // ignore close error
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err

@@ -206,13 +206,13 @@ func printModelList(loop *core.Loop, cfg *config.Config, providerName string) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s available models:\n", providerName))
+	fmt.Fprintf(&sb, "%s available models:\n", providerName)
 	for i, m := range models {
 		marker := " "
 		if i == 0 {
 			marker = "*"
 		}
-		sb.WriteString(fmt.Sprintf(" %s %s — %s\n", marker, m.Name, m.Description))
+		fmt.Fprintf(&sb, " %s %s — %s\n", marker, m.Name, m.Description)
 	}
 	emitSessionNotice(loop, sb.String())
 }

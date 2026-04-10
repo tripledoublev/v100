@@ -3,7 +3,6 @@ package providers
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 const (
@@ -85,16 +84,7 @@ func (p *GLMProvider) Metadata(ctx context.Context, model string) (ModelMetadata
 
 	m := ModelMetadata{Model: model, ContextSize: 128000, IsFree: true}
 
-	// For the GLM Coding Plan, models are part of subscription (no per-token cost)
-	switch {
-	case strings.HasPrefix(model, "GLM-5") || strings.HasPrefix(model, "glm-5"):
-		// GLM-5-Turbo, GLM-5.1, etc. — latest models, included in subscription
-	case strings.HasPrefix(model, "GLM-4.7") || strings.HasPrefix(model, "glm-4.7"):
-		// GLM-4.7 — primary model, included in subscription
-	case strings.HasPrefix(model, "GLM-4.5-air") || strings.HasPrefix(model, "glm-4.5-air"):
-		// GLM-4.5-air — lightweight, included in subscription
-	}
-
+	// For the GLM Coding Plan, all models are part of subscription (no per-token cost)
 	return m, nil
 }
 

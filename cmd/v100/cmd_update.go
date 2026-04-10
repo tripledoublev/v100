@@ -50,14 +50,14 @@ func updateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("download failed: %w", err)
 			}
-			defer os.Remove(tmpPath)
+			defer func() { _ = os.Remove(tmpPath) }() // ignore error, temp file cleanup
 
 			fmt.Println(ui.Info("Applying update..."))
 			if err := update.ApplyUpdate(tmpPath); err != nil {
 				return fmt.Errorf("failed to apply update: %w", err)
 			}
 
-			fmt.Println(ui.Info("Successfully updated to " + release.TagName))
+			fmt.Println(ui.OK("Successfully updated to " + release.TagName))
 			fmt.Println(ui.Info("Please restart v100 to use the new version."))
 			return nil
 		},
