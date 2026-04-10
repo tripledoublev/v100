@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -172,6 +173,12 @@ func newModelCallPayload(model string, msgs []providers.Message, toolNames []str
 		ToolNames:             toolNames,
 		MaxToolCalls:          maxToolCalls,
 		ProviderSupportsImage: prov != nil && prov.Capabilities().Images,
+	}
+	if payload.Model == "" && prov != nil {
+		// Try to resolve the default model name from metadata if not provided.
+		if meta, err := prov.Metadata(context.Background(), ""); err == nil {
+			payload.Model = meta.Model
+		}
 	}
 	for _, msg := range msgs {
 		count := len(msg.Images)

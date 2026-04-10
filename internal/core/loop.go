@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -191,6 +192,21 @@ func (l *Loop) appendUserMessage(stepID, userInput string) error {
 	if _, err := l.emit(EventUserMsg, stepID, payload); err != nil {
 		return err
 	}
+
+	// If the last message is also from the user (e.g. previous turn was interrupted),
+	// merge the content to avoid consecutive user messages which many providers reject.
+	if len(l.Messages) > 0 && l.Messages[len(l.Messages)-1].Role == "user" {
+		last := &l.Messages[len(l.Messages)-1]
+		if last.Content != "" && userInput != "" {
+			last.Content += "\n\n" + userInput
+		} else if userInput != "" {
+			last.Content = userInput
+		}
+		last.Images = append(last.Images, l.pendingUserImages...)
+		l.pendingUserImages = nil
+		return nil
+	}
+
 	msg := providers.Message{
 		Role:    "user",
 		Content: userInput,
@@ -525,6 +541,16 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 		Output:     result.Output,
 		DurationMS: result.DurationMS,
 	})
+
+	// Detect if the output contains a raw PNG image and emit it for inline terminal rendering.
+	if result.OK && strings.HasPrefix(result.Output, "\x89PNG\r\n\x1a\n") {
+		b64 := base64.StdEncoding.EncodeToString([]byte(result.Output))
+		_, _ = l.emit(EventImageInline, stepID, ImageInlinePayload{
+			Data:  b64,
+			Index: 0,
+		})
+	}
+
 	return err
 }
 
