@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -156,12 +157,41 @@ func TargetAsset() string {
 	return fmt.Sprintf("v100-%s-%s%s", runtime.GOOS, runtime.GOARCH, ext)
 }
 
-// IsNewer compares the current version with a new tag name.
+// IsNewer compares the current version with a new tag name using semantic versioning.
 func IsNewer(current, latest string) bool {
 	if current == "dev" {
 		return true // assume latest is newer than dev for testing
 	}
 	current = strings.TrimPrefix(current, "v")
 	latest = strings.TrimPrefix(latest, "v")
-	return latest != current && latest > current // naive semver comparison for now
+
+	if current == latest {
+		return false
+	}
+
+	// Split into parts and compare numerically
+	currParts := strings.Split(current, ".")
+	latestParts := strings.Split(latest, ".")
+
+	// Pad with zeros to ensure equal length
+	for len(currParts) < len(latestParts) {
+		currParts = append(currParts, "0")
+	}
+	for len(latestParts) < len(currParts) {
+		latestParts = append(latestParts, "0")
+	}
+
+	// Compare each part numerically
+	for i := 0; i < len(currParts); i++ {
+		currNum, _ := strconv.Atoi(currParts[i])
+		latestNum, _ := strconv.Atoi(latestParts[i])
+		if latestNum > currNum {
+			return true
+		}
+		if currNum > latestNum {
+			return false
+		}
+	}
+
+	return false
 }
