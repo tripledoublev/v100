@@ -16,7 +16,7 @@ import (
 // ResearchRunner orchestrates autonomous experiment loops.
 type ResearchRunner struct {
 	Config   *ResearchConfig
-	Dir      string // working directory for the experiments
+	Dir      string                                   // working directory for the experiments
 	OutFn    func(format string, args ...interface{}) // logging output
 	StopCh   chan struct{}
 	maxRound int // 0 = unlimited
@@ -160,54 +160,34 @@ func (r *ResearchRunner) runExperiment(ctx context.Context, round int) (*Researc
 		return nil, fmt.Errorf("git info: %w", err)
 	}
 
-	// Parse timeout
-	timeout := 5 * time.Minute
-	if r.Config.Experiment.Timeout != "" {
-		if d, err := time.ParseDuration(r.Config.Experiment.Timeout); err == nil {
-			timeout = d
-		}
-	}
-
-	// Build command
-	cmd := exec.CommandContext(ctx, "sh", "-c", r.Config.Experiment.Command)
-	cmd.Dir = r.Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
 	r.OutFn("running: %s", r.Config.Experiment.Command)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Run()
-	}()
-
-	var runErr error
-	select {
-	case err := <-done:
-		runErr = err
-	case <-time.After(timeout):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		runErr = fmt.Errorf("timeout after %v", timeout)
+	res, err := RunResearchExperiment(ctx, r.Config, ExperimentRunContext{
+		Round:      round,
+		RunID:      fmt.Sprintf("runner-%03d", round),
+		Commit:     commitHash,
+		Branch:     "",
+		Workspace:  r.Dir,
+		TargetFile: r.Config.Target.File,
+		MetricName: r.Config.Experiment.Metric,
+		Timestamp:  time.Now(),
+	}, nil)
+	if err != nil {
+		return nil, err
 	}
-
-	// Parse output for metric and memory
-	metric, memGB := r.parseOutput(round)
-	if metric == 0 && runErr != nil {
+	if res.Status == "crash" && res.Metric == 0 {
 		return &ResearchResult{
 			Commit:      commitHash,
 			Metric:      0,
 			MemoryGB:    0,
 			Status:      "crash",
-			Description: fmt.Sprintf("round %d error: %v", round, runErr),
+			Description: fmt.Sprintf("round %d crashed", round),
 		}, nil
 	}
 
 	return &ResearchResult{
 		Commit:      commitHash,
-		Metric:      metric,
-		MemoryGB:    memGB,
+		Metric:      res.Metric,
+		MemoryGB:    res.MemoryGB,
 		Status:      "keep", // tentative
 		Description: fmt.Sprintf("round %d", round),
 	}, nil

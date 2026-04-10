@@ -1,23 +1,20 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tripledoublev/v100/internal/compute"
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/providers"
@@ -29,6 +26,7 @@ func researchCmd(cfgPath *string) *cobra.Command {
 	var (
 		researchConfigPath string
 		providerName       string
+		computeName        string
 		maxRounds          int
 		dryRun             bool
 	)
@@ -76,13 +74,30 @@ func researchCmd(cfgPath *string) *cobra.Command {
 				fmt.Printf("  Otherwise, git commit -a may sweep them up.\n\n")
 			}
 
+			// Build compute provider (flag overrides toml)
+			computeCfg := compute.Config{
+				Provider:    researchCfg.Compute.Provider,
+				GPU:         researchCfg.Compute.GPU,
+				Image:       researchCfg.Compute.Image,
+				Timeout:     researchCfg.Compute.Timeout,
+				ModalSecret: researchCfg.Compute.ModalSecret,
+			}
+			if computeName != "" {
+				computeCfg.Provider = computeName
+			}
+			computeProv, err := compute.Build(computeCfg)
+			if err != nil {
+				return fmt.Errorf("build compute provider: %w", err)
+			}
+
 			// Run the research loop
-			return runResearchLoop(context.Background(), researchCfg, v100cfg, prov, providerName, maxRounds, dryRun)
+			return runResearchLoop(context.Background(), researchCfg, v100cfg, prov, providerName, computeProv, maxRounds, dryRun)
 		},
 	}
 
 	cmd.Flags().StringVar(&researchConfigPath, "config", "", "path to research.toml (required)")
 	cmd.Flags().StringVar(&providerName, "provider", "", "LLM provider for agent")
+	cmd.Flags().StringVar(&computeName, "compute", "", "compute provider for experiments (local, modal)")
 	cmd.Flags().IntVar(&maxRounds, "max-rounds", 0, "max rounds (0 = unlimited)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would run without executing")
 
@@ -95,12 +110,14 @@ func runResearchLoop(
 	v100cfg *config.Config,
 	prov providers.Provider,
 	providerName string,
+	computeProv compute.Provider,
 	maxRounds int,
 	dryRun bool,
 ) error {
 	fmt.Printf("%s\n", ui.Header("Research Loop"))
 	fmt.Printf("  Project:    %s\n", researchCfg.Name)
 	fmt.Printf("  Provider:   %s\n", providerName)
+	fmt.Printf("  Compute:    %s\n", computeProv.Name())
 	fmt.Printf("  Target:     %s\n", researchCfg.Target.File)
 	fmt.Printf("  Metric:     %s (lower = better: %v)\n", researchCfg.Experiment.Metric, researchCfg.Experiment.Direction == "lower")
 	fmt.Printf("  Timeout:    %s\n", researchCfg.Experiment.Timeout)
@@ -138,7 +155,9 @@ func runResearchLoop(
 
 	// Run baseline experiment
 	fmt.Printf("%s\n", ui.Header("Baseline"))
-	baselineMetric, _, baselineStatus, err := runExperiment(ctx, researchCfg)
+	baselineCommit, _ := gitCurrentCommit()
+	baselineBranch, _ := gitCurrentBranch()
+	baselineMetric, _, baselineStatus, err := runExperiment(ctx, researchCfg, computeProv, 0, baselineCommit, baselineBranch, "baseline")
 	if err != nil {
 		return fmt.Errorf("baseline experiment: %w", err)
 	}
@@ -150,8 +169,6 @@ func runResearchLoop(
 		}
 	}
 
-	// Get baseline commit
-	baselineCommit, _ := gitCurrentCommit()
 	fmt.Printf("  %s  Baseline: %s (status: %s)\n", ui.OK("recorded"), formatMetric(baselineMetric), baselineStatus)
 
 	// Append baseline to TSV
@@ -289,7 +306,9 @@ func runResearchLoop(
 
 		// Run experiment
 		fmt.Printf("  %s  Running experiment...\n", ui.Info("run"))
-		metric, memGB, status, err := runExperiment(ctx, researchCfg)
+		commitBeforeRun, _ := gitCurrentCommit()
+		branchBeforeRun, _ := gitCurrentBranch()
+		metric, memGB, status, err := runExperiment(ctx, researchCfg, computeProv, round, commitBeforeRun, branchBeforeRun, runID)
 		if err != nil {
 			fmt.Printf("  %s  Experiment error: %v\n", ui.Fail("error"), err)
 			status = "crash"
@@ -383,48 +402,32 @@ Please analyze the current code and results history, and propose your next exper
 }
 
 // runExperiment executes the experiment command and returns the metric.
-func runExperiment(ctx context.Context, cfg *core.ResearchConfig) (float64, float64, string, error) {
-	// Parse timeout
-	timeout := 10 * time.Minute
-	if cfg.Experiment.Timeout != "" {
-		if dur, err := time.ParseDuration(cfg.Experiment.Timeout); err == nil {
-			timeout = dur
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.Experiment.Command)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
-	cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)
-
-	err := cmd.Run()
-	output := stdout.String()
-
-	// Try to parse metric
-	metricRegex := regexp.MustCompile(fmt.Sprintf(`^%s:\s*([\d.]+)`, regexp.QuoteMeta(cfg.Experiment.Metric)))
-	metric := math.NaN()
-	status := "completed"
-
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if matches := metricRegex.FindStringSubmatch(line); matches != nil {
-			metric, _ = strconv.ParseFloat(matches[1], 64)
-			break
-		}
-	}
-
+func runExperiment(ctx context.Context, cfg *core.ResearchConfig, computeProv compute.Provider, round int, commit, branch, runID string) (float64, float64, string, error) {
+	res, err := core.RunResearchExperiment(ctx, cfg, core.ExperimentRunContext{
+		Round:      round,
+		RunID:      runID,
+		Commit:     commit,
+		Branch:     branch,
+		Workspace:  ".",
+		TargetFile: cfg.Target.File,
+		MetricName: cfg.Experiment.Metric,
+		Timestamp:  time.Now(),
+	}, computeProv)
 	if err != nil {
-		status = "crash"
+		return math.NaN(), 0, "crash", err
 	}
-	if math.IsNaN(metric) {
-		status = "crash"
+	combined := strings.TrimSpace(res.Output)
+	if combined != "" {
+		fmt.Println(combined)
 	}
-
-	return metric, 0.0, status, nil
+	if strings.TrimSpace(res.LocalLog) != "" && strings.TrimSpace(res.LocalLog) != combined {
+		fmt.Println(strings.TrimSpace(res.LocalLog))
+	}
+	metric := res.Metric
+	if res.Status == "crash" && metric == 0 {
+		metric = math.NaN()
+	}
+	return metric, res.MemoryGB, res.Status, nil
 }
 
 // isImproved checks if the new metric is better than the baseline.
@@ -449,6 +452,14 @@ func formatMetric(m float64) string {
 // gitCurrentCommit returns the short commit hash.
 func gitCurrentCommit() (string, error) {
 	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitCurrentBranch() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return "", err
 	}
