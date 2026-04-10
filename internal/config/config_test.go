@@ -55,6 +55,20 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected gemma-4-E2B-it-GGUF:Q8_0, got %s", cfg.Providers["llamacpp"].DefaultModel)
 	}
 
+	// Check that glm provider exists in defaults
+	if _, ok := cfg.Providers["glm"]; !ok {
+		t.Error("expected glm provider in defaults")
+	}
+	if cfg.Providers["glm"].Type != "glm" {
+		t.Errorf("expected type glm, got %s", cfg.Providers["glm"].Type)
+	}
+	if cfg.Providers["glm"].DefaultModel != "glm-4-plus" {
+		t.Errorf("expected glm-4-plus, got %s", cfg.Providers["glm"].DefaultModel)
+	}
+	if cfg.Providers["glm"].Auth.Env != "ZHIPU_API_KEY" {
+		t.Errorf("expected ZHIPU_API_KEY, got %s", cfg.Providers["glm"].Auth.Env)
+	}
+
 	// Verify sh tool is enabled and dangerous by default
 	shEnabled := false
 	for _, tool := range cfg.Tools.Enabled {
@@ -212,6 +226,15 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "gemma-4-E2B-it-GGUF:Q8_0") {
 		t.Error("default TOML should reference the llamacpp default model")
+	}
+	if !contains(toml, "[providers.glm]") {
+		t.Error("default TOML should contain glm provider section")
+	}
+	if !contains(toml, "glm-4-plus") {
+		t.Error("default TOML should reference glm-4-plus model")
+	}
+	if !contains(toml, "ZHIPU_API_KEY") {
+		t.Error("default TOML should reference ZHIPU_API_KEY")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

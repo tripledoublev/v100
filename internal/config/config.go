@@ -154,6 +154,12 @@ func DefaultConfig() *Config {
 				BaseURL:      "https://api.minimax.chat/v1",
 				Auth:         AuthConfig{Env: "MINIMAX_API_KEY"},
 			},
+			"glm": {
+				Type:         "glm",
+				DefaultModel: "glm-4-plus",
+				BaseURL:      "https://open.bigmodel.cn/api/paas/v4/",
+				Auth:         AuthConfig{Env: "ZHIPU_API_KEY"},
+			},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
@@ -274,6 +280,13 @@ default_model = "MiniMax-M2.7"
 base_url = "https://api.minimax.chat/v1"
 [providers.minimax.auth]
 env = "MINIMAX_API_KEY"
+
+[providers.glm]
+type = "glm"
+default_model = "glm-4-plus"
+base_url = "https://open.bigmodel.cn/api/paas/v4/"
+[providers.glm.auth]
+env = "ZHIPU_API_KEY"
 
 [tools]
 enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect"]
