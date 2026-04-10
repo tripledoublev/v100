@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -113,7 +112,7 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 
 	// Handle model list request (/provider model or /provider models)
 	if rest == "model" || rest == "models" {
-		printModelList(cfg, strings.TrimPrefix(mode, "/"))
+		printModelList(loop, cfg, strings.TrimPrefix(mode, "/"))
 		return "", true, nil
 	}
 
@@ -186,32 +185,34 @@ func fuzzyMatchModel(prov providers.Provider, query string) string {
 	return ""
 }
 
-// printModelList prints available models for a provider to stderr.
-func printModelList(cfg *config.Config, providerName string) {
+// printModelList emits available models for a provider to the session.
+func printModelList(loop *core.Loop, cfg *config.Config, providerName string) {
 	prov, err := buildProvider(cfg, providerName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error building provider %q: %v\n", providerName, err)
+		emitSessionNotice(loop, fmt.Sprintf("error building provider %q: %v", providerName, err))
 		return
 	}
 
 	lister, ok := prov.(providers.ModelLister)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "no model list available for %s\n", providerName)
+		emitSessionNotice(loop, fmt.Sprintf("no model list available for %s", providerName))
 		return
 	}
 
 	models := lister.Models()
 	if len(models) == 0 {
-		fmt.Fprintf(os.Stderr, "no models available for %s\n", providerName)
+		emitSessionNotice(loop, fmt.Sprintf("no models available for %s", providerName))
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "%s available models:\n", providerName)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s available models:\n", providerName))
 	for i, m := range models {
 		marker := " "
 		if i == 0 {
 			marker = "*"
 		}
-		fmt.Fprintf(os.Stderr, " %s %s — %s\n", marker, m.Name, m.Description)
+		sb.WriteString(fmt.Sprintf(" %s %s — %s\n", marker, m.Name, m.Description))
 	}
+	emitSessionNotice(loop, sb.String())
 }
