@@ -351,6 +351,16 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 			return nil, fmt.Errorf("build smart provider %q: %w", smartProvName, err)
 		}
 		return &core.RouterSolver{Cheap: cheap, Smart: smart}, nil
+	case "miniglm":
+		minimax, err := buildProvider(cfg, "minimax")
+		if err != nil {
+			return nil, fmt.Errorf("build minimax provider: %w", err)
+		}
+		glm, err := buildProvider(cfg, "glm")
+		if err != nil {
+			return nil, fmt.Errorf("build glm provider: %w", err)
+		}
+		return &core.MiniGLMSolver{MiniMax: minimax, GLM: glm}, nil
 	case "react", "":
 		if solverName == "" && strings.TrimSpace(cfg.Defaults.Provider) == "smartrouter" {
 			return buildSolver(cfg, "smartrouter")
@@ -370,6 +380,8 @@ func solverDisplayName(s core.Solver) string {
 		return "plan_execute"
 	case *core.RouterSolver:
 		return "smartrouter"
+	case *core.MiniGLMSolver:
+		return "miniglm"
 	default:
 		return "react"
 	}
