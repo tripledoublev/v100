@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -116,8 +117,10 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		durMS = time.Since(t0).Milliseconds()
 
 		if err != nil {
-			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
-			l.emitErrorAssistance(ctx, stepID, err)
+			if !errors.Is(err, context.Canceled) {
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+				l.emitErrorAssistance(ctx, stepID, err)
+			}
 			return SolveResult{}, fmt.Errorf("router solver: %w", err)
 		}
 
@@ -150,6 +153,10 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 			})
 			durMS = time.Since(t0).Milliseconds()
 			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
+					l.emitErrorAssistance(ctx, stepID, err)
+				}
 				return SolveResult{}, fmt.Errorf("smart provider: %w", err)
 			}
 		}
