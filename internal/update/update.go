@@ -103,10 +103,15 @@ func ApplyUpdate(newPath string) error {
 		return fmt.Errorf("could not move current executable: %w", err)
 	}
 
+	// Try os.Rename first (fast), fall back to copy+delete if cross-device
 	if err := os.Rename(newPath, exePath); err != nil {
-		// Try to rollback if possible
-		_ = os.Rename(oldPath, exePath)
-		return fmt.Errorf("could not install new executable: %w", err)
+		// Cross-device link error: fall back to copy + delete
+		if copyErr := copyFile(newPath, exePath); copyErr != nil {
+			// Try to rollback if possible
+			_ = os.Rename(oldPath, exePath)
+			return fmt.Errorf("could not install new executable: %w", err)
+		}
+		_ = os.Remove(newPath) // clean up temp file
 	}
 
 	// Set executable permissions on Unix-like systems
@@ -117,6 +122,29 @@ func ApplyUpdate(newPath string) error {
 	}
 
 	return nil
+}
+
+// copyFile copies src to dst, preserving permissions.
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
 // TargetAsset returns the expected asset name for the current platform.
