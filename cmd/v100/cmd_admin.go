@@ -434,7 +434,7 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 				case "llamacpp", "llama.cpp", "llama-cpp":
 					baseURL := strings.TrimSpace(pc.BaseURL)
 					if baseURL == "" {
-						baseURL = "http://127.0.0.1:8080/v1"
+						baseURL = "http://127.0.0.1:19091/v1"
 					}
 					envURL := os.Getenv("LLAMA_CPP_BASE_URL")
 					if envURL == "" {

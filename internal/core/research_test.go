@@ -133,4 +133,42 @@ direction = "lower"
 	if cfg.BranchPrefix != "research" {
 		t.Errorf("default branch_prefix = %q, want research", cfg.BranchPrefix)
 	}
+	if cfg.Experiment.WorkDir != "." {
+		t.Errorf("default workdir = %q, want .", cfg.Experiment.WorkDir)
+	}
+	if cfg.Experiment.LogFile != "run.log" {
+		t.Errorf("default log_file = %q, want run.log", cfg.Experiment.LogFile)
+	}
+}
+
+func TestResearchConfigWandBDefaults(t *testing.T) {
+	content := `
+name = "test"
+
+[target]
+file = "train.py"
+program = "program.md"
+
+[experiment]
+command = "echo test"
+metric = "val_bpb"
+direction = "lower"
+
+[experiment.tracking.wandb]
+enabled = true
+project = "autoresearch"
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadResearchConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Experiment.Tracking.WandB.APIKeyEnv != "WANDB_API_KEY" {
+		t.Fatalf("api_key_env = %q, want WANDB_API_KEY", cfg.Experiment.Tracking.WandB.APIKeyEnv)
+	}
 }

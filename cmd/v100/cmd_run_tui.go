@@ -75,7 +75,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		}
 
 		err := runInteractiveStep(func() error {
-			return loop.StepWithImages(stepCtx, req.Text, images)
+			rewritten, handled, err := applyInteractiveMode(stepCtx, cfg, loop, req.Text, false)
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+			return loop.StepWithImages(stepCtx, rewritten, images)
 		}, budget, func(reason string) bool {
 			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
 		})
@@ -210,7 +217,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepMu.Unlock()
 
 		err := runInteractiveStep(func() error {
-			return loop.Step(stepCtx, initialPrompt)
+			rewritten, handled, err := applyInteractiveMode(stepCtx, cfg, loop, initialPrompt, false)
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+			return loop.Step(stepCtx, rewritten)
 		}, budget, func(reason string) bool {
 			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
 		})

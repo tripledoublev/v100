@@ -20,7 +20,7 @@ const (
 	EventToolCallDelta    EventType = "tool.call_delta"
 	EventToolOutputDelta  EventType = "tool.output_delta"
 	EventToolResult       EventType = "tool.result"
-	EventToolReflect      EventType = "tool.reflect"
+	EventReflect          EventType = "tool.reflect"
 	EventRunError         EventType = "run.error"
 	EventRunEnd           EventType = "run.end"
 	EventSandboxSnapshot  EventType = "sandbox.snapshot"
@@ -33,9 +33,18 @@ const (
 	EventSolverPlan       EventType = "solver.plan"
 	EventSolverReplan     EventType = "solver.replan"
 	EventHookIntervention EventType = "hook.intervention"
+	EventImageInline      EventType = "image.inline"
 	EventGeneratedGoal    EventType = "generated.goal"
 	EventPolicyEvolve     EventType = "policy.evolve"
 )
+
+// ImageInlinePayload carries the base64-encoded image for iTerm2 inline rendering.
+type ImageInlinePayload struct {
+	// Data is the raw PNG bytes, encoded as base64 for the TUI render layer.
+	Data string `json:"data"`
+	// Index is the image attachment index (0-based) within the current response.
+	Index int `json:"index"`
+}
 
 // HookAction identifies the action a policy hook wants to take.
 type HookAction int
@@ -191,13 +200,13 @@ type CompressPayload struct {
 	TokensBefore       int     `json:"tokens_before"`
 	TokensAfter        int     `json:"tokens_after"`
 	CostUSD            float64 `json:"cost_usd"`
-	Trigger            string  `json:"trigger,omitempty"`             // "context_limit" or "budget_tokens"
-	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
-	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
-	MessagesFailed     int     `json:"messages_failed,omitempty"`     // compression failures
-	TokensSaved        int     `json:"tokens_saved,omitempty"`        // derived: before - after
-	DurationMS         int64   `json:"duration_ms,omitempty"`         // wall time of compress calls
-	ProviderModel      string  `json:"provider_model,omitempty"`      // model used for compression
+	Trigger            string  `json:"trigger,omitempty"`              // "context_limit" or "budget_tokens"
+	Strategy           string  `json:"strategy,omitempty"`             // "targeted" or "bulk"
+	MessagesCompressed int     `json:"messages_compressed,omitempty"`   // for targeted
+	MessagesFailed     int     `json:"messages_failed,omitempty"`      // compression failures
+	TokensSaved        int     `json:"tokens_saved,omitempty"`         // derived: before - after
+	DurationMS         int64   `json:"duration_ms,omitempty"`          // wall time of compress calls
+	ProviderModel      string  `json:"provider_model,omitempty"`       // model used for compression
 }
 
 // StepSummaryPayload is the Payload for EventStepSummary.

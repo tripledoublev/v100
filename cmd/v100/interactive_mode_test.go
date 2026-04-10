@@ -1,0 +1,242 @@
+package main
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/tripledoublev/v100/internal/config"
+	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/tools"
+)
+
+type testProviderStub struct {
+	requests []providers.CompleteRequest
+	caps     providers.Capabilities
+}
+
+func (p *testProviderStub) Name() string { return "test-stub" }
+func (p *testProviderStub) Capabilities() providers.Capabilities {
+	return p.caps
+}
+func (p *testProviderStub) Complete(_ context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	p.requests = append(p.requests, req)
+	return providers.CompleteResponse{AssistantText: "ok"}, nil
+}
+func (p *testProviderStub) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{}, nil
+}
+func (p *testProviderStub) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: model, ContextSize: 4096}, nil
+}
+
+func testInteractiveConfig() *config.Config {
+	cfg := config.DefaultConfig()
+	cfg.Providers["smartrouter"] = config.ProviderConfig{Type: "smartrouter"}
+	cfg.Providers["ollama"] = config.ProviderConfig{
+		Type:         "ollama",
+		DefaultModel: "qwen-local",
+		BaseURL:      "http://127.0.0.1:11434",
+	}
+	cfg.Providers["codex"] = config.ProviderConfig{
+		Type:         "ollama",
+		DefaultModel: "gpt-frontier",
+		BaseURL:      "http://127.0.0.1:11435",
+	}
+	cfg.Providers["gemini"] = config.ProviderConfig{
+		Type:         "llamacpp",
+		DefaultModel: "gemini-frontier",
+		BaseURL:      "http://127.0.0.1:19091/v1",
+	}
+	cfg.Providers["minimax"] = config.ProviderConfig{
+		Type:         "ollama",
+		DefaultModel: "minimax-frontier",
+		BaseURL:      "http://127.0.0.1:11436",
+	}
+	cfg.Defaults.Provider = "smartrouter"
+	cfg.Defaults.CheapProvider = "ollama"
+	cfg.Defaults.SmartProvider = "codex"
+	return cfg
+}
+
+func newInteractiveTestLoop(t *testing.T) *core.Loop {
+	t.Helper()
+	runDir := t.TempDir()
+	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = trace.Close() })
+	return &core.Loop{
+		Run:      &core.Run{ID: "interactive-test", Dir: runDir},
+		Provider: &testProviderStub{},
+		Tools:    tools.NewRegistry(nil),
+		Trace:    trace,
+		Budget:   core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 10000}),
+		Solver:   &core.ReactSolver{},
+	}
+}
+
+func TestParseInteractiveModeCommand(t *testing.T) {
+	mode, rest, ok := parseInteractiveModeCommand("/codex inspect this")
+	if !ok || mode != "/codex" || rest != "inspect this" {
+		t.Fatalf("parseInteractiveModeCommand returned (%q, %q, %v)", mode, rest, ok)
+	}
+
+	mode, rest, ok = parseInteractiveModeCommand("plain text")
+	if ok || mode != "" || rest != "plain text" {
+		t.Fatalf("unexpected parse result for plain text: (%q, %q, %v)", mode, rest, ok)
+	}
+}
+
+func TestBuildProviderSupportsSmartRouterType(t *testing.T) {
+	cfg := testInteractiveConfig()
+	prov, err := buildProvider(cfg, "smartrouter")
+	if err != nil {
+		t.Fatalf("buildProvider(smartrouter) error = %v", err)
+	}
+	if prov.Name() != "smartrouter" {
+		t.Fatalf("provider name = %q, want smartrouter", prov.Name())
+	}
+}
+
+func TestBuildSolverAutoUsesSmartRouterWhenProviderDefaultIsSmartRouter(t *testing.T) {
+	cfg := testInteractiveConfig()
+	solver, err := buildSolver(cfg, "")
+	if err != nil {
+		t.Fatalf("buildSolver error = %v", err)
+	}
+	if _, ok := solver.(*core.RouterSolver); !ok {
+		t.Fatalf("solver type = %T, want *core.RouterSolver", solver)
+	}
+}
+
+func TestBuildCompressProviderPrefersLocalProvider(t *testing.T) {
+	cfg := testInteractiveConfig()
+	cfg.Defaults.CheapProvider = "gemini"
+	cp := buildCompressProvider(cfg)
+	if cp == nil {
+		t.Fatal("expected non-nil compress provider")
+	}
+	if cp.Name() != "ollama" && cp.Name() != "llamacpp" {
+		t.Fatalf("compress provider = %q, want a local backend", cp.Name())
+	}
+}
+
+func TestApplyInteractiveModeSwitchesToAuto(t *testing.T) {
+	cfg := testInteractiveConfig()
+	loop := newInteractiveTestLoop(t)
+	rewritten, handled, err := applyInteractiveMode(context.Background(), cfg, loop, "/auto inspect the project", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if handled {
+		t.Fatal("expected trailing prompt to continue after mode switch")
+	}
+	if rewritten != "inspect the project" {
+		t.Fatalf("rewritten input = %q", rewritten)
+	}
+	if loop.Provider.Name() != "smartrouter" {
+		t.Fatalf("provider name = %q, want smartrouter", loop.Provider.Name())
+	}
+	if _, ok := loop.Solver.(*core.RouterSolver); !ok {
+		t.Fatalf("solver type = %T, want *core.RouterSolver", loop.Solver)
+	}
+}
+
+func TestApplyInteractiveModeHandlesStandaloneSwitch(t *testing.T) {
+	cfg := testInteractiveConfig()
+	loop := newInteractiveTestLoop(t)
+	_, handled, err := applyInteractiveMode(context.Background(), cfg, loop, "/local", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if !handled {
+		t.Fatal("expected standalone mode switch to be fully handled")
+	}
+	if loop.Provider.Name() != "ollama" {
+		t.Fatalf("provider name = %q, want ollama", loop.Provider.Name())
+	}
+	if _, ok := loop.Solver.(*core.ReactSolver); !ok {
+		t.Fatalf("solver type = %T, want *core.ReactSolver", loop.Solver)
+	}
+}
+
+func TestRunCLIInputTreatsModeSwitchAsNonModelTurn(t *testing.T) {
+	cfg := testInteractiveConfig()
+	runDir := t.TempDir()
+	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	mock := &testProviderStub{}
+	loop := &core.Loop{
+		Run:      &core.Run{ID: "cli-input", Dir: runDir},
+		Provider: mock,
+		Tools:    tools.NewRegistry(nil),
+		Trace:    trace,
+		Budget:   core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 10000}),
+		Solver:   &core.ReactSolver{},
+	}
+	if err := runCLIInput(context.Background(), cfg, loop, "/local", nil, false); err != nil {
+		t.Fatalf("runCLIInput error = %v", err)
+	}
+	if len(mock.requests) != 0 {
+		t.Fatalf("expected no model request for standalone mode switch, got %d", len(mock.requests))
+	}
+}
+
+func TestApplyInteractiveModeLeavesPlanModeAlone(t *testing.T) {
+	cfg := testInteractiveConfig()
+	loop := newInteractiveTestLoop(t)
+	rewritten, handled, err := applyInteractiveMode(context.Background(), cfg, loop, "/auto inspect the project", true)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if handled || rewritten != "/auto inspect the project" {
+		t.Fatalf("plan mode should leave input untouched, got (%q, %v)", rewritten, handled)
+	}
+}
+
+func TestEmitSessionNoticeWritesTrace(t *testing.T) {
+	loop := newInteractiveTestLoop(t)
+	emitSessionNotice(loop, "session mode switched to auto")
+	events, err := core.ReadAll(loop.Trace.Path())
+	if err != nil {
+		t.Fatalf("ReadAll error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Type != core.EventUserMsg {
+		t.Fatalf("event type = %q, want %q", events[0].Type, core.EventUserMsg)
+	}
+}
+
+func TestBuildSingleProviderSelectionUsesConfiguredModel(t *testing.T) {
+	cfg := testInteractiveConfig()
+	sel, err := buildSingleProviderSelection(cfg, "codex", "codex")
+	if err != nil {
+		t.Fatalf("buildSingleProviderSelection error = %v", err)
+	}
+	if sel.Model != "gpt-frontier" {
+		t.Fatalf("selection model = %q, want gpt-frontier", sel.Model)
+	}
+	if sel.Provider == nil || sel.Provider.Name() != "ollama" {
+		t.Fatalf("selection provider = %v, want ollama-backed provider", sel.Provider)
+	}
+}
+
+func TestSmartRouterProviderCapabilitiesUnion(t *testing.T) {
+	prov := &providers.SmartRouterProvider{
+		Cheap: &testProviderStub{caps: providers.Capabilities{ToolCalls: true}},
+		Smart: &testProviderStub{caps: providers.Capabilities{Images: true, Streaming: true}},
+	}
+	caps := prov.Capabilities()
+	if !caps.ToolCalls || !caps.Images || !caps.Streaming {
+		t.Fatalf("unexpected capabilities: %+v", caps)
+	}
+}

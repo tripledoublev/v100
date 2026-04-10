@@ -334,7 +334,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&planFlag, "plan", false, "preview a plan and require approval before execution (CLI only)")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
-	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router (default: react)")
+	cmd.Flags().StringVar(&solverFlag, "solver", "", "solver type: react|plan_execute|router|smartrouter (default: react)")
 	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "", "read the initial prompt from a file ('-' for stdin)")
 	cmd.Flags().StringVar(&authFlag, "auth", "", "basic auth (user:pass); bare --auth loads from .env")
 	cmd.Flags().Lookup("auth").NoOptDefVal = "env"
@@ -549,7 +549,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepMu.Unlock()
 
 		err := runInteractiveStep(func() error {
-			return runCLIInput(stepCtx, loop, initialPrompt, nil, planMode)
+			return runCLIInput(stepCtx, cfg, loop, initialPrompt, nil, planMode)
 		}, budget, func(reason string) bool {
 			return promptContinueWithoutBudgetLimit(os.Stdin, os.Stderr, reason)
 		})
@@ -619,7 +619,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 		stepMu.Unlock()
 
 		err = runInteractiveStep(func() error {
-			return runCLIInput(stepCtx, loop, input, images, planMode)
+			return runCLIInput(stepCtx, cfg, loop, input, images, planMode)
 		}, budget, func(reason string) bool {
 			return promptContinueWithoutBudgetLimit(os.Stdin, os.Stderr, reason)
 		})
@@ -698,7 +698,15 @@ func printInterruptWarning(w io.Writer, message string) {
 	_, _ = fmt.Fprintln(w, ui.Warn(message))
 }
 
-func runCLIInput(ctx context.Context, loop *core.Loop, input string, images []providers.ImageAttachment, planMode bool) error {
+func runCLIInput(ctx context.Context, cfg *config.Config, loop *core.Loop, input string, images []providers.ImageAttachment, planMode bool) error {
+	rewritten, handled, err := applyInteractiveMode(ctx, cfg, loop, input, planMode)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+	input = rewritten
 	if !planMode {
 		return loop.StepWithImages(ctx, input, images)
 	}

@@ -142,7 +142,7 @@ func describeTraceEvent(ev core.Event) (string, []string) {
 		}
 		return title, nil
 
-	case core.EventToolReflect:
+	case core.EventReflect:
 		var p core.ToolReflectPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		title := fmt.Sprintf("%s  %s  confidence=%.2f", ev.Type, p.Name, p.Confidence)

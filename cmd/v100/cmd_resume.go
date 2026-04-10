@@ -264,7 +264,14 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			break
 		}
 		err = runInteractiveStep(func() error {
-			return loop.StepWithImages(ctx, input, images)
+			rewritten, handled, err := applyInteractiveMode(ctx, cfg, loop, input, false)
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+			return loop.StepWithImages(ctx, rewritten, images)
 		}, budget, func(reason string) bool {
 			return promptContinueWithoutBudgetLimit(os.Stdin, os.Stderr, reason)
 		})
@@ -335,7 +342,14 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
 		}
 		err := runInteractiveStep(func() error {
-			return loop.StepWithImages(ctx, req.Text, images)
+			rewritten, handled, err := applyInteractiveMode(ctx, cfg, loop, req.Text, false)
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+			return loop.StepWithImages(ctx, rewritten, images)
 		}, budget, func(reason string) bool {
 			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
 		})

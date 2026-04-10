@@ -116,6 +116,9 @@ type DefaultsConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Providers: map[string]ProviderConfig{
+			"smartrouter": {
+				Type: "smartrouter",
+			},
 			"codex": {
 				Type:         "codex",
 				DefaultModel: "gpt-5.4",
@@ -231,6 +234,9 @@ func DefaultConfig() *Config {
 func DefaultTOML() string {
 	return `# v100 agent harness configuration
 
+[providers.smartrouter]
+type = "smartrouter"
+
 [providers.codex]
 type = "codex"
 default_model = "gpt-5.4"
@@ -279,8 +285,8 @@ max_tool_calls_per_step = 50
 
 [defaults]
 provider = "minimax"          # use MiniMax subscription by default
-smart_provider = "minimax"    # for router solver escalation
-cheap_provider = "ollama"     # for router solver discovery
+smart_provider = "minimax"    # frontier provider for smartrouter/router
+cheap_provider = "ollama"     # local provider for smartrouter/router and compression
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
 budget_tokens = 1000000
@@ -292,7 +298,7 @@ memory_max_tokens = 256    # approximate token budget for retrieved durable memo
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
 max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
 compress_protect_recent = 6   # recent messages protected from targeted compression
-# compress_provider = ""      # provider for compression calls (empty = use cheap_provider)
+# compress_provider = ""      # provider for compression calls (empty = prefer local cheap_provider)
 
 [sandbox]
 enabled = false

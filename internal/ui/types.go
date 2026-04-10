@@ -122,7 +122,7 @@ type TUIModel struct {
 	compressEvents []time.Time
 	lastEventAt    time.Time
 
-	// clipboard images
+	// clipboard images attached to current input
 	pastedImages [][]byte
 
 	// callbacks
@@ -202,6 +202,13 @@ type downloadDoneMsg struct {
 	artist string
 	title  string
 	err    string
+}
+
+// ImageRenderedMsg carries a rendered iTerm2 inline image string.
+type ImageRenderedMsg struct {
+	Image        string
+	Index        int
+	MessageIndex int // which user/model message this image belongs to
 }
 
 func (m *TUIModel) SetVerbose(v bool) {

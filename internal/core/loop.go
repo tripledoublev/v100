@@ -303,7 +303,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		if l.Policy != nil && l.Policy.ReflectOnDangerous {
 			confidence, uncertainty, err := l.reflectOnTool(ctx, stepID, tc)
 			if err == nil {
-				_, _ = l.emit(EventToolReflect, stepID, ToolReflectPayload{
+				_, _ = l.emit(EventReflect, stepID, ToolReflectPayload{
 					CallID:      tc.ID,
 					Name:        tc.Name,
 					Confidence:  confidence,

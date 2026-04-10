@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -191,36 +190,6 @@ func (r *ResearchRunner) runExperiment(ctx context.Context, round int) (*Researc
 		Status:      "keep", // tentative
 		Description: fmt.Sprintf("round %d", round),
 	}, nil
-}
-
-// parseOutput greps the log file (run.log) for the metric and memory values.
-// The experiment command should write output to run.log in the working dir.
-func (r *ResearchRunner) parseOutput(round int) (metric, memGB float64) {
-	logPath := r.Dir + "/run.log"
-	f, err := os.Open(logPath)
-	if err != nil {
-		return 0, 0
-	}
-	defer func() { _ = f.Close() }()
-
-	metricRE := regexp.MustCompile(`(?i)^` + r.Config.Experiment.Metric + `:\s*([0-9.]+)`)
-	memRE := regexp.MustCompile(`(?i)^peak_vram_mb:\s*([0-9.]+)`)
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if m := metricRE.FindStringSubmatch(line); len(m) > 1 {
-			if v, err := strconv.ParseFloat(m[1], 64); err == nil {
-				metric = v
-			}
-		}
-		if m := memRE.FindStringSubmatch(line); len(m) > 1 {
-			if v, err := strconv.ParseFloat(m[1], 64); err == nil {
-				memGB = v / 1024.0
-			}
-		}
-	}
-	return metric, memGB
 }
 
 // --- Decision logic ---

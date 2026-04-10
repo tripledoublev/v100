@@ -80,6 +80,9 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 			return nil, fmt.Errorf("provider %q not configured", providerName)
 		}
 	}
+	if pc.Type == "smartrouter" {
+		return buildSmartRouterProvider(cfg, "")
+	}
 	return buildProviderFromConfig(pc)
 }
 
@@ -109,7 +112,96 @@ func buildProviderWithModel(cfg *config.Config, providerName, model string) (pro
 	if trimmed := strings.TrimSpace(model); trimmed != "" {
 		pc.DefaultModel = trimmed
 	}
+	if pc.Type == "smartrouter" {
+		return buildSmartRouterProvider(cfg, strings.TrimSpace(model))
+	}
 	return buildProviderFromConfig(pc)
+}
+
+func providerConfigType(cfg *config.Config, providerName string) string {
+	if cfg == nil {
+		return ""
+	}
+	if pc, ok := cfg.Providers[providerName]; ok && strings.TrimSpace(pc.Type) != "" {
+		return pc.Type
+	}
+	defaults := config.DefaultConfig()
+	if pc, ok := defaults.Providers[providerName]; ok {
+		return pc.Type
+	}
+	return ""
+}
+
+func isLocalProviderType(providerType string) bool {
+	switch providerType {
+	case "ollama", "llamacpp", "llama.cpp", "llama-cpp":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLocalProviderName(cfg *config.Config, providerName string) bool {
+	return isLocalProviderType(providerConfigType(cfg, providerName))
+}
+
+func resolveLocalProviderName(cfg *config.Config) string {
+	candidates := []string{
+		cfg.Defaults.CheapProvider,
+		"ollama",
+		"llamacpp",
+	}
+	for _, name := range candidates {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if isLocalProviderName(cfg, name) {
+			return name
+		}
+	}
+	for _, name := range candidates {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func resolveSmartProviderName(cfg *config.Config) string {
+	candidate := strings.TrimSpace(cfg.Defaults.SmartProvider)
+	if candidate != "" && candidate != "smartrouter" {
+		return candidate
+	}
+	candidate = strings.TrimSpace(cfg.Defaults.Provider)
+	if candidate != "" && candidate != "smartrouter" {
+		return candidate
+	}
+	return "minimax"
+}
+
+func buildSmartRouterProvider(cfg *config.Config, smartModel string) (providers.Provider, error) {
+	cheapProvName := resolveLocalProviderName(cfg)
+	if cheapProvName == "" {
+		cheapProvName = "ollama"
+	}
+	smartProvName := resolveSmartProviderName(cfg)
+	if smartProvName == "smartrouter" {
+		return nil, fmt.Errorf("smartrouter smart provider cannot point to smartrouter")
+	}
+	if cheapProvName == "smartrouter" {
+		return nil, fmt.Errorf("smartrouter cheap provider cannot point to smartrouter")
+	}
+	cheap, err := buildProvider(cfg, cheapProvName)
+	if err != nil {
+		return nil, fmt.Errorf("build cheap provider %q: %w", cheapProvName, err)
+	}
+	smart, err := buildProviderWithModel(cfg, smartProvName, smartModel)
+	if err != nil {
+		return nil, fmt.Errorf("build smart provider %q: %w", smartProvName, err)
+	}
+	return &providers.SmartRouterProvider{Cheap: cheap, Smart: smart}, nil
 }
 
 func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
@@ -130,6 +222,8 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 	var raw providers.Provider
 	var err error
 	switch pc.Type {
+	case "smartrouter":
+		return nil, fmt.Errorf("smartrouter provider requires full config context")
 	case "codex":
 		raw, err = providers.NewCodexProvider("", pc.DefaultModel)
 	case "openai":
@@ -242,15 +336,12 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 			maxReplans = 3
 		}
 		return &core.PlanExecuteSolver{MaxReplans: maxReplans}, nil
-	case "router":
-		cheapProvName := cfg.Defaults.CheapProvider
+	case "router", "smartrouter":
+		cheapProvName := resolveLocalProviderName(cfg)
 		if cheapProvName == "" {
-			cheapProvName = "ollama" // default cheap
+			cheapProvName = "ollama"
 		}
-		smartProvName := cfg.Defaults.SmartProvider
-		if smartProvName == "" {
-			smartProvName = cfg.Defaults.Provider
-		}
+		smartProvName := resolveSmartProviderName(cfg)
 		cheap, err := buildProvider(cfg, cheapProvName)
 		if err != nil {
 			return nil, fmt.Errorf("build cheap provider %q: %w", cheapProvName, err)
@@ -261,6 +352,9 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 		}
 		return &core.RouterSolver{Cheap: cheap, Smart: smart}, nil
 	case "react", "":
+		if solverName == "" && strings.TrimSpace(cfg.Defaults.Provider) == "smartrouter" {
+			return buildSolver(cfg, "smartrouter")
+		}
 		return &core.ReactSolver{}, nil
 	default:
 		if solverName == "plan" {
@@ -275,7 +369,7 @@ func solverDisplayName(s core.Solver) string {
 	case *core.PlanExecuteSolver:
 		return "plan_execute"
 	case *core.RouterSolver:
-		return "router"
+		return "smartrouter"
 	default:
 		return "react"
 	}
@@ -890,11 +984,12 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 func buildCompressProvider(cfg *config.Config) providers.Provider {
 	cpName := cfg.Defaults.CompressProvider
 	if cpName == "" {
-		// Default to gemini for compression — fast and cheap.
-		// Fall back to CheapProvider only if it's a remote provider.
-		cpName = "gemini"
-		if cheap := cfg.Defaults.CheapProvider; cheap != "" && cheap != "ollama" {
+		if local := resolveLocalProviderName(cfg); local != "" {
+			cpName = local
+		} else if cheap := strings.TrimSpace(cfg.Defaults.CheapProvider); cheap != "" {
 			cpName = cheap
+		} else {
+			cpName = "gemini"
 		}
 	}
 	if cpName == cfg.Defaults.Provider {

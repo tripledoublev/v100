@@ -56,6 +56,47 @@ uv run train.py
 
 If the above commands all work ok, your setup is working and you can go into autonomous research mode.
 
+## No local GPU: remote research
+
+If you do not have a local GPU, the research loop can now launch training remotely and still keep the agent, results history, and metric parsing local.
+
+`research.toml` supports:
+
+- `workdir` and `log_file` for where the local launcher runs and where logs are read from.
+- `setup`, `command`, and `collect` hooks so you can sync code to a remote box, submit a cloud job, and pull logs back.
+- Go-template placeholders in those hooks, including `{{.Round}}`, `{{.Commit}}`, `{{.Branch}}`, `{{.RunID}}`, `{{.LogFile}}`, and `{{.WandB.RunName}}`.
+- optional Weights & Biases export via `[experiment.tracking.wandb]`, which injects `WANDB_*` env vars into the launched job.
+
+That means you can drive training in a few different ways without changing Go code:
+
+- SSH to your own rented GPU box.
+- Wrap `setup` / `command` / `collect` around RunPod, Modal, Vast, Lambda, or any other CLI/API script.
+- Keep using a local command when you do have a GPU.
+
+Example pattern:
+
+```toml
+[experiment]
+workdir = "."
+log_file = "run.log"
+setup = "rsync -az --delete ./ gpubox:~/autoresearch/"
+command = "ssh gpubox 'cd ~/autoresearch && uv run train.py | tee run.log'"
+collect = "scp gpubox:~/autoresearch/run.log {{.LogFile}}"
+timeout = "10m"
+metric = "val_bpb"
+direction = "lower"
+
+[experiment.tracking.wandb]
+enabled = true
+project = "autoresearch"
+group = "cloud"
+run_name = "remote-r{{.Round}}-{{.Commit}}"
+tags = ["remote", "cloud"]
+api_key_env = "WANDB_API_KEY"
+```
+
+For provider-specific cloud launches, the intended pattern is to keep the provider logic in shell scripts or CLIs and let `v100 research` stay responsible for the agent loop, metric comparison, and result bookkeeping.
+
 ## Running the agent
 
 Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
