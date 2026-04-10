@@ -9,8 +9,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Defaults.Provider != "minimax" {
-		t.Errorf("expected default provider minimax, got %s", cfg.Defaults.Provider)
+	if cfg.Defaults.Provider != "glm" {
+		t.Errorf("expected default provider glm, got %s", cfg.Defaults.Provider)
 	}
 	if cfg.Defaults.BudgetSteps != 50 {
 		t.Errorf("expected 50 budget steps, got %d", cfg.Defaults.BudgetSteps)

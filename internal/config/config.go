@@ -19,6 +19,12 @@ type Config struct {
 	Defaults  DefaultsConfig            `toml:"defaults"`
 	Sandbox   SandboxConfig             `toml:"sandbox"`
 	Wake      WakeConfig                `toml:"wake"`
+	Update    UpdateConfig              `toml:"update"`
+}
+
+// UpdateConfig defines auto-update behavior.
+type UpdateConfig struct {
+	CheckInterval string `toml:"check_interval"` // e.g. "24h", "disabled"
 }
 
 // SandboxConfig defines the isolated execution environment.
@@ -201,8 +207,8 @@ func DefaultConfig() *Config {
 			},
 		},
 		Defaults: DefaultsConfig{
-			Provider:              "minimax",
-			SmartProvider:         "minimax",
+			Provider:              "glm",
+			SmartProvider:         "glm",
 			CheapProvider:         "ollama",
 			ConfirmTools:          "dangerous",
 			BudgetSteps:           50,
@@ -232,6 +238,9 @@ func DefaultConfig() *Config {
 			BudgetSteps:     10,
 			BudgetTokens:    50000,
 			BudgetCostUSD:   0.0,
+		},
+		Update: UpdateConfig{
+			CheckInterval: "24h",
 		},
 	}
 }
@@ -297,8 +306,8 @@ system_prompt_path = "~/.config/v100/policies/default.md"
 max_tool_calls_per_step = 50
 
 [defaults]
-provider = "minimax"          # use MiniMax subscription by default
-smart_provider = "minimax"    # frontier provider for smartrouter/router
+provider = "glm"              # use GLM subscription by default
+smart_provider = "glm"        # frontier provider for smartrouter/router
 cheap_provider = "ollama"     # local provider for smartrouter/router and compression
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
@@ -334,6 +343,9 @@ max_failures = 0            # 0 = unlimited
 budget_steps = 10
 budget_tokens = 50000
 budget_cost_usd = 0.0
+
+[update]
+check_interval = "24h"
 `
 }
 
@@ -386,6 +398,7 @@ func Load(path string) (*Config, error) {
 	}
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
+	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
 	return &cfg, nil
 }
 
@@ -514,5 +527,14 @@ func applyWakeDefaults(dst *WakeConfig, defaults WakeConfig) {
 	}
 	if dst.BudgetCostUSD == 0 {
 		dst.BudgetCostUSD = defaults.BudgetCostUSD
+	}
+}
+
+func applyUpdateDefaults(dst *UpdateConfig, defaults UpdateConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.CheckInterval) == "" {
+		dst.CheckInterval = defaults.CheckInterval
 	}
 }
