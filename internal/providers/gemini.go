@@ -870,6 +870,16 @@ func (p *GeminiProvider) Metadata(ctx context.Context, model string) (ModelMetad
 	}, nil
 }
 
+func (p *GeminiProvider) Models() []ModelInfo {
+	return []ModelInfo{
+		{Name: "gemini-2.5-pro", Description: "powerful — deep reasoning + coding"},
+		{Name: "gemini-2.5-flash", Description: "standard — best price/performance"},
+		{Name: "gemini-2.5-flash-lite", Description: "fast — most budget-friendly"},
+		{Name: "gemini-3.1-pro-preview", Description: "powerful — advanced reasoning + agentic"},
+		{Name: "gemini-3-flash-preview", Description: "fast — frontier, free tier"},
+	}
+}
+
 // geminiFormatError extracts a human-readable message from a Gemini error response.
 // For 429 responses, the JSON often contains a "message" field with user-facing text.
 func geminiFormatError(statusCode int, raw []byte) error {

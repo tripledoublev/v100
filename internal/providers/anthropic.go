@@ -161,6 +161,14 @@ func (p *AnthropicProvider) Metadata(ctx context.Context, model string) (ModelMe
 	return m, nil
 }
 
+func (p *AnthropicProvider) Models() []ModelInfo {
+	return []ModelInfo{
+		{Name: "claude-opus-4-6", Description: "powerful — flagship for agents + coding"},
+		{Name: "claude-sonnet-4-6", Description: "standard — speed/intelligence balance"},
+		{Name: "claude-haiku-4-5-20251001", Description: "fast — lowest latency"},
+	}
+}
+
 func (p *AnthropicProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {

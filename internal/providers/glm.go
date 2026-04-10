@@ -8,7 +8,7 @@ import (
 
 const (
 	glmBaseURL      = "https://api.z.ai/api/coding/paas/v4"
-	glmDefaultModel = "GLM-4.7"
+	glmDefaultModel = "glm-4.7"
 )
 
 // GLMProvider implements Provider using Zhipu AI's OpenAI-compatible API.
@@ -96,6 +96,21 @@ func (p *GLMProvider) Metadata(ctx context.Context, model string) (ModelMetadata
 	}
 
 	return m, nil
+}
+
+func (p *GLMProvider) Models() []ModelInfo {
+	return []ModelInfo{
+		{Name: "glm-5.1", Description: "flagship — long-horizon agents"},
+		{Name: "glm-5", Description: "powerful — agentic + coding"},
+		{Name: "glm-4.7", Description: "standard — enhanced coding + reasoning"},
+		{Name: "glm-4.7-flashx", Description: "fast — lightweight, paid"},
+		{Name: "glm-4.7-flash", Description: "free — lightweight"},
+		{Name: "glm-4.6", Description: "standard — comparable to Sonnet"},
+		{Name: "glm-4.5", Description: "reasoning — 355B params"},
+		{Name: "glm-4.5-air", Description: "reasoning — lightweight 106B"},
+		{Name: "glm-4.5-airx", Description: "reasoning — lightweight + fast"},
+		{Name: "glm-4.5-flash", Description: "reasoning — free"},
+	}
 }
 
 // estimateCostGLM returns a USD cost estimate for GLM models.

@@ -111,6 +111,17 @@ type ModelMetadata struct {
 	IsFree       bool
 }
 
+// ModelInfo describes a single model available from a provider.
+type ModelInfo struct {
+	Name        string // e.g. "glm-4.7", "gemini-2.5-flash", "claude-opus-4-6"
+	Description string // e.g. "standard — enhanced coding + reasoning"
+}
+
+// ModelLister is an optional interface for providers with a known static model list.
+type ModelLister interface {
+	Models() []ModelInfo
+}
+
 // StreamEventType identifies the type of streaming event.
 type StreamEventType int
 

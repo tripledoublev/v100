@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=v100
+Exec=v100
+Icon=v100
+Categories=Utility;Development;
+Terminal=true
+Comment=Modular CLI/TUI agent harness

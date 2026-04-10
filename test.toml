@@ -1,0 +1,17 @@
+name = "test"
+branch_prefix = "test"
+
+[target]
+file = "train.py"
+context = ["README.md"]
+program = "program.md"
+
+[experiment]
+command = "echo 'val_bpb: 0.987654'; sleep 1"
+timeout = "30s"
+metric = "val_bpb"
+direction = "lower"
+
+[budget]
+steps = 5
+cost_usd = 0.10

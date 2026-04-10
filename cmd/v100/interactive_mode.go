@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ func parseInteractiveModeCommand(input string) (mode string, rest string, ok boo
 	}
 	mode = strings.ToLower(fields[0])
 	switch mode {
-	case "/auto", "/local", "/codex", "/gemini", "/minimax":
+	case "/auto", "/local", "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/openai", "/ollama", "/llamacpp":
 	default:
 		return "", input, false
 	}
@@ -71,7 +72,7 @@ func buildSessionSelection(cfg *config.Config, mode string) (sessionSelection, e
 			return sessionSelection{}, fmt.Errorf("no local provider configured for /local")
 		}
 		return buildSingleProviderSelection(cfg, localName, "local")
-	case "/codex", "/gemini", "/minimax":
+	case "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/openai", "/ollama", "/llamacpp":
 		return buildSingleProviderSelection(cfg, strings.TrimPrefix(mode, "/"), strings.TrimPrefix(mode, "/"))
 	default:
 		return sessionSelection{}, fmt.Errorf("unsupported session mode %q", mode)
@@ -109,14 +110,29 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 	if err != nil {
 		return "", true, err
 	}
+
+	// Handle model list request (/provider model or /provider models)
+	if rest == "model" || rest == "models" {
+		printModelList(cfg, strings.TrimPrefix(mode, "/"))
+		return "", true, nil
+	}
+
+	// Handle model selection with fuzzy matching
+	if strings.TrimSpace(rest) != "" {
+		matchedModel := fuzzyMatchModel(selection.Provider, rest)
+		if matchedModel != "" {
+			selection.Model = matchedModel
+		}
+	}
+
 	loop.Provider = selection.Provider
 	loop.Solver = selection.Solver
 	loop.CompressProvider = selection.CompressProvider
 	if meta, err := selection.Provider.Metadata(ctx, selection.Model); err == nil {
 		loop.ModelMetadata = meta
 	}
-	emitSessionNotice(loop, fmt.Sprintf("session mode switched to %s", selection.Label))
-	if strings.TrimSpace(rest) == "" {
+	emitSessionNotice(loop, fmt.Sprintf("session mode switched to %s (model: %s)", selection.Label, selection.Model))
+	if strings.TrimSpace(rest) == "" || rest == "model" || rest == "models" {
 		return "", true, nil
 	}
 	return rest, false, nil
@@ -146,5 +162,56 @@ func emitSessionNotice(loop *core.Loop, message string) {
 	}
 	if loop.OutputFn != nil {
 		loop.OutputFn(ev)
+	}
+}
+
+// fuzzyMatchModel returns the best model name match for a query, or "" if no match.
+func fuzzyMatchModel(prov providers.Provider, query string) string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return ""
+	}
+
+	lister, ok := prov.(providers.ModelLister)
+	if !ok {
+		return ""
+	}
+
+	models := lister.Models()
+	for _, m := range models {
+		if strings.Contains(strings.ToLower(m.Name), query) {
+			return m.Name
+		}
+	}
+	return ""
+}
+
+// printModelList prints available models for a provider to stderr.
+func printModelList(cfg *config.Config, providerName string) {
+	prov, err := buildProvider(cfg, providerName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error building provider %q: %v\n", providerName, err)
+		return
+	}
+
+	lister, ok := prov.(providers.ModelLister)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "no model list available for %s\n", providerName)
+		return
+	}
+
+	models := lister.Models()
+	if len(models) == 0 {
+		fmt.Fprintf(os.Stderr, "no models available for %s\n", providerName)
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "%s available models:\n", providerName)
+	for i, m := range models {
+		marker := " "
+		if i == 0 {
+			marker = "*"
+		}
+		fmt.Fprintf(os.Stderr, " %s %s — %s\n", marker, m.Name, m.Description)
 	}
 }

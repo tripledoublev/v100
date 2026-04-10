@@ -300,3 +300,12 @@ func (p *MiniMaxProvider) Metadata(ctx context.Context, model string) (ModelMeta
 		IsFree:      true, // subscription-backed
 	}, nil
 }
+
+func (p *MiniMaxProvider) Models() []ModelInfo {
+	return []ModelInfo{
+		{Name: "MiniMax-M2.7", Description: "powerful — self-evolving, agent/coding"},
+		{Name: "MiniMax-M2.7-highspeed", Description: "fast — high speed variant"},
+		{Name: "MiniMax-M2.5", Description: "standard — SOTA coding + agents"},
+		{Name: "MiniMax-M2.5-highspeed", Description: "fast — high speed variant"},
+	}
+}

@@ -201,6 +201,20 @@ func (p *OpenAIProvider) Metadata(ctx context.Context, model string) (ModelMetad
 	return m, nil
 }
 
+func (p *OpenAIProvider) Models() []ModelInfo {
+	return []ModelInfo{
+		{Name: "gpt-5.4", Description: "flagship — professional work, reasoning + agentic"},
+		{Name: "gpt-5.4-mini", Description: "fast — efficient, subagents, lighter tasks"},
+		{Name: "gpt-5.3-codex", Description: "powerful — industry-leading coding"},
+		{Name: "gpt-5.3-codex-spark", Description: "ultra-fast — real-time iteration (research preview)"},
+		{Name: "gpt-5.2", Description: "standard — reasoning, agentic workflows"},
+		{Name: "gpt-4o", Description: "standard"},
+		{Name: "gpt-4o-mini", Description: "fast — lightweight"},
+		{Name: "o3-mini", Description: "reasoning — fast"},
+		{Name: "o3", Description: "reasoning — powerful"},
+	}
+}
+
 func (p *OpenAIProvider) StreamComplete(ctx context.Context, req CompleteRequest) (<-chan StreamEvent, error) {
 	model := req.Model
 	if model == "" {
