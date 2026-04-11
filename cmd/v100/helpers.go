@@ -169,6 +169,16 @@ func resolveLocalProviderName(cfg *config.Config) string {
 	return ""
 }
 
+func resolveCheapProviderName(cfg *config.Config) string {
+	if cheap := strings.TrimSpace(cfg.Defaults.CheapProvider); cheap != "" && cheap != "smartrouter" {
+		return cheap
+	}
+	if local := resolveLocalProviderName(cfg); local != "" && local != "smartrouter" {
+		return local
+	}
+	return "ollama"
+}
+
 func resolveSmartProviderName(cfg *config.Config) string {
 	candidate := strings.TrimSpace(cfg.Defaults.SmartProvider)
 	if candidate != "" && candidate != "smartrouter" {
@@ -182,10 +192,7 @@ func resolveSmartProviderName(cfg *config.Config) string {
 }
 
 func buildSmartRouterProvider(cfg *config.Config, smartModel string) (providers.Provider, error) {
-	cheapProvName := resolveLocalProviderName(cfg)
-	if cheapProvName == "" {
-		cheapProvName = "ollama"
-	}
+	cheapProvName := resolveCheapProviderName(cfg)
 	smartProvName := resolveSmartProviderName(cfg)
 	if smartProvName == "smartrouter" {
 		return nil, fmt.Errorf("smartrouter smart provider cannot point to smartrouter")
@@ -337,10 +344,7 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 		}
 		return &core.PlanExecuteSolver{MaxReplans: maxReplans}, nil
 	case "router", "smartrouter":
-		cheapProvName := resolveLocalProviderName(cfg)
-		if cheapProvName == "" {
-			cheapProvName = "ollama"
-		}
+		cheapProvName := resolveCheapProviderName(cfg)
 		smartProvName := resolveSmartProviderName(cfg)
 		cheap, err := buildProvider(cfg, cheapProvName)
 		if err != nil {
@@ -996,6 +1000,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 func buildCompressProvider(cfg *config.Config) providers.Provider {
 	cpName := cfg.Defaults.CompressProvider
 	if cpName == "" {
+		if main := strings.TrimSpace(cfg.Defaults.Provider); main != "" && !isLocalProviderName(cfg, main) {
+			return nil
+		}
 		if local := resolveLocalProviderName(cfg); local != "" {
 			cpName = local
 		} else if cheap := strings.TrimSpace(cfg.Defaults.CheapProvider); cheap != "" {

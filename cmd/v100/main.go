@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,10 @@ func rootCmd() *cobra.Command {
 		Short:   "Modular CLI/TUI agent harness",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Don't check for updates if we are actually running the update command itself.
+			if cmd.Name() != "update" {
+				checkForUpdateInBackground(cmd.Context())
+			}
 			return nil
 		},
 	}
@@ -39,6 +44,8 @@ func rootCmd() *cobra.Command {
 		providersCmd(&cfgPath),
 		agentsCmd(&cfgPath),
 		memoryCmd(&cfgPath),
+		updateCmd(),
+		versionCmd(),
 		configInitCmd(),
 		doctorCmd(&cfgPath),
 		installCmd(),
@@ -65,4 +72,14 @@ func rootCmd() *cobra.Command {
 		researchCmd(&cfgPath),
 	)
 	return root
+}
+
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version number of v100",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("v100 %s\n", version)
+		},
+	}
 }

@@ -12,6 +12,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Defaults.Provider != "glm" {
 		t.Errorf("expected default provider glm, got %s", cfg.Defaults.Provider)
 	}
+	if cfg.Defaults.CheapProvider != "glm" {
+		t.Errorf("expected default cheap provider glm, got %s", cfg.Defaults.CheapProvider)
+	}
+	if cfg.Defaults.CompressProvider != "glm" {
+		t.Errorf("expected default compress provider glm, got %s", cfg.Defaults.CompressProvider)
+	}
 	if cfg.Defaults.BudgetSteps != 50 {
 		t.Errorf("expected 50 budget steps, got %d", cfg.Defaults.BudgetSteps)
 	}
@@ -241,6 +247,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "ZHIPU_API_KEY") {
 		t.Error("default TOML should reference ZHIPU_API_KEY")
+	}
+	if !contains(toml, "cheap_provider = \"glm\"") {
+		t.Error("default TOML should default cheap provider to glm")
+	}
+	if !contains(toml, "compress_provider = \"glm\"") {
+		t.Error("default TOML should default compression provider to glm")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

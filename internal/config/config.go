@@ -209,7 +209,7 @@ func DefaultConfig() *Config {
 		Defaults: DefaultsConfig{
 			Provider:              "glm",
 			SmartProvider:         "glm",
-			CheapProvider:         "ollama",
+			CheapProvider:         "glm",
 			ConfirmTools:          "dangerous",
 			BudgetSteps:           50,
 			BudgetTokens:          1000000,
@@ -220,6 +220,7 @@ func DefaultConfig() *Config {
 			ContextLimit:          80000,
 			MaxToolResultChars:    20000,
 			CompressProtectRecent: 6,
+			CompressProvider:      "glm",
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
@@ -308,7 +309,7 @@ max_tool_calls_per_step = 50
 [defaults]
 provider = "glm"              # use GLM subscription by default
 smart_provider = "glm"        # frontier provider for smartrouter/router
-cheap_provider = "ollama"     # local provider for smartrouter/router and compression
+cheap_provider = "glm"        # cheap/router tier; default avoids local Ollama fallback
 confirm_tools = "dangerous"   # always | dangerous | never
 budget_steps = 50
 budget_tokens = 1000000
@@ -320,7 +321,7 @@ memory_max_tokens = 256    # approximate token budget for retrieved durable memo
 context_limit = 80000        # estimated token threshold; compress history when exceeded (0 = disabled)
 max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
 compress_protect_recent = 6   # recent messages protected from targeted compression
-# compress_provider = ""      # provider for compression calls (empty = prefer local cheap_provider)
+compress_provider = "glm"     # provider for compression calls (empty = main provider for cloud runs)
 
 [sandbox]
 enabled = false

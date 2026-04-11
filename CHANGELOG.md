@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.2.14 — 2026-04-10
+
+**GLM Defaults and Update Command Wiring**
+
+This patch release keeps default cloud runs on GLM for model calls, router cheap-tier calls, and context compression, while wiring the self-update command into the CLI surface.
+
+### Provider Defaults
+
+- **GLM default path hardened** — Built-in defaults now use GLM for `provider`, `smart_provider`, `cheap_provider`, and `compress_provider`, avoiding accidental Ollama fallback during cloud runs.
+- **Router cheap provider respects config** — Router and smartrouter construction now honor the configured `cheap_provider` before considering local fallbacks, so `cheap_provider = "glm"` stays on GLM.
+- **Cloud compression avoids local fallback** — When no explicit compression provider is configured, cloud main providers now reuse the main provider instead of selecting a local Ollama backend.
+
+### CLI Updates
+
+- **Update command registered** — The root CLI now exposes `v100 update`, runs background update checks outside the update command itself, and includes a `v100 version` helper.
+- **Update tests tightened** — Added update package coverage for semantic version comparison and platform-specific release asset naming.
+
+## v0.2.13 — 2026-04-10
+
+**MiniGLM Provider Switching**
+
+This patch release adds the MiniGLM solver and makes GLM the default provider path for normal runs.
+
+### Provider Defaults
+
+- **MiniGLM solver added** — Added a MiniGLM solver for intelligent switching between MiniMax and GLM-backed work.
+- **GLM default provider** — Default provider settings now prefer GLM for the main run path.
+
+## v0.2.12 — 2026-04-10
+
+**Update Version Comparison Fix**
+
+This patch release fixes update detection so multi-digit patch versions compare correctly.
+
+### Update Reliability
+
+- **Semantic version comparison fixed** — Update checks now compare semantic version components numerically instead of lexicographically, so versions like `v0.2.10` sort after `v0.2.9`.
+
+## v0.2.11 — 2026-04-10
+
+**Lint Cleanup**
+
+This patch release resolves lint issues introduced during the update and provider work.
+
+### Maintenance
+
+- **Lint issues resolved** — Fixed golangci-lint findings across the current release branch.
+- **Update install hardening** — Update application handles cross-device executable replacement more robustly.
+
+## v0.2.10 — 2026-04-07
+
+**Tag-Only Release Workflow**
+
+This patch release moves the release workflow to tag-only publishing after the multi-platform release pipeline changes.
+
+### Release Flow
+
+- **Tag-only releases** — Release automation now runs from tags instead of branch pushes, reducing accidental release attempts.
+
 ## v0.2.9 — 2026-04-07
 
 **Multi-Platform Release Flow**

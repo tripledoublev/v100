@@ -112,9 +112,47 @@ func TestBuildSolverAutoUsesSmartRouterWhenProviderDefaultIsSmartRouter(t *testi
 	}
 }
 
-func TestBuildCompressProviderPrefersLocalProvider(t *testing.T) {
+func TestBuildSolverRouterUsesConfiguredCheapProvider(t *testing.T) {
+	t.Setenv("ZHIPU_API_KEY", "test-key")
 	cfg := testInteractiveConfig()
+	cfg.Providers["glm"] = config.ProviderConfig{
+		Type:         "glm",
+		DefaultModel: "GLM-4.7",
+		BaseURL:      "https://api.z.ai/api/coding/paas/v4",
+		Auth:         config.AuthConfig{Env: "ZHIPU_API_KEY"},
+	}
+	cfg.Defaults.CheapProvider = "glm"
+	cfg.Defaults.SmartProvider = "codex"
+
+	solver, err := buildSolver(cfg, "router")
+	if err != nil {
+		t.Fatalf("buildSolver error = %v", err)
+	}
+	router, ok := solver.(*core.RouterSolver)
+	if !ok {
+		t.Fatalf("solver type = %T, want *core.RouterSolver", solver)
+	}
+	if router.Cheap.Name() != "glm" {
+		t.Fatalf("cheap provider = %q, want glm", router.Cheap.Name())
+	}
+}
+
+func TestBuildCompressProviderUsesMainProviderForCloudDefault(t *testing.T) {
+	cfg := testInteractiveConfig()
+	cfg.Defaults.Provider = "glm"
+	cfg.Defaults.CheapProvider = "ollama"
+	cfg.Defaults.CompressProvider = ""
+	cp := buildCompressProvider(cfg)
+	if cp != nil {
+		t.Fatalf("compress provider = %q, want nil to reuse main provider", cp.Name())
+	}
+}
+
+func TestBuildCompressProviderPrefersLocalProviderForLocalDefault(t *testing.T) {
+	cfg := testInteractiveConfig()
+	cfg.Defaults.Provider = "ollama"
 	cfg.Defaults.CheapProvider = "gemini"
+	cfg.Defaults.CompressProvider = ""
 	cp := buildCompressProvider(cfg)
 	if cp == nil {
 		t.Fatal("expected non-nil compress provider")
