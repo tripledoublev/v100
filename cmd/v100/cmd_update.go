@@ -69,7 +69,7 @@ func updateCmd() *cobra.Command {
 }
 
 func checkForUpdateInBackground(ctx context.Context) {
-	// This is a simplified version for now. 
+	// This is a simplified version for now.
 	// In a real implementation, we would check a timestamp to avoid hitting the API every time.
 	go func() {
 		release, err := update.CheckLatest(ctx)
@@ -77,7 +77,11 @@ func checkForUpdateInBackground(ctx context.Context) {
 			return
 		}
 		if update.IsNewer(version, release.TagName) {
-			fmt.Fprintf(os.Stderr, "\n%s\n", ui.Warn(fmt.Sprintf("New version %s is available! Run 'v100 update' to install.", release.TagName)))
+			fmt.Fprintf(os.Stderr, "\n%s\n", ui.Warn(updateAvailableNotice(release.TagName)))
 		}
 	}()
+}
+
+func updateAvailableNotice(tag string) string {
+	return fmt.Sprintf("New version %s is available. Exit and run 'v100 update' in your shell to install it.", tag)
 }
