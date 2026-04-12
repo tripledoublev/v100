@@ -1,0 +1,39 @@
+# Benchmark: minimax-vs-glm
+# Compare MiniMax vs GLM on coding tasks
+
+name = "minimax-vs-glm"
+
+# Define providers and solvers to test
+[[variants]]
+name     = "minimax"
+provider = "minimax"
+solver   = "react"
+
+[[variants]]
+name     = "glm"
+provider = "glm"
+solver   = "react"
+
+# Coding task 1: Reverse string
+[[prompts]]
+message  = "Write a Go function that reverses a string and handles UTF-8 correctly. Return only the function code."
+expected = "func"
+scorer   = "contains"
+
+# Coding task 2: Fibonacci
+[[prompts]]
+message  = "Write a Go function that computes the nth Fibonacci number efficiently. Return only the function code."
+expected = "func"
+scorer   = "contains"
+
+# Task 3: Explain a concept
+[[prompts]]
+message  = "Explain what a merkle tree is and why it's useful in blockchain. Be concise."
+expected = "hash"
+scorer   = "contains"
+
+# Task 4: Debug a snippet
+[[prompts]]
+message  = "There's a bug in this Go code: `func sum(nums []int) int { s := 0; for _, n := range nums { s = n } return s }`. What's wrong and how to fix it?"
+expected = "accumulate"
+scorer   = "contains"
