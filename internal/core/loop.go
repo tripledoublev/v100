@@ -842,6 +842,67 @@ func estimateTokens(msgs []providers.Message) int {
 	return n
 }
 
+func targetedCompressionLimit(p providers.Provider) int {
+	if p == nil {
+		return 0
+	}
+	switch p.Name() {
+	case "glm":
+		// GLM is more likely to reject compression inputs and can hit request
+		// limits quickly when targeted compression fans out into many calls.
+		// Prefer a single bulk summary call instead.
+		return 0
+	default:
+		// Keep targeted compression bounded so one overloaded step cannot
+		// explode into a long burst of extra provider requests.
+		return 3
+	}
+}
+
+var compressionMarkerReplacer = strings.NewReplacer(
+	"<arg_key>", " ",
+	"</arg_key>", " ",
+	"<arg_value>", " ",
+	"</arg_value>", " ",
+)
+
+func sanitizeCompressionContent(content string) string {
+	if content == "" {
+		return content
+	}
+	content = compressionMarkerReplacer.Replace(content)
+	content = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r < 0x20:
+			return -1
+		default:
+			return r
+		}
+	}, content)
+	content = strings.Join(strings.Fields(content), " ")
+
+	const maxCompressionChars = 12000
+	if len(content) <= maxCompressionChars {
+		return content
+	}
+	keep := maxCompressionChars * 2 / 5
+	head := content[:keep]
+	tail := content[len(content)-keep:]
+	return head + fmt.Sprintf(" [... truncated %d chars ...] ", len(content)-(2*keep)) + tail
+}
+
+func sanitizeCompressionMessages(msgs []providers.Message) []providers.Message {
+	out := make([]providers.Message, 0, len(msgs))
+	for _, m := range msgs {
+		cp := m
+		cp.Content = sanitizeCompressionContent(m.Content)
+		out = append(out, cp)
+	}
+	return out
+}
+
 // maybeCompress implements a two-pass compression strategy:
 //   - Pass 1 (targeted): compress the N largest non-recent messages individually
 //   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
@@ -888,47 +949,53 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 	compressed := 0
 	failedCount := 0
 	cp := l.compressProvider()
+	targetedLimit := targetedCompressionLimit(cp)
 
-	for _, c := range candidates {
-		m := l.Messages[c.idx]
-		summaryReq := providers.CompleteRequest{
-			RunID: l.Run.ID,
-			Messages: []providers.Message{
-				{
-					Role:    "system",
-					Content: "Summarize the following message content in a dense, compact form. Preserve key facts, file paths, decisions, and results. Remove verbatim content and repetition. Be very concise.",
+	if targetedLimit > 0 {
+		for i, c := range candidates {
+			if i >= targetedLimit {
+				break
+			}
+			m := l.Messages[c.idx]
+			summaryReq := providers.CompleteRequest{
+				RunID: l.Run.ID,
+				Messages: []providers.Message{
+					{
+						Role:    "system",
+						Content: "Summarize the following message content in a dense, compact form. Preserve key facts, file paths, decisions, and results. Remove verbatim content and repetition. Be very concise.",
+					},
+					{
+						Role:    "user",
+						Content: sanitizeCompressionContent(m.Content),
+					},
 				},
-				{
-					Role:    "user",
-					Content: m.Content,
-				},
-			},
-		}
-		resp, err := cp.Complete(ctx, summaryReq)
-		if err != nil {
-			failedCount++
-			_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
-				Error: fmt.Sprintf("compress: failed to compress message %d (skipping): %v", c.idx, err),
-			})
-			fmt.Fprintf(os.Stderr, "warning: compression failed for message %d: %v\n", c.idx, err)
-			continue // skip this message, try next
-		}
+			}
+			resp, err := cp.Complete(ctx, summaryReq)
+			if err != nil {
+				failedCount++
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
+					Error: fmt.Sprintf("compress: failed to compress message %d (skipping): %v", c.idx, err),
+				})
+				fmt.Fprintf(os.Stderr, "warning: compression failed for message %d: %v\n", c.idx, err)
+				continue // skip this message, try next
+			}
 
-		if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression tokens: %v\n", err)
-		}
-		if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression cost: %v\n", err)
-		}
-		totalCompressCost += resp.Usage.CostUSD
+			if err := l.Budget.AddTokens(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression tokens: %v\n", err)
+			}
+			if err := l.Budget.AddCost(resp.Usage.CostUSD); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: budget exceeded adding compression cost: %v\n", err)
+			}
+			totalCompressCost += resp.Usage.CostUSD
 
-		// Replace content in-place, preserving metadata
-		l.Messages[c.idx].Content = "[compressed] " + resp.AssistantText
-		compressed++
+			// Replace content in-place, preserving metadata
+			l.Messages[c.idx].Content = "[compressed] " + resp.AssistantText
+			compressed++
 
-		// Stop early once pressure has eased enough.
-		if l.compressionTrigger(estimateTokens(l.previewMessagesForStep(stepID))) == "" {
-			break
+			// Stop early once pressure has eased enough.
+			if l.compressionTrigger(estimateTokens(l.previewMessagesForStep(stepID))) == "" {
+				break
+			}
 		}
 	}
 
@@ -972,7 +1039,7 @@ func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
 				Role:    "system",
 				Content: "You are a summarizer. Produce a dense, structured summary of the following conversation segment. Preserve: decisions made, files read/edited, tool results, current task state. Be concise.",
 			}},
-			toSummarize...,
+			sanitizeCompressionMessages(toSummarize)...,
 		),
 	}
 	resp, err := cp.Complete(ctx, summaryReq)

@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,45 @@ func (c *capturingProvider) Embed(_ context.Context, _ providers.EmbedRequest) (
 
 func (c *capturingProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
 	return providers.ModelMetadata{Model: "mock", ContextSize: 4096}, nil
+}
+
+type namedCapturingProvider struct {
+	capturingProvider
+	name string
+}
+
+func (c *namedCapturingProvider) Name() string {
+	if c.name != "" {
+		return c.name
+	}
+	return c.capturingProvider.Name()
+}
+
+type sanitizingCompressionProvider struct {
+	requests []providers.CompleteRequest
+}
+
+func (p *sanitizingCompressionProvider) Name() string { return "glm" }
+func (p *sanitizingCompressionProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{ToolCalls: true}
+}
+func (p *sanitizingCompressionProvider) Complete(_ context.Context, req providers.CompleteRequest) (providers.CompleteResponse, error) {
+	p.requests = append(p.requests, req)
+	for _, msg := range req.Messages {
+		if strings.Contains(msg.Content, "</arg_") || strings.Contains(msg.Content, "<arg_") {
+			return providers.CompleteResponse{}, fmt.Errorf("openai: error, status code: 400, status: 400 Bad Request, message: Invalid API parameter, please check the documentation.")
+		}
+	}
+	return providers.CompleteResponse{
+		AssistantText: "bulk summary",
+		Usage:         providers.Usage{InputTokens: 100, OutputTokens: 20},
+	}, nil
+}
+func (p *sanitizingCompressionProvider) Embed(_ context.Context, _ providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{Embedding: []float32{0.1}}, nil
+}
+func (p *sanitizingCompressionProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "glm", ContextSize: 4096}, nil
 }
 
 type noopTool struct{}
@@ -459,12 +499,7 @@ func TestTargetedCompressionUsesCompressProvider(t *testing.T) {
 func TestBulkFallbackAfterTargeted(t *testing.T) {
 	prov := &capturingProvider{
 		responses: []providers.CompleteResponse{
-			// Many targeted compression calls (still won't be enough)
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			// Bounded targeted compression calls (still won't be enough)
 			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
 			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
 			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
@@ -493,6 +528,85 @@ func TestBulkFallbackAfterTargeted(t *testing.T) {
 		first := loop.Messages[0]
 		if strings.Contains(first.Content, "CONTEXT SUMMARY") {
 			t.Log("bulk fallback fired")
+		}
+	}
+}
+
+func TestTargetedCompressionDisabledForGLM(t *testing.T) {
+	mainProv := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "done"},
+		},
+	}
+	compressProv := &namedCapturingProvider{
+		name: "glm",
+		capturingProvider: capturingProvider{
+			responses: []providers.CompleteResponse{
+				{AssistantText: "bulk summary", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
+			},
+		},
+	}
+
+	loop := newCompressLoop(t, mainProv, 200)
+	loop.CompressProvider = compressProv
+	loop.Policy.CompressProtectRecent = 2
+
+	loop.Messages = append(loop.Messages,
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		providers.Message{Role: "user", Content: "small"},
+		providers.Message{Role: "assistant", Content: "small"},
+	)
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(compressProv.requests); got != 1 {
+		t.Fatalf("expected 1 compression call for glm bulk-only mode, got %d", got)
+	}
+	if !strings.Contains(loop.Messages[0].Content, "CONTEXT SUMMARY") {
+		t.Fatalf("expected bulk compression summary, got %q", loop.Messages[0].Content)
+	}
+}
+
+func TestBulkCompressionSanitizesMalformedGLMPayloads(t *testing.T) {
+	mainProv := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "done"},
+		},
+	}
+	compressProv := &sanitizingCompressionProvider{}
+
+	loop := newCompressLoop(t, mainProv, 200)
+	loop.CompressProvider = compressProv
+	loop.Policy.CompressProtectRecent = 2
+
+	loop.Messages = append(loop.Messages,
+		providers.Message{Role: "assistant", Content: "bad tool call git_diff</arg_value>staged</arg_key><arg_value>false</arg_value>"},
+		providers.Message{Role: "tool", Content: "tool output with <arg_key>staged</arg_key> markers"},
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
+		providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+		providers.Message{Role: "user", Content: "small"},
+		providers.Message{Role: "assistant", Content: "small"},
+	)
+
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(compressProv.requests) != 1 {
+		t.Fatalf("expected 1 bulk compression call, got %d", len(compressProv.requests))
+	}
+	for _, msg := range compressProv.requests[0].Messages {
+		if strings.Contains(msg.Content, "</arg_") || strings.Contains(msg.Content, "<arg_") {
+			t.Fatalf("compression request still contained malformed tool markers: %q", msg.Content)
 		}
 	}
 }
