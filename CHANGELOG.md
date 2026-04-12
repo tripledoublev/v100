@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.15 — 2026-04-12
+
+**Compression Hardening and Quebec News Defaults**
+
+This patch release makes GLM-backed context compression safer under provider limits, updates the default GLM model to `GLM-5.1`, and expands Quebec French news defaults.
+
+### Compression and Provider Reliability
+
+- **GLM compression hardened** — Context compression now avoids bursty per-message calls on GLM, sanitizes malformed compression payloads before provider requests, and caps targeted compression for other providers.
+- **Default GLM model updated** — Built-in GLM defaults now target `GLM-5.1` across provider construction and config-backed tests.
+
+### Tooling and Content Defaults
+
+- **Quebec French news feeds expanded** — `news_fetch` now includes `TVA Nouvelles` and `L'Actualité` in Quebec French defaults, with test coverage for the new routing behavior.
+- **Benchmark fixture added** — Added a `MiniMax vs GLM` benchmark config under `tests/benchmarks/` for repeatable provider comparisons.
+
 ## v0.2.14 — 2026-04-10
 
 **GLM Defaults and Update Command Wiring**
