@@ -337,3 +337,35 @@ func (s *routingFakeDockerSession) Run(_ context.Context, req executor.RunReques
 	}
 	return executor.Result{ExitCode: 1, Stderr: "unexpected url: " + url}, nil
 }
+
+
+func TestResolveNewsSourceRequestsQuebecFrench(t *testing.T) {
+	reqs := resolveNewsSourceRequests(newsFetchArgs{
+		Region:   "quebec",
+		Language: "fr",
+		Topic:    "general",
+		MaxItems: 5,
+	})
+	if len(reqs) == 0 {
+		t.Fatal("expected Quebec French defaults")
+	}
+	names := make([]string, 0, len(reqs))
+	for _, req := range reqs {
+		names = append(names, req.Key)
+		if req.Language != "fr" {
+			t.Fatalf("unexpected non-French source in Quebec French defaults: %+v", req)
+		}
+	}
+	// Check new RSS feeds are included
+	for _, want := range []string{"tvanouvelles", "lactualite"} {
+		if !containsString(names, want) {
+			t.Fatalf("expected source %q in %v", want, names)
+		}
+	}
+	// Check existing page extraction sources are still included
+	for _, want := range []string{"radio_canada_quebec", "ledevoir", "lapresse_politique"} {
+		if !containsString(names, want) {
+			t.Fatalf("expected source %q in %v", want, names)
+		}
+	}
+}

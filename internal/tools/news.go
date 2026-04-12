@@ -153,6 +153,8 @@ var newsSourcePresets = []newsSourcePreset{
 	{Key: "radio_canada_quebec", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/regions/quebec/", Kind: "page", Region: "quebec", Language: "fr", Section: "quebec"},
 	{Key: "ledevoir", Name: "Le Devoir", URL: "https://www.ledevoir.com/", Kind: "page", Region: "quebec", Language: "fr", Section: "actualites"},
 	{Key: "journaldemontreal", Name: "Journal de Montreal", URL: "https://www.journaldemontreal.com/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "montreal"},
+	{Key: "tvanouvelles", Name: "TVA Nouvelles", URL: "https://www.tvanouvelles.ca/rss", Kind: "feed", Region: "quebec", Language: "fr", Topic: "general", Section: "general"},
+	{Key: "lactualite", Name: "L'Actualité", URL: "https://lactualite.com/rss", Kind: "feed", Region: "quebec", Language: "fr", Topic: "general", Section: "general"},
 	{Key: "ars_technica", Name: "Ars Technica", URL: "https://arstechnica.com/feed/", Kind: "feed", Region: "world", Topic: "tech", Language: "en", Section: "technology"},
 	{Key: "ars_technica_science", Name: "Ars Technica", URL: "https://arstechnica.com/science/feed/", Kind: "feed", Region: "world", Topic: "science", Language: "en", Section: "science"},
 	{Key: "ars_technica_culture", Name: "Ars Technica", URL: "https://arstechnica.com/culture/feed/", Kind: "feed", Region: "world", Topic: "culture", Language: "en", Section: "culture"},
@@ -431,6 +433,7 @@ func resolveNewsSourceRequests(a newsFetchArgs) []newsSourceRequest {
 	case "quebec":
 		if a.Language != "en" {
 			wanted = append(wanted, "lapresse_politique", "radio_canada_quebec", "ledevoir")
+			wanted = append(wanted, "tvanouvelles", "lactualite")
 		}
 		if a.Language != "fr" {
 			wanted = append(wanted, "cbc_canada", "ctv_canada")
