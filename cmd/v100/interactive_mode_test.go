@@ -117,7 +117,7 @@ func TestBuildSolverRouterUsesConfiguredCheapProvider(t *testing.T) {
 	cfg := testInteractiveConfig()
 	cfg.Providers["glm"] = config.ProviderConfig{
 		Type:         "glm",
-		DefaultModel: "GLM-4.7",
+		DefaultModel: "GLM-5.1",
 		BaseURL:      "https://api.z.ai/api/coding/paas/v4",
 		Auth:         config.AuthConfig{Env: "ZHIPU_API_KEY"},
 	}

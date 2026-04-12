@@ -162,7 +162,7 @@ func DefaultConfig() *Config {
 			},
 			"glm": {
 				Type:         "glm",
-				DefaultModel: "GLM-4.7",
+				DefaultModel: "GLM-5.1",
 				BaseURL:      "https://api.z.ai/api/coding/paas/v4",
 				Auth:         AuthConfig{Env: "ZHIPU_API_KEY"},
 			},
@@ -293,7 +293,7 @@ env = "MINIMAX_API_KEY"
 
 [providers.glm]
 type = "glm"
-default_model = "GLM-4.7"
+default_model = "GLM-5.1"
 base_url = "https://api.z.ai/api/coding/paas/v4"
 [providers.glm.auth]
 env = "ZHIPU_API_KEY"

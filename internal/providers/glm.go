@@ -7,7 +7,7 @@ import (
 
 const (
 	glmBaseURL      = "https://api.z.ai/api/coding/paas/v4"
-	glmDefaultModel = "glm-4.7"
+	glmDefaultModel = "glm-5.1"
 )
 
 // GLMProvider implements Provider using Zhipu AI's OpenAI-compatible API.

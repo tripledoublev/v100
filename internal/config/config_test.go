@@ -68,8 +68,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Providers["glm"].Type != "glm" {
 		t.Errorf("expected type glm, got %s", cfg.Providers["glm"].Type)
 	}
-	if cfg.Providers["glm"].DefaultModel != "GLM-4.7" {
-		t.Errorf("expected GLM-4.7, got %s", cfg.Providers["glm"].DefaultModel)
+	if cfg.Providers["glm"].DefaultModel != "GLM-5.1" {
+		t.Errorf("expected GLM-5.1, got %s", cfg.Providers["glm"].DefaultModel)
 	}
 	if cfg.Providers["glm"].BaseURL != "https://api.z.ai/api/coding/paas/v4" {
 		t.Errorf("expected https://api.z.ai/api/coding/paas/v4, got %s", cfg.Providers["glm"].BaseURL)
@@ -239,8 +239,8 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, "[providers.glm]") {
 		t.Error("default TOML should contain glm provider section")
 	}
-	if !contains(toml, "GLM-4.7") {
-		t.Error("default TOML should reference GLM-4.7 model")
+	if !contains(toml, "GLM-5.1") {
+		t.Error("default TOML should reference GLM-5.1 model")
 	}
 	if !contains(toml, "https://api.z.ai/api/coding/paas/v4") {
 		t.Error("default TOML should reference z.ai coding API URL")
