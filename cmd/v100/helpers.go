@@ -397,6 +397,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
 	reg.Register(tools.FSMkdir())
+	reg.Register(tools.FSRenderImage())
 	reg.Register(tools.BlackboardRead())
 	reg.Register(tools.BlackboardWrite())
 	reg.Register(tools.BlackboardSearch())

@@ -394,3 +394,62 @@ func failResult(start time.Time, msg string) ToolResult {
 		DurationMS: time.Since(start).Milliseconds(),
 	}
 }
+
+// ─────────────────────────────────────────
+// fs.render_image
+// ─────────────────────────────────────────
+
+type fsRenderImageTool struct{}
+
+func FSRenderImage() Tool { return &fsRenderImageTool{} }
+
+func (t *fsRenderImageTool) Name() string { return "fs_render_image" }
+func (t *fsRenderImageTool) Description() string {
+	return "Render a PNG image file inline in the v100 TUI transcript."
+}
+func (t *fsRenderImageTool) DangerLevel() DangerLevel { return Safe }
+func (t *fsRenderImageTool) Effects() ToolEffects     { return ToolEffects{} }
+
+func (t *fsRenderImageTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["path"],
+		"properties": {
+			"path": {"type": "string", "description": "Path to the PNG image file to render."}
+		}
+	}`)
+}
+
+func (t *fsRenderImageTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"status": {"type": "string"}}}`)
+}
+
+func (t *fsRenderImageTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	start := time.Now()
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return failResult(start, "invalid args: "+err.Error()), nil
+	}
+	path, ok := call.Mapper.SecurePath(a.Path)
+	if !ok {
+		return failResult(start, "illegal path outside sandbox: "+a.Path), nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return failResult(start, err.Error()), nil
+	}
+
+	// Verify PNG header
+	if len(data) < 8 || string(data[:8]) != "\x89PNG\r\n\x1a\n" {
+		return failResult(start, "file is not a valid PNG image"), nil
+	}
+
+	return ToolResult{
+		OK:         true,
+		Output:     fmt.Sprintf("Image %s rendered to TUI", a.Path),
+		Stdout:     string(data), // Pass raw bytes through Stdout for loop detection
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
