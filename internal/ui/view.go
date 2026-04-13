@@ -267,17 +267,16 @@ func centerToWidth(s string, width int) string {
 func (m *TUIModel) seedWelcomeContent() {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+now) + "\n\n")
-
-	m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
-	m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
-
-	m.transcriptBuf.WriteString(styleMuted.Render("Type a task below and press Enter."))
+	m.addItem(&TranscriptItem{
+		Type:      ItemWelcome,
+		Text:      now,
+		Timestamp: time.Now(),
+	})
 
 	m.traceBuf.WriteString(tuiTraceLabelStyle.Render("trace stream") + "\n")
 	m.traceBuf.WriteString(styleMuted.Render("waiting for events...") + "\n\n")
 	m.traceBuf.WriteString(styleMuted.Render("run_start  model response  tool_call  tool_result  run_end"))
 
-	m.transcript.SetContent(m.transcriptBuf.String())
+	m.rebuildTranscript(true)
 	m.traceView.SetContent(m.traceBuf.String())
 }

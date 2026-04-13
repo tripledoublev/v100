@@ -276,27 +276,8 @@ func assertViewWithinWidth(t *testing.T, view string, width int) {
 	}
 }
 
-func stripANSI(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if inEsc {
-			if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') {
-				inEsc = false
-			}
-			continue
-		}
-		if ch == 0x1b {
-			inEsc = true
-			continue
-		}
-		b.WriteByte(ch)
-	}
-	return b.String()
-}
-
 func TestFocusCycleLeftHalf(t *testing.T) {
+
 	m := NewTUIModel()
 	m.focus = focusTranscript
 
