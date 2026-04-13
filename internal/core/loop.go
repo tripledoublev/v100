@@ -543,8 +543,12 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 	})
 
 	// Detect if the output contains a raw PNG image and emit it for inline terminal rendering.
-	if result.OK && strings.HasPrefix(result.Output, "\x89PNG\r\n\x1a\n") {
-		b64 := base64.StdEncoding.EncodeToString([]byte(result.Output))
+	rawOut := result.Stdout
+	if rawOut == "" {
+		rawOut = result.Output
+	}
+	if result.OK && (strings.HasPrefix(rawOut, "\x89PNG\r\n\x1a\n") || strings.HasPrefix(rawOut, "\x89PNG")) {
+		b64 := base64.StdEncoding.EncodeToString([]byte(rawOut))
 		_, _ = l.emit(EventImageInline, stepID, ImageInlinePayload{
 			Data:  b64,
 			Index: 0,
