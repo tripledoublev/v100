@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -150,7 +151,7 @@ var newsSourcePresets = []newsSourcePreset{
 	{Key: "lapresse_montreal", Name: "La Presse", URL: "https://www.lapresse.ca/actualites/grand-montreal/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "grand-montreal"},
 	{Key: "lapresse_politique", Name: "La Presse", URL: "https://www.lapresse.ca/actualites/politique/", Kind: "page", Region: "quebec", Language: "fr", Section: "politique"},
 	{Key: "radio_canada_montreal", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/regions/montreal/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "montreal"},
-	{Key: "radio_canada_quebec", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/regions/quebec/", Kind: "page", Region: "quebec", Language: "fr", Section: "quebec"},
+	{Key: "radio_canada_quebec", Name: "Radio-Canada", URL: "https://ici.radio-canada.ca/info", Kind: "page", Region: "quebec", Language: "fr", Section: "quebec"},
 	{Key: "ledevoir", Name: "Le Devoir", URL: "https://www.ledevoir.com/", Kind: "page", Region: "quebec", Language: "fr", Section: "actualites"},
 	{Key: "journaldemontreal", Name: "Journal de Montreal", URL: "https://www.journaldemontreal.com/", Kind: "page", Region: "montreal", Language: "fr", Locality: "montreal", Section: "montreal"},
 	{Key: "tvanouvelles", Name: "TVA Nouvelles", URL: "https://www.tvanouvelles.ca/rss", Kind: "feed", Region: "quebec", Language: "fr", Topic: "general", Section: "general"},
@@ -599,7 +600,7 @@ func presetToNewsRequest(key string) (newsSourceRequest, bool) {
 
 func parseNewsFeed(req newsSourceRequest, body []byte) ([]newsItem, error) {
 	var rss rssDocument
-	if err := xml.Unmarshal(body, &rss); err == nil && len(rss.Channel.Items) > 0 {
+	if err := xml.Unmarshal(sanitizeXMLBody(body), &rss); err == nil && len(rss.Channel.Items) > 0 {
 		source := req.Name
 		if strings.TrimSpace(rss.Channel.Title) != "" {
 			source = strings.TrimSpace(rss.Channel.Title)
@@ -635,7 +636,7 @@ func parseNewsFeed(req newsSourceRequest, body []byte) ([]newsItem, error) {
 	}
 
 	var atom atomDocument
-	if err := xml.Unmarshal(body, &atom); err != nil {
+	if err := xml.Unmarshal(sanitizeXMLBody(body), &atom); err != nil {
 		return nil, err
 	}
 	source := req.Name
@@ -912,7 +913,7 @@ func filterFreshNewsItems(items []newsItem, freshHours int) []newsItem {
 	if len(filtered) > 0 {
 		return filtered
 	}
-	return unknownTime
+	return oldestWhenStale(unknownTime, items)
 }
 
 func filterItemsByTopic(items []newsItem, topic string) []newsItem {
@@ -1348,4 +1349,84 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// sanitizeXMLBody fixes common XML well-formedness issues found in real-world
+// RSS feeds. In particular, many feeds (e.g. TVA Nouvelles) include bare "&"
+// characters in URL query parameters inside attributes (e.g. &x=0&y=178) which
+// are not valid XML entity references and cause Go's strict XML parser to fail.
+func sanitizeXMLBody(body []byte) []byte {
+	var buf bytes.Buffer
+	buf.Grow(len(body) + len(body)/20)
+	i := 0
+	for i < len(body) {
+		if body[i] == '&' {
+			if isValidXMLEntity(body[i:]) {
+				buf.WriteByte(body[i])
+			} else {
+				buf.WriteString("&amp;")
+			}
+		} else {
+			buf.WriteByte(body[i])
+		}
+		i++
+	}
+	return buf.Bytes()
+}
+
+// isValidXMLEntity checks whether the bytes starting at '&' form a valid XML
+// entity reference such as &amp; &lt; &gt; &apos; &quot; &#123; &#xAB;
+func isValidXMLEntity(s []byte) bool {
+	if len(s) < 2 || s[0] != '&' {
+		return false
+	}
+	// Named entities
+	for _, name := range []string{"amp;", "lt;", "gt;", "apos;", "quot;"} {
+		if len(s) > len(name) && string(s[1:1+len(name)]) == name {
+			return true
+		}
+	}
+	// Numeric character references: &#NNN; or &#xHHH;
+	if len(s) > 2 && s[1] == '#' {
+		j := 2
+		if s[2] == 'x' || s[2] == 'X' {
+			j = 3
+		}
+		for j < len(s) {
+			if s[j] == ';' {
+				return true
+			}
+			if !isXMLNameChar(s[j]) {
+				return false
+			}
+			j++
+		}
+		return false
+	}
+	// General entity: &name;
+	for j := 1; j < len(s); j++ {
+		if s[j] == ';' {
+			return true
+		}
+		if !isXMLNameChar(s[j]) {
+			return false
+		}
+	}
+	return false
+}
+
+func isXMLNameChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-' || b == '.'
+}
+
+// oldestWhenStale is the fallback for filterFreshNewsItems. If we have items
+// with unknown timestamps, those are returned (prefer ambiguity over dropping).
+// If all items had timestamps but none passed the freshness cutoff, we return
+// the original items so that infrequently-updated feeds (e.g. L'Actualité)
+// still produce results rather than appearing as failures.
+func oldestWhenStale(unknownTime, allItems []newsItem) []newsItem {
+	if len(unknownTime) > 0 {
+		return unknownTime
+	}
+	return allItems
 }
