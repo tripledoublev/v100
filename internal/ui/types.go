@@ -50,6 +50,7 @@ type TranscriptItemType int
 const (
 	ItemMessage TranscriptItemType = iota
 	ItemWelcome
+	ItemImage
 	ItemToolGroup
 	ItemAgentStart
 	ItemAgentEnd
@@ -71,6 +72,7 @@ type TranscriptItem struct {
 	Type      TranscriptItemType
 	Role      string // "user", "v100", "system"
 	Text      string
+	Images    [][]byte
 	ToolExecs []*ToolExecution
 	Expanded  bool
 	ID        int

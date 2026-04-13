@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -65,6 +66,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				Role:      role,
 				Text:      content,
 				Timestamp: ev.TS,
+				Images:    nil, // Note: The TUI current event doesn't carry raw bytes for UserMsg attachments yet
 			})
 			label := userMessageLabel
 			if role == "system" {
@@ -251,6 +253,18 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		m.usedCost = p.CostUSD
 		m.lastStepMS = p.DurationMS
 		m.lastStepTools = p.ToolCalls
+
+	case core.EventImageInline:
+		var p core.ImageInlinePayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if !sub {
+			data, _ := base64.StdEncoding.DecodeString(p.Data)
+			m.addItem(&TranscriptItem{
+				Type:      ItemImage,
+				Images:    [][]byte{data},
+				Timestamp: ev.TS,
+			})
+		}
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.
@@ -296,6 +310,15 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 			m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
 			m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
 			m.transcriptBuf.WriteString(styleMuted.Render("Type a task below and press Enter."))
+
+		case ItemImage:
+			if len(item.Images) > 0 {
+				maxWidth := m.transcriptWrapWidth()
+				img := RenderImageInlineAuto(item.Images[0], maxWidth)
+				if img != "" {
+					m.transcriptBuf.WriteString("\n" + img + "\n")
+				}
+			}
 
 		case ItemMessage:
 			switch item.Role {
@@ -465,6 +488,8 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 				compressEventLabel(p.Trigger),
 				p.MessagesBefore, p.MessagesAfter,
 				p.TokensBefore/1000, p.TokensAfter/1000))
+	case core.EventImageInline:
+		return sep + "  " + styleInfo.Render("🖼🖼") + "  " + styleInfo.Render("image inline")
 	default:
 		return sep + "  " + indent + styleMuted.Render("::") + "  " + styleMuted.Render(string(ev.Type))
 	}
