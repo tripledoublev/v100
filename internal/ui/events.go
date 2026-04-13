@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -264,6 +265,19 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				Images:    [][]byte{data},
 				Timestamp: ev.TS,
 			})
+			// Emit Kitty graphics protocol directly to terminal device, bypassing all buffering
+			if os.Getenv("KITTY_WINDOW_ID") != "" {
+				w, h := GetPNGDimensions(data)
+				if w > 0 && h > 0 {
+					meta := fmt.Sprintf("a=T,s=%d,v=%d,c=80", w, h)
+					kittySeq := fmt.Sprintf("\x1b_%s;%s\x1b\\\n", meta, p.Data)
+					// Write directly to /dev/tty to bypass all buffering
+					if f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+						_, _ = f.WriteString(kittySeq)
+						_ = f.Close()
+					}
+				}
+			}
 		}
 	}
 
@@ -313,10 +327,15 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 
 		case ItemImage:
 			if len(item.Images) > 0 {
-				maxWidth := m.transcriptWrapWidth()
+				// Use a safe width, slightly less than panel width
+				maxWidth := m.width / 2
+				if maxWidth < 20 {
+					maxWidth = 20
+				}
 				img := RenderImageInlineAuto(item.Images[0], maxWidth)
 				if img != "" {
-					m.transcriptBuf.WriteString("\n" + img + "\n")
+					// Direct write to buffer without any lipgloss/wrap intervention
+					m.transcriptBuf.WriteString("\n\n" + img + "\n\n")
 				}
 			}
 

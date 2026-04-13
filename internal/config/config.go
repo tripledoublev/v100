@@ -169,7 +169,7 @@ func DefaultConfig() *Config {
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
-				"fs_read", "fs_write", "fs_list", "fs_mkdir", "sh",
+				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
 			},

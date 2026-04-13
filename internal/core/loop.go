@@ -539,6 +539,7 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 		Name:       tc.Name,
 		OK:         result.OK,
 		Output:     result.Output,
+		Stdout:     result.Stdout,
 		DurationMS: result.DurationMS,
 	})
 
