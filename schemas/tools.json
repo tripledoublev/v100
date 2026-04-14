@@ -123,6 +123,26 @@
       "dangerous": true,
       "input":  { "required": ["key","value"], "properties": { "key": { "type": "string" }, "value": { "type": "string" } } },
       "output": { "properties": { "stored": { "type": "boolean" } } }
+    },
+    "atproto_feed": {
+      "dangerous": false,
+      "input":  { "properties": { "limit": { "type": "integer" }, "cursor": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" }, "cursor": { "type": "string" } } }
+    },
+    "atproto_notifications": {
+      "dangerous": false,
+      "input":  { "properties": { "limit": { "type": "integer" }, "unread_only": { "type": "boolean" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
+    },
+    "atproto_post": {
+      "dangerous": true,
+      "input":  { "properties": { "text": { "type": "string" }, "reply_to_uri": { "type": "string" }, "reply_to_cid": { "type": "string" }, "root_uri": { "type": "string" }, "root_cid": { "type": "string" }, "quote_uri": { "type": "string" }, "quote_cid": { "type": "string" }, "repost_uri": { "type": "string" }, "repost_cid": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "uri": { "type": "string" }, "cid": { "type": "string" } } }
+    },
+    "atproto_resolve": {
+      "dangerous": false,
+      "input":  { "required": ["handle"], "properties": { "handle": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "did": { "type": "string" }, "handle": { "type": "string" } } }
     }
   }
 }
