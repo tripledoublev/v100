@@ -20,6 +20,15 @@ type Config struct {
 	Sandbox   SandboxConfig             `toml:"sandbox"`
 	Wake      WakeConfig                `toml:"wake"`
 	Update    UpdateConfig              `toml:"update"`
+	ATProto   ATProtoConfig             `toml:"atproto"`
+}
+
+// ATProtoConfig holds Bluesky/ATProto credentials and connection settings.
+type ATProtoConfig struct {
+	Handle         string `toml:"handle"`           // e.g. "alice.bsky.social"
+	AppPassword    string `toml:"app_password"`      // direct value (fallback)
+	AppPasswordEnv string `toml:"app_password_env"`  // env var name (preferred)
+	PDSURL         string `toml:"pds_url"`           // default "https://bsky.social"
 }
 
 // UpdateConfig defines auto-update behavior.
@@ -170,10 +179,11 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
-				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
+				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "atproto_post"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -388,6 +398,11 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "sem_blame")
 	ensureString(&cfg.Tools.Enabled, "inspect_tool")
 	ensureString(&cfg.Tools.Enabled, "reflect")
+	ensureString(&cfg.Tools.Enabled, "atproto_feed")
+	ensureString(&cfg.Tools.Enabled, "atproto_notifications")
+	ensureString(&cfg.Tools.Enabled, "atproto_post")
+	ensureString(&cfg.Tools.Dangerous, "atproto_post")
+	ensureString(&cfg.Tools.Enabled, "atproto_resolve")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}

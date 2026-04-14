@@ -421,6 +421,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSOutline())
 	reg.Register(tools.InspectTool())
 	reg.Register(tools.NewReflect())
+	reg.Register(tools.Wiki())
 	return reg
 }
 
