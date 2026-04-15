@@ -160,7 +160,7 @@ func TargetAsset() string {
 // IsNewer compares the current version with a new tag name using semantic versioning.
 func IsNewer(current, latest string) bool {
 	if current == "dev" {
-		return true // assume latest is newer than dev for testing
+		return false // dev builds are never behind a release
 	}
 	current = strings.TrimPrefix(current, "v")
 	latest = strings.TrimPrefix(latest, "v")

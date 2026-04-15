@@ -16,7 +16,7 @@ func TestIsNewer(t *testing.T) {
 		{"v0.2.9", "v0.2.10", true},
 		{"v0.2.10", "v0.2.10", false},
 		{"v0.2.11", "v0.2.10", false},
-		{"dev", "v0.2.10", true},
+		{"dev", "v0.2.10", false},
 		{"0.2.9", "v0.2.10", true},
 		{"v0.2.9", "0.2.10", true},
 	}
