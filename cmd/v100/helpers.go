@@ -994,6 +994,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	if cfg.Defaults.CompressProtectRecent > 0 {
 		p.CompressProtectRecent = cfg.Defaults.CompressProtectRecent
 	}
+	if cfg.Defaults.ContextLimit > 0 {
+		p.ContextLimit = cfg.Defaults.ContextLimit
+	}
 	if cfg.Defaults.MemoryMode != "" {
 		p.MemoryMode = cfg.Defaults.MemoryMode
 	}
