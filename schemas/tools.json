@@ -89,6 +89,11 @@
       "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "max_bytes": { "type": "integer" } } },
       "output": { "properties": { "status": { "type": "integer" }, "extract": { "type": "string" } } }
     },
+    "wiki": {
+      "dangerous": false,
+      "input":  { "required": ["action"], "properties": { "action": { "type": "string", "enum": ["read", "search", "update"] }, "title": { "type": "string" }, "query": { "type": "string" }, "lang": { "type": "string" }, "sentences": { "type": "integer" }, "max_results": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" }, "duration_ms": { "type": "integer" } } }
+    },
     "agent": {
       "dangerous": true,
       "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "budget_steps": { "type": "integer" }, "budget_tokens": { "type": "integer" } } },
