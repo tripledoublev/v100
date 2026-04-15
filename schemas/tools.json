@@ -143,6 +143,16 @@
       "dangerous": false,
       "input":  { "required": ["handle"], "properties": { "handle": { "type": "string" } } },
       "output": { "properties": { "ok": { "type": "boolean" }, "did": { "type": "string" }, "handle": { "type": "string" } } }
+    },
+    "atproto_vibe_check": {
+      "dangerous": false,
+      "input":  { "properties": { "hours": { "type": "integer" }, "limit": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
+    },
+    "atproto_daily_digest": {
+      "dangerous": false,
+      "input":  { "properties": { "hours": { "type": "integer" }, "limit": { "type": "integer" }, "top_n": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
     }
   }
 }

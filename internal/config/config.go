@@ -181,7 +181,7 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_vibe_check", "atproto_daily_digest",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "atproto_post"},
 		},

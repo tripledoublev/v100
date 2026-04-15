@@ -426,6 +426,8 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
+	reg.Register(tools.ATProtoVibeCheck(cfg))
+	reg.Register(tools.ATProtoDailyDigest(cfg))
 	return reg
 }
 
