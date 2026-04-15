@@ -403,6 +403,11 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "atproto_post")
 	ensureString(&cfg.Tools.Dangerous, "atproto_post")
 	ensureString(&cfg.Tools.Enabled, "atproto_resolve")
+	ensureString(&cfg.Tools.Enabled, "wiki")
+	ensureString(&cfg.Tools.Enabled, "git_commit")
+	ensureString(&cfg.Tools.Dangerous, "git_commit")
+	ensureString(&cfg.Tools.Enabled, "atproto_vibe_check")
+	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}
