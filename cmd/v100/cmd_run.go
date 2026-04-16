@@ -503,16 +503,9 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 
 				if busy && !confirmActive.Load() {
 					fd := int(os.Stdin.Fd())
-					// Poll stdin with a 50 ms timeout using syscall.Select so we
-					// never block longer than that window. ConfirmTool may start at
-					// any moment and needs exclusive stdin access; the short timeout
-					// ensures the goroutine yields quickly when confirmActive is set.
-					tv := syscall.Timeval{Usec: 50_000}
-					rset := new(syscall.FdSet)
-					stdinFDSet(rset, fd)
-					n, serr := syscall.Select(fd+1, rset, nil, nil, &tv)
-					if serr != nil || n == 0 || confirmActive.Load() {
-						// timeout, select error, or confirm just became active — skip
+					// Poll stdin with a short timeout so we never block past the
+					// window where ConfirmTool may start needing exclusive stdin.
+					if !stdinPollReady(fd) || confirmActive.Load() {
 						continue
 					}
 
@@ -1049,7 +1042,3 @@ func matchesFile(writePath, targetPath, targetBase string) bool {
 	return false
 }
 
-// stdinFDSet sets the bit for fd in a syscall.FdSet.
-func stdinFDSet(s *syscall.FdSet, fd int) {
-	s.Bits[fd/64] |= 1 << (uint(fd) % 64)
-}
