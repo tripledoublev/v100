@@ -103,7 +103,7 @@ func (t *fingerprintTool) Exec(ctx context.Context, call ToolCallContext, args j
 	}
 
 	samplePath := filepath.Join(workDir, fmt.Sprintf("fp_sample_%d.wav", time.Now().UnixNano()))
-	defer os.Remove(samplePath)
+	defer func() { _ = os.Remove(samplePath) }()
 
 	// Record from URL or copy local file to wav
 	if strings.HasPrefix(a.AudioURL, "http://") || strings.HasPrefix(a.AudioURL, "https://") {
@@ -213,7 +213,7 @@ func (t *fingerprintTool) fingerprint(wavPath string) (string, int, error) {
 			fingerprint = strings.TrimPrefix(line, "FINGERPRINT=")
 		}
 		if strings.HasPrefix(line, "DURATION=") {
-			fmt.Sscanf(strings.TrimPrefix(line, "DURATION="), "%d", &duration)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "DURATION="), "%d", &duration)
 		}
 	}
 
@@ -249,7 +249,7 @@ func (t *fingerprintTool) acoustIDLookup(fingerprint string, duration int, artis
 	if err != nil {
 		return "", "", "", "", 0, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
