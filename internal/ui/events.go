@@ -153,7 +153,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if !sub {
 			m.addItem(&TranscriptItem{
 				Type:      ItemRunEnd,
-				Text:      fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d", p.Reason, p.UsedSteps, p.UsedTokens),
+				Text:      fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d\n  run: %s", p.Reason, p.UsedSteps, p.UsedTokens, ev.RunID),
 				Timestamp: ev.TS,
 			})
 			if p.Summary != "" {
