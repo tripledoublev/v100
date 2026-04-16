@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
+	"strings"
 
 	"github.com/tripledoublev/v100/internal/config"
 )
@@ -214,4 +216,170 @@ func (t *atprotoGetProfileTool) Exec(_ context.Context, _ ToolCallContext, args 
 	}
 
 	return ToolResult{OK: true, Output: string(data)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// atproto_graph_explorer — "who do my follows follow that I don't?"
+// ---------------------------------------------------------------------------
+
+type atprotoGraphExplorerTool struct{ cfg config.ATProtoConfig }
+
+// ATProtoGraphExplorer returns the atproto_graph_explorer tool.
+func ATProtoGraphExplorer(cfg *config.Config) Tool { return &atprotoGraphExplorerTool{cfg: cfg.ATProto} }
+
+func (t *atprotoGraphExplorerTool) Name() string { return "atproto_graph_explorer" }
+func (t *atprotoGraphExplorerTool) Description() string {
+	return "Explore your 2nd-degree follow graph to find new people to follow. Analyzes who your follows are following and suggests the most common ones you don't already follow."
+}
+func (t *atprotoGraphExplorerTool) DangerLevel() DangerLevel { return Safe }
+func (t *atprotoGraphExplorerTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+
+func (t *atprotoGraphExplorerTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"sample_size": {"type": "integer", "description": "Number of your follows to sample (default 10, max 25)."},
+			"follows_limit": {"type": "integer", "description": "Number of follows to fetch per sampled account (default 20, max 100)."}
+		}
+	}`)
+}
+
+func (t *atprotoGraphExplorerTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":     {"type": "boolean"},
+			"output": {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		SampleSize   int `json:"sample_size"`
+		FollowsLimit int `json:"follows_limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	if in.SampleSize <= 0 {
+		in.SampleSize = 10
+	}
+	if in.SampleSize > 25 {
+		in.SampleSize = 25
+	}
+	if in.FollowsLimit <= 0 {
+		in.FollowsLimit = 20
+	}
+	if in.FollowsLimit > 100 {
+		in.FollowsLimit = 100
+	}
+
+	cli := newATProtoClient(t.cfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	// 1. Get my own follows to know who NOT to suggest
+	myFollowsData, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+		"actor": {cli.session.DID},
+		"limit": {"100"},
+	})
+	if err != nil {
+		return ToolResult{OK: false, Output: "failed to get my follows: " + err.Error()}, nil
+	}
+
+	var myFollowsResp struct {
+		Follows []struct {
+			DID    string `json:"did"`
+			Handle string `json:"handle"`
+		} `json:"follows"`
+	}
+	if err := json.Unmarshal(myFollowsData, &myFollowsResp); err != nil {
+		return ToolResult{OK: false, Output: "failed to parse my follows: " + err.Error()}, nil
+	}
+
+	alreadyFollowed := make(map[string]bool)
+	alreadyFollowed[cli.session.DID] = true // Don't suggest myself
+	for _, f := range myFollowsResp.Follows {
+		alreadyFollowed[f.DID] = true
+	}
+
+	// 2. Sample N of my follows and see who they follow
+	suggestions := make(map[string]int)
+	profileInfo := make(map[string]string) // DID -> handle
+
+	count := 0
+	for _, f := range myFollowsResp.Follows {
+		if count >= in.SampleSize {
+			break
+		}
+
+		followsData, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+			"actor": {f.DID},
+			"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
+		})
+		if err != nil {
+			continue // skip failures for individual accounts
+		}
+
+		var fResp struct {
+			Follows []struct {
+				DID         string `json:"did"`
+				Handle      string `json:"handle"`
+				DisplayName string `json:"displayName"`
+			} `json:"follows"`
+		}
+		if err := json.Unmarshal(followsData, &fResp); err != nil {
+			continue
+		}
+
+		for _, candidate := range fResp.Follows {
+			if alreadyFollowed[candidate.DID] {
+				continue
+			}
+			suggestions[candidate.DID]++
+			if _, ok := profileInfo[candidate.DID]; !ok {
+				name := candidate.DisplayName
+				if name == "" {
+					name = candidate.Handle
+				}
+				profileInfo[candidate.DID] = fmt.Sprintf("%s (@%s)", name, candidate.Handle)
+			}
+		}
+		count++
+	}
+
+	// 3. Sort and present top suggestions
+	type suggestion struct {
+		DID   string
+		Count int
+	}
+	var sorted []suggestion
+	for did, c := range suggestions {
+		sorted = append(sorted, suggestion{did, c})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Count > sorted[j].Count
+	})
+
+	if len(sorted) == 0 {
+		return ToolResult{OK: true, Output: "no new suggestions found in this sample."}, nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Found %d suggestions from sampling %d follows:\n\n", len(sorted), count)
+	
+	limit := 15
+	if len(sorted) < limit {
+		limit = len(sorted)
+	}
+
+	for i := 0; i < limit; i++ {
+		s := sorted[i]
+		fmt.Fprintf(&sb, "%d. %s — followed by %d of your sampled follows\n", 
+			i+1, profileInfo[s.DID], s.Count)
+	}
+
+	return ToolResult{OK: true, Output: sb.String()}, nil
 }
