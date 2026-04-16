@@ -229,7 +229,7 @@ func ATProtoGraphExplorer(cfg *config.Config) Tool { return &atprotoGraphExplore
 
 func (t *atprotoGraphExplorerTool) Name() string { return "atproto_graph_explorer" }
 func (t *atprotoGraphExplorerTool) Description() string {
-	return "Explore your 2nd-degree follow graph to find new people to follow. Analyzes who your follows are following and suggests the most common ones you don't already follow."
+	return "Explore and map a Bluesky user's social graph. Samples the accounts they follow, fetches who those accounts follow, and surfaces the most-connected people in their 2nd-degree network. Use this when asked to graph someone, explore their network, find follow suggestions, or analyze social connections."
 }
 func (t *atprotoGraphExplorerTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoGraphExplorerTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
