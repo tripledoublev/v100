@@ -37,7 +37,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 		ParentRunID: "20260323T010101-deadbeef",
 	}, "child prompt", "completed")
 
-	runs, err := collectRuns(runRoot, false, "", false)
+	runs, err := collectRuns(runRoot, false, "", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 		t.Fatalf("prompt = %q, want newer prompt", runs[0].Prompt)
 	}
 
-	failedRuns, err := collectRuns(runRoot, true, "", true)
+	failedRuns, err := collectRuns(runRoot, true, "", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestCollectRunsFiltersSortsAndReadsPrompt(t *testing.T) {
 		t.Fatalf("failed filter returned %+v, want newer canonical run only", failedRuns)
 	}
 
-	providerRuns, err := collectRuns(runRoot, true, "minimax", false)
+	providerRuns, err := collectRuns(runRoot, true, "minimax", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestCollectRunsSkipsNonCanonicalDirectoriesByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runs, err := collectRuns(runRoot, false, "", false)
+	runs, err := collectRuns(runRoot, false, "", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestCollectRunsSkipsNonCanonicalDirectoriesByDefault(t *testing.T) {
 		t.Fatalf("default runs filter returned %+v, want canonical run only", runs)
 	}
 
-	allRuns, err := collectRuns(runRoot, true, "", false)
+	allRuns, err := collectRuns(runRoot, true, "", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

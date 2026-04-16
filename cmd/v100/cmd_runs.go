@@ -49,7 +49,7 @@ func runsCmd(cfgPath *string) *cobra.Command {
 				runDir = "runs"
 			}
 
-			runs, err := collectRuns(runDir, allFlag, providerFilter, failedFlag)
+			runs, err := collectRuns(runDir, allFlag, providerFilter, failedFlag, limit)
 			if err != nil {
 				if os.IsNotExist(err) {
 					fmt.Println(ui.Dim("No runs found"))
@@ -116,7 +116,7 @@ func defaultExecResumeRun(configPath, runID string) error {
 	return cmd.Run()
 }
 
-func collectRuns(runDir string, allFlag bool, providerFilter string, failedFlag bool) ([]listedRun, error) {
+func collectRuns(runDir string, allFlag bool, providerFilter string, failedFlag bool, limit int) ([]listedRun, error) {
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
 		return nil, err
@@ -172,6 +172,11 @@ func collectRuns(runDir string, allFlag bool, providerFilter string, failedFlag 
 			Prompt:   firstUserPrompt(dir),
 			SubRun:   meta.ParentRunID != "",
 		})
+		// Stop early once we have enough results. Skip when failedFlag is set
+		// because that requires scanning every trace to check end reason.
+		if limit > 0 && !failedFlag && len(runs) >= limit {
+			break
+		}
 	}
 	return runs, nil
 }
@@ -428,26 +433,20 @@ func max(a, b int) int {
 	return b
 }
 
-// firstUserPrompt reads the trace and returns the first user message, truncated.
+// firstUserPrompt reads only until the first user message in the trace.
 func firstUserPrompt(dir string) string {
-	events, err := core.ReadAll(filepath.Join(dir, "trace.jsonl"))
-	if err != nil {
+	ev, err := core.ReadFirstMatch(filepath.Join(dir, "trace.jsonl"), core.EventUserMsg)
+	if err != nil || ev == nil {
 		return ""
 	}
-	for _, ev := range events {
-		if ev.Type != core.EventUserMsg {
-			continue
-		}
-		var p core.UserMsgPayload
-		if json.Unmarshal(ev.Payload, &p) != nil {
-			continue
-		}
-		prompt := strings.TrimSpace(p.Content)
-		prompt = strings.Join(strings.Fields(prompt), " ")
-		if len(prompt) > 80 {
-			prompt = prompt[:77] + "..."
-		}
-		return prompt
+	var p core.UserMsgPayload
+	if json.Unmarshal(ev.Payload, &p) != nil {
+		return ""
 	}
-	return ""
+	prompt := strings.TrimSpace(p.Content)
+	prompt = strings.Join(strings.Fields(prompt), " ")
+	if len(prompt) > 80 {
+		prompt = prompt[:77] + "..."
+	}
+	return prompt
 }

@@ -85,3 +85,36 @@ func ReadAll(path string) ([]Event, error) {
 	}
 	return events, nil
 }
+
+// ReadFirstMatch opens path and returns the first event whose type matches
+// any of the given types, stopping as soon as it is found. This avoids
+// reading the rest of the file — useful when only the first occurrence matters.
+func ReadFirstMatch(path string, types ...EventType) (*Event, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("trace: open %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	want := make(map[EventType]struct{}, len(types))
+	for _, t := range types {
+		want[t] = struct{}{}
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		raw := scanner.Bytes()
+		if len(raw) == 0 {
+			continue
+		}
+		var ev Event
+		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		if _, ok := want[ev.Type]; ok {
+			return &ev, nil
+		}
+	}
+	return nil, nil
+}
