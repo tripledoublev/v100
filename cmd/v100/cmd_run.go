@@ -31,6 +31,7 @@ import (
 func runCmd(cfgPath *string) *cobra.Command {
 	var (
 		providerFlag     string
+		embeddingFlag    string
 		modelFlag        string
 		policyFlag       string
 		runDirFlag       string
@@ -195,6 +196,20 @@ func runCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
+			// Build dedicated embedding provider.
+			// Flag takes precedence; fall back to cfg.Embedding.Provider if configured.
+			var embedProv providers.Provider
+			embedProvName := embeddingFlag
+			if embedProvName == "" {
+				embedProvName = cfg.Embedding.Provider
+			}
+			if embedProvName != "" {
+				embedProv, err = buildProvider(cfg, embedProvName)
+				if err != nil {
+					return fmt.Errorf("embedding provider %q: %w", embedProvName, err)
+				}
+			}
+
 			// Decide model
 			model := modelFlag
 			if model == "" {
@@ -300,13 +315,14 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, initialPrompt, session, mapper)
+				return runWithTUI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, initialPrompt, session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
+			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
 		},
 	}
 
 	cmd.Flags().StringVar(&providerFlag, "provider", "", "provider name (overrides config)")
+	cmd.Flags().StringVar(&embeddingFlag, "embedding", "", "provider to use for vector embeddings (e.g. ollama)")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "model name (overrides config)")
 	cmd.Flags().StringVar(&policyFlag, "policy", "default", "policy name")
 	cmd.Flags().StringVar(&runDirFlag, "run-dir", "", "base directory for runs (default: ./runs)")
@@ -384,7 +400,7 @@ func validatePlanMode(planMode bool, tuiMode bool, solverName string) error {
 	return nil
 }
 
-func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embedProv providers.Provider, reg *tools.Registry, pol *policy.Policy,
 	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, planMode bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	// Auto-exit when stdin is piped (not a TTY) to avoid hanging after prompt
@@ -405,6 +421,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	loop := &core.Loop{
 		Run:              run,
 		Provider:         prov,
+		EmbedProvider:    embedProv,
 		CompressProvider: buildCompressProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,

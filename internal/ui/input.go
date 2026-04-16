@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"regexp"
+	"runtime"
 	"strings"
 )
 
 var clipboardImageReader = readClipboardImage
+
+var urlRegex = regexp.MustCompile(`https?://[^\s)\]'"]+`)
 
 func (m *TUIModel) handleMouseClick(x, y int) {
 	if m.width <= 0 || m.height <= 0 {
@@ -21,6 +25,8 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		return
 	}
 	if !m.showTrace {
+		m.tryClickURL(x, y)
+		m.tryClickToggleTarget(y)
 		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
@@ -34,6 +40,8 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 	}
 	leftOuterEnd := leftW + 1 // 0-indexed: left border at 0, content 1..leftW, right border at leftW+1
 	if x <= leftOuterEnd {
+		m.tryClickURL(x, y)
+		m.tryClickToggleTarget(y)
 		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
@@ -59,6 +67,71 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.focus = focusStatus
 	}
 	m.input.Blur()
+}
+
+func (m *TUIModel) tryClickURL(termX, termY int) {
+	const contentStartRow = 2
+	if termY < contentStartRow {
+		return
+	}
+	contentLine := (termY - contentStartRow) + m.transcript.YOffset
+	lines := strings.Split(m.transcriptBuf.String(), "\n")
+	if contentLine < 0 || contentLine >= len(lines) {
+		return
+	}
+	rawLine := lines[contentLine]
+	strippedLine := stripANSI(rawLine)
+
+	localX := termX - 1 // 1 for left border
+	if localX < 0 || localX >= len(strippedLine) {
+		return
+	}
+
+	matches := urlRegex.FindAllStringIndex(strippedLine, -1)
+	for _, match := range matches {
+		if localX >= match[0] && localX < match[1] {
+			url := strippedLine[match[0]:match[1]]
+			_ = openURL(url)
+			return
+		}
+	}
+}
+
+func openURL(u string) error {
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", u}
+	case "darwin":
+		cmd = "open"
+		args = []string{u}
+	default: // linux, freebsd, etc
+		cmd = "xdg-open"
+		args = []string{u}
+	}
+	return exec.Command(cmd, args...).Start()
+}
+
+func (m *TUIModel) tryClickToggleTarget(termY int) {
+	const contentStartRow = 2
+	if termY < contentStartRow {
+		return
+	}
+	contentLine := (termY - contentStartRow) + m.transcript.YOffset
+	for _, tt := range m.toggleTargets {
+		if contentLine == tt.lineNo {
+			for _, item := range m.history {
+				if item.ID == tt.itemID {
+					item.Expanded = !item.Expanded
+					m.rebuildTranscript(false)
+					return
+				}
+			}
+		}
+	}
 }
 
 // tryClickCopyTarget checks if the click row matches a copy icon and copies if so.

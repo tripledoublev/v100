@@ -34,7 +34,8 @@ type ToolCallContext struct {
 	HostWorkspaceDir string // original source workspace for shared state across runs
 	TimeoutMS        int
 	Provider         providers.Provider
-	Registry         *Registry        // access to other enabled tools
+	EmbedProvider    providers.Provider // dedicated embedding provider; falls back to Provider if nil
+	Registry         *Registry          // access to other enabled tools
 	Session          executor.Session // active sandbox session
 	Mapper           PathTranslator   // bidirectional path mapping
 	EmitOutputDelta  func(stream, text string) error

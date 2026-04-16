@@ -45,6 +45,47 @@ type agentFrame struct {
 	Started  time.Time
 }
 
+type TranscriptItemType int
+
+const (
+	ItemMessage TranscriptItemType = iota
+	ItemWelcome
+	ItemImage
+	ItemToolGroup
+	ItemAgentStart
+	ItemAgentEnd
+	ItemRunEnd
+	ItemTokenGroup
+	ItemError
+)
+
+type ToolExecution struct {
+	CallID    string
+	Name      string
+	Args      string
+	Result    string
+	OK        bool
+	Duration  int64
+	Timestamp time.Time
+}
+
+type TranscriptItem struct {
+	Type      TranscriptItemType
+	Role      string // "user", "v100", "system"
+	Text      string
+	Images    [][]byte
+	Tokens    []string   // accumulated token stream for ItemTokenGroup
+	ToolExecs []*ToolExecution
+	Expanded  bool
+	ID        int
+	Timestamp time.Time
+}
+
+type toggleTarget struct {
+	lineNo int
+	itemID int
+}
+
 type deviceStatus struct {
 	CheckedAt      time.Time
 	BatteryPresent bool
@@ -67,6 +108,26 @@ type TUIModel struct {
 
 	transcriptBuf strings.Builder
 	traceBuf      strings.Builder
+	lastTraceLine      string
+	lastTraceCount     int
+	lastTraceEventType core.EventType
+
+	history        []*TranscriptItem
+	nextItemID     int
+	toggleTargets  []toggleTarget
+	copyTargets    []copyTarget
+	plainBuf       strings.Builder // plain-text transcript for full-copy
+	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
+	traceStepCount int             // running step count for trace pane
+	activeAgents   []agentFrame
+	agentDoneCount int
+	agentFailCount int
+	lastAgentNote  string
+	device         deviceStatus
+	modelEvents    []time.Time
+	toolEvents     []time.Time
+	compressEvents []time.Time
+	lastEventAt    time.Time
 
 	focus        focus
 	showTrace    bool
@@ -75,6 +136,7 @@ type TUIModel struct {
 	statusMode   string
 	statusLine   string
 	statusTick   int
+	downloadAnimTick int
 	runSummary   string
 	leftPanePct  int
 	tracePanePct int
@@ -107,20 +169,6 @@ type TUIModel struct {
 
 	showRadioSelect bool
 	radioSelectIdx  int
-
-	copyTargets    []copyTarget
-	plainBuf       strings.Builder // plain-text transcript for full-copy
-	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
-	traceStepCount int             // running step count for trace pane
-	activeAgents   []agentFrame
-	agentDoneCount int
-	agentFailCount int
-	lastAgentNote  string
-	device         deviceStatus
-	modelEvents    []time.Time
-	toolEvents     []time.Time
-	compressEvents []time.Time
-	lastEventAt    time.Time
 
 	// clipboard images attached to current input
 	pastedImages [][]byte

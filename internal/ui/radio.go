@@ -93,6 +93,10 @@ func radioTickCmd() tea.Cmd {
 }
 
 func (m *TUIModel) onRadioTick() tea.Cmd {
+	// Tick the download spinner while downloading
+	if m.statusMode == "downloading" {
+		m.downloadAnimTick++
+	}
 	if !m.radioPlaying {
 		m.radioWave = ""
 		return nil

@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -266,7 +267,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n%s\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+		fmt.Printf("\n%s\n", EndBanner(p.Reason, ev.RunID, p.UsedSteps, p.UsedTokens))
 		if p.Summary != "" {
 			fmt.Printf("%s\n", styleInfo.Render("Summary: "+p.Summary))
 		}
@@ -361,6 +362,18 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			styleMuted.Render(fmt.Sprintf("tok=%s  $%.4f  %d tools  %d model calls  %dms",
 				formatTokens(p.InputTokens), p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
 		)
+
+	case core.EventImageInline:
+		if r.inSubAgent > 0 {
+			break
+		}
+		var p core.ImageInlinePayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		data, _ := base64.StdEncoding.DecodeString(p.Data)
+		img := RenderImageInlineAuto(data, 80)
+		if img != "" {
+			fmt.Printf("\n%s\n", img)
+		}
 
 	default:
 		fmt.Printf("%s  %s\n", ts, styleMuted.Render(string(ev.Type)))
@@ -638,7 +651,7 @@ func PrintReplayEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, ev.RunID, p.UsedSteps, p.UsedTokens))
 
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
@@ -697,6 +710,15 @@ func PrintReplayEvent(ev core.Event) {
 			styleMuted.Render(fmt.Sprintf("tok=%dk  $%.4f  %d tools  %d model calls  %dms",
 				p.InputTokens/1000, p.CostUSD, p.ToolCalls, p.ModelCalls, p.DurationMS)),
 		)
+
+	case core.EventImageInline:
+		var p core.ImageInlinePayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		data, _ := base64.StdEncoding.DecodeString(p.Data)
+		img := RenderImageInlineAuto(data, 80)
+		if img != "" {
+			fmt.Printf("\n%s\n", img)
+		}
 
 	default:
 		fmt.Printf("%s  %s\n", styleMuted.Render(ts), styleMuted.Render(string(ev.Type)))

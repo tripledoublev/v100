@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.2.16 — 2026-04-16
+
+**ATProto RAG, Audio Fingerprinting, Social Graph Tools, and Compress Command**
+
+This release adds semantic search over Bluesky records via vector embeddings, an acoustic fingerprinting tool for identifying songs from audio streams, a social graph explorer for second-degree network discovery, and a standalone `compress` command for force-compressing run context.
+
+### ATProto Vector Index and RAG
+
+- **`atproto_index` tool** — Fetches feed, notifications, or a user profile and embeds each record using a dedicated embedding provider, storing vectors in `~/.v100/atproto.vectors.json` for persistence across runs and workspaces.
+- **`atproto_recall` tool** — Semantic search over indexed ATProto records via cosine similarity. Accepts a natural language query, optional `record_type` filter (`post`, `notification`, `profile`), and returns scored results for use as RAG context.
+- **`--embedding` flag on `run`** — Specifies a dedicated provider for embedding calls, independent of the chat provider (e.g. `--embedding ollama`). Defaults to the new `[embedding]` config section (`provider = "ollama"`, `model = "nomic-embed-text:latest"`).
+- **`EmbedProvider` on Loop and ToolCallContext** — Embedding calls in tools now route through a separate provider field rather than the chat provider, allowing any model that supports embeddings to back the vector tools.
+- **`NewNamedVectorStore`** — New constructor in `internal/memory` for named vector stores (`<name>.vectors.json`) separate from the blackboard store.
+- **`UserDataDir()`** — New config helper returning `~/.v100/` for user-local persistent data.
+
+### Audio Fingerprinting
+
+- **`fingerprint` tool** — Identifies songs from an audio stream URL or local file using chromaprint (`fpcalc`) and the AcoustID API. Records a short sample, generates an acoustic fingerprint, and returns artist, title, and MusicBrainz recording ID. Requires `fpcalc` and `ffmpeg`.
+
+### ATProto Social Graph Tools
+
+- **`atproto_get_follows`** — Lists accounts followed by a given user.
+- **`atproto_get_followers`** — Lists accounts following a given user.
+- **`atproto_get_profile`** — Fetches a full Bluesky profile.
+- **`atproto_graph_explorer`** — Maps second-degree network: surfaces accounts followed by people you follow that you don't yet follow yourself, ranked by mutual follow count.
+
+### Compress Command
+
+- **`v100 compress <run_id>`** — Force-compresses the message history of any existing run and writes a `compress.checkpoint.json` to the run directory. Accepts `--provider` to select the compression model and `--dry-run` to preview token savings without writing.
+- **Checkpoint-based resume** — `v100 resume` now detects `compress.checkpoint.json` and loads the compressed message history instead of replaying the full trace.
+
+### UI
+
+- **Download spinner helpers** — Added `DownloadSpinner` and `SpinSlash` animation helpers for TUI status indicators.
+- **Radio download animation** — TUI radio mode ticks a download spinner while in downloading state.
+
 ## v0.2.15 — 2026-04-12
 
 **Compression Hardening and Quebec News Defaults**

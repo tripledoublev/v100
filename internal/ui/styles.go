@@ -87,7 +87,7 @@ func RunBanner(runID, provider, model string) string {
 }
 
 // EndBanner renders the run-end footer.
-func EndBanner(reason string, steps, tokens int) string {
+func EndBanner(reason, runID string, steps, tokens int) string {
 	bar := lipgloss.NewStyle().Foreground(clrMuted).Render(
 		"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
 	)
@@ -95,7 +95,8 @@ func EndBanner(reason string, steps, tokens int) string {
 		styleInfo.Render(reason) +
 		styleMuted.Render("  steps=") + styleRunID.Render(fmt_int(steps)) +
 		styleMuted.Render("  tokens=") + styleRunID.Render(fmt_int(tokens))
-	return bar + "\n" + label
+	id := styleMuted.Render("run: ") + styleRunID.Render(runID)
+	return bar + "\n" + label + "\n" + id
 }
 
 func fmt_int(n int) string {

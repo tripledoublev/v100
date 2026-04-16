@@ -14,7 +14,7 @@ import (
 
 const (
 	traceEventMaxBlockChars  = 1200
-	traceEventMaxBlockLines  = 8
+	traceEventMaxBlockLines = 8
 	traceEventMaxPayloadList = 4
 )
 
@@ -86,6 +86,10 @@ func describeTraceEvent(ev core.Event) (string, []string) {
 			details = append(details, "available: "+strings.Join(p.ToolNames, ", "))
 		}
 		return title, details
+
+	case core.EventModelToken:
+		// Simple label for streaming tokens — they're collapsed to a single ×N line anyway.
+		return "model.token", nil
 
 	case core.EventModelResp:
 		var p core.ModelRespPayload

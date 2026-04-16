@@ -259,6 +259,12 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 			authEnv = "ZHIPU_API_KEY"
 		}
 		raw, err = providers.NewGLMProvider(authEnv, pc.BaseURL, pc.DefaultModel)
+	case "mistral":
+		authEnv := pc.Auth.Env
+		if authEnv == "" {
+			authEnv = "MISTRAL_API_KEY"
+		}
+		raw, err = providers.NewMistralProvider(authEnv, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
@@ -397,6 +403,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
 	reg.Register(tools.FSMkdir())
+	reg.Register(tools.FSRenderImage())
 	reg.Register(tools.BlackboardRead())
 	reg.Register(tools.BlackboardWrite())
 	reg.Register(tools.BlackboardSearch())
@@ -420,6 +427,20 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.FSOutline())
 	reg.Register(tools.InspectTool())
 	reg.Register(tools.NewReflect())
+	reg.Register(tools.Wiki())
+	reg.Register(tools.Fingerprint())
+	reg.Register(tools.ATProtoFeed(cfg))
+	reg.Register(tools.ATProtoNotifications(cfg))
+	reg.Register(tools.ATProtoPost(cfg))
+	reg.Register(tools.ATProtoResolve(cfg))
+	reg.Register(tools.ATProtoGetFollows(cfg))
+	reg.Register(tools.ATProtoGetFollowers(cfg))
+	reg.Register(tools.ATProtoGetProfile(cfg))
+	reg.Register(tools.ATProtoGraphExplorer(cfg))
+	reg.Register(tools.ATProtoVibeCheck(cfg))
+	reg.Register(tools.ATProtoDailyDigest(cfg))
+	reg.Register(tools.ATProtoIndex(cfg))
+	reg.Register(tools.ATProtoRecall(cfg))
 	return reg
 }
 
@@ -987,6 +1008,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	}
 	if cfg.Defaults.CompressProtectRecent > 0 {
 		p.CompressProtectRecent = cfg.Defaults.CompressProtectRecent
+	}
+	if cfg.Defaults.ContextLimit > 0 {
+		p.ContextLimit = cfg.Defaults.ContextLimit
 	}
 	if cfg.Defaults.MemoryMode != "" {
 		p.MemoryMode = cfg.Defaults.MemoryMode

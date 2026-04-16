@@ -20,6 +20,22 @@ type Config struct {
 	Sandbox   SandboxConfig             `toml:"sandbox"`
 	Wake      WakeConfig                `toml:"wake"`
 	Update    UpdateConfig              `toml:"update"`
+	ATProto   ATProtoConfig             `toml:"atproto"`
+	Embedding EmbeddingConfig           `toml:"embedding"`
+}
+
+// EmbeddingConfig specifies the provider and model used for vector embeddings.
+type EmbeddingConfig struct {
+	Provider string `toml:"provider"` // provider name, e.g. "ollama"
+	Model    string `toml:"model"`    // model name, e.g. "nomic-embed-text:latest"
+}
+
+// ATProtoConfig holds Bluesky/ATProto credentials and connection settings.
+type ATProtoConfig struct {
+	Handle         string `toml:"handle"`           // e.g. "alice.bsky.social"
+	AppPassword    string `toml:"app_password"`      // direct value (fallback)
+	AppPasswordEnv string `toml:"app_password_env"`  // env var name (preferred)
+	PDSURL         string `toml:"pds_url"`           // default "https://bsky.social"
 }
 
 // UpdateConfig defines auto-update behavior.
@@ -166,14 +182,21 @@ func DefaultConfig() *Config {
 				BaseURL:      "https://api.z.ai/api/coding/paas/v4",
 				Auth:         AuthConfig{Env: "ZHIPU_API_KEY"},
 			},
+			"mistral": {
+				Type:         "mistral",
+				DefaultModel: "mistral-large-latest",
+				BaseURL:      "https://api.mistral.ai/v1",
+				Auth:         AuthConfig{Env: "MISTRAL_API_KEY"},
+			},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
-				"fs_read", "fs_write", "fs_list", "fs_mkdir", "sh",
-				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
+				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
+				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "atproto_post"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -220,7 +243,7 @@ func DefaultConfig() *Config {
 			ContextLimit:          80000,
 			MaxToolResultChars:    20000,
 			CompressProtectRecent: 6,
-			CompressProvider:      "glm",
+			CompressProvider:      "anthropic",
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
@@ -242,6 +265,10 @@ func DefaultConfig() *Config {
 		},
 		Update: UpdateConfig{
 			CheckInterval: "24h",
+		},
+		Embedding: EmbeddingConfig{
+			Provider: "ollama",
+			Model:    "nomic-embed-text:latest",
 		},
 	}
 }
@@ -298,9 +325,13 @@ base_url = "https://api.z.ai/api/coding/paas/v4"
 [providers.glm.auth]
 env = "ZHIPU_API_KEY"
 
+[embedding]
+provider = "ollama"
+model = "nomic-embed-text:latest"
+
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -388,6 +419,22 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "sem_blame")
 	ensureString(&cfg.Tools.Enabled, "inspect_tool")
 	ensureString(&cfg.Tools.Enabled, "reflect")
+	ensureString(&cfg.Tools.Enabled, "atproto_feed")
+	ensureString(&cfg.Tools.Enabled, "atproto_notifications")
+	ensureString(&cfg.Tools.Enabled, "atproto_post")
+	ensureString(&cfg.Tools.Dangerous, "atproto_post")
+	ensureString(&cfg.Tools.Enabled, "atproto_resolve")
+	ensureString(&cfg.Tools.Enabled, "wiki")
+	ensureString(&cfg.Tools.Enabled, "git_commit")
+	ensureString(&cfg.Tools.Dangerous, "git_commit")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_follows")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_followers")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_profile")
+	ensureString(&cfg.Tools.Enabled, "atproto_graph_explorer")
+	ensureString(&cfg.Tools.Enabled, "atproto_vibe_check")
+	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
+	ensureString(&cfg.Tools.Enabled, "atproto_index")
+	ensureString(&cfg.Tools.Enabled, "atproto_recall")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}
@@ -400,6 +447,12 @@ func Load(path string) (*Config, error) {
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
+	if cfg.Embedding.Provider == "" {
+		cfg.Embedding.Provider = DefaultConfig().Embedding.Provider
+	}
+	if cfg.Embedding.Model == "" {
+		cfg.Embedding.Model = DefaultConfig().Embedding.Model
+	}
 	return &cfg, nil
 }
 
@@ -455,6 +508,14 @@ func LoadDotEnv(path string) error {
 		}
 	}
 	return scanner.Err()
+}
+
+// UserDataDir returns the user-local data directory (~/.v100/).
+// Used for persistent data that should not live in any particular workspace,
+// such as vector indexes and local caches.
+func UserDataDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".v100")
 }
 
 // XDGConfigPath returns the default XDG config path for v100.

@@ -15,8 +15,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Defaults.CheapProvider != "glm" {
 		t.Errorf("expected default cheap provider glm, got %s", cfg.Defaults.CheapProvider)
 	}
-	if cfg.Defaults.CompressProvider != "glm" {
-		t.Errorf("expected default compress provider glm, got %s", cfg.Defaults.CompressProvider)
+	if cfg.Defaults.CompressProvider != "anthropic" {
+		t.Errorf("expected default compress provider anthropic, got %s", cfg.Defaults.CompressProvider)
 	}
 	if cfg.Defaults.BudgetSteps != 50 {
 		t.Errorf("expected 50 budget steps, got %d", cfg.Defaults.BudgetSteps)

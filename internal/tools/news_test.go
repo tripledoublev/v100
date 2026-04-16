@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"testing"
@@ -367,5 +368,115 @@ func TestResolveNewsSourceRequestsQuebecFrench(t *testing.T) {
 		if !containsString(names, want) {
 			t.Fatalf("expected source %q in %v", want, names)
 		}
+	}
+}
+
+func TestSanitizeXMLBodyFixesBareAmpersands(t *testing.T) {
+	// TVA Nouvelles RSS contains bare &x=0&y=178 in media:content URLs.
+	input := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="https://search.yahoo.com/mrss/">
+<channel><title>Test Feed</title>
+<item>
+  <title>Bernard Drainville se rallie à Fréchette</title>
+  <link>https://example.com/story</link>
+  <pubDate>Mon, 13 Apr 2026 07:58:55 EDT</pubDate>
+  <description>Description here</description>
+  <media:content url="https://img.example.com/photo.jpg?w=500&amp;x=0&amp;y=0" type="image/jpeg"/>
+</item>
+</channel></rss>`
+
+	// Already-valid XML should round-trip cleanly
+	clean := sanitizeXMLBody([]byte(input))
+	var rss rssDocument
+	if err := xml.Unmarshal(clean, &rss); err != nil {
+		t.Fatalf("valid XML should parse: %v", err)
+	}
+	if len(rss.Channel.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(rss.Channel.Items))
+	}
+
+	// Now test the actual broken XML with raw & in URLs
+	broken := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="https://search.yahoo.com/mrss/">
+<channel><title>Test Feed</title>
+<item>
+  <title>Bernard Drainville se rallie à Fréchette</title>
+  <link>https://example.com/story</link>
+  <pubDate>Mon, 13 Apr 2026 07:58:55 EDT</pubDate>
+  <description>Description here</description>
+  <media:content url="https://img.example.com/photo.jpg?w=500&x=0&y=0" type="image/jpeg"/>
+</item>
+</channel></rss>`
+
+	// Without sanitization this would fail
+	var rss2 rssDocument
+	if err := xml.Unmarshal([]byte(broken), &rss2); err == nil {
+		t.Log("note: raw XML parsed OK (unexpected but fine)")
+	} else {
+		t.Logf("raw broken XML correctly fails: %v", err)
+	}
+
+	// With sanitization it should parse
+	fixed := sanitizeXMLBody([]byte(broken))
+	var rss3 rssDocument
+	if err := xml.Unmarshal(fixed, &rss3); err != nil {
+		t.Fatalf("sanitized XML should parse: %v", err)
+	}
+	if len(rss3.Channel.Items) != 1 {
+		t.Fatalf("expected 1 item after sanitization, got %d", len(rss3.Channel.Items))
+	}
+	if rss3.Channel.Items[0].Title != "Bernard Drainville se rallie à Fréchette" {
+		t.Fatalf("unexpected title: %q", rss3.Channel.Items[0].Title)
+	}
+}
+
+func TestSanitizeXMLBodyPreservesValidEntities(t *testing.T) {
+	input := `<item><title>Tom &amp; Jerry &lt;b&gt;bold&lt;/b&gt; &#39;quoted&#39;</title></item>`
+	clean := sanitizeXMLBody([]byte(input))
+	var item struct {
+		Title string `xml:"title"`
+	}
+	if err := xml.Unmarshal(clean, &item); err != nil {
+		t.Fatalf("valid entities should be preserved: %v", err)
+	}
+	if item.Title != "Tom & Jerry <b>bold</b> 'quoted'" {
+		t.Fatalf("title = %q", item.Title)
+	}
+}
+
+func TestFilterFreshNewsItemsFallsBackWhenAllStale(t *testing.T) {
+	// Simulate a feed where all items are older than the freshness window
+	// but still have valid timestamps (like L'Actualité publishing 2-3x per week)
+	staleTime := time.Now().UTC().Add(-48 * time.Hour)
+
+	items := []newsItem{
+		{Headline: "Stale article 1", PublishedAt: staleTime.Format(time.RFC3339)},
+		{Headline: "Stale article 2", PublishedAt: staleTime.Add(-6 * time.Hour).Format(time.RFC3339)},
+	}
+
+	// With 24h freshness window, all items are stale
+	filtered := filterFreshNewsItems(items, 24)
+	if len(filtered) == 0 {
+		t.Fatal("expected fallback to return stale items, got 0")
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 stale items returned as fallback, got %d", len(filtered))
+	}
+}
+
+func TestFilterFreshNewsItemsPrefersFreshWhenAvailable(t *testing.T) {
+	now := time.Now().UTC()
+	items := []newsItem{
+		{Headline: "Fresh article", PublishedAt: now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{Headline: "Stale article", PublishedAt: now.Add(-72 * time.Hour).Format(time.RFC3339)},
+		{Headline: "Unknown time article"},
+	}
+
+	filtered := filterFreshNewsItems(items, 24)
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 fresh item, got %d", len(filtered))
+	}
+	if filtered[0].Headline != "Fresh article" {
+		t.Fatalf("expected fresh article, got %q", filtered[0].Headline)
 	}
 }

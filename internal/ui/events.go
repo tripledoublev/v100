@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -22,7 +24,6 @@ func compressEventLabel(trigger string) string {
 }
 
 func (m *TUIModel) appendEvent(ev core.Event) {
-	ts := styleMuted.Render(ev.TS.Local().Format(time.TimeOnly))
 	m.updateStatusFromEvent(ev)
 	m.lastEventAt = ev.TS
 	sub := len(m.activeAgents) > 0
@@ -31,18 +32,18 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		// Initialize metrics metadata
-		m.maxSteps = 50 // default fallback
+		m.maxSteps = 50
 		m.maxTokens = p.ModelMetadata.ContextSize
 		if m.maxTokens == 0 {
-			m.maxTokens = 100000 // fallback
+			m.maxTokens = 100000
 		}
 		if !sub {
-			m.transcriptBuf.WriteString(
-				stylePrimary.Render("v100") +
-					styleMuted.Render("  run "+ev.RunID[:8]+"  "+p.Provider+" · "+p.Model) +
-					"\n\n",
-			)
+			m.addItem(&TranscriptItem{
+				Type:      ItemMessage,
+				Role:      "system",
+				Text:      fmt.Sprintf("v100  run %s  %s · %s", ev.RunID[:8], p.Provider, p.Model),
+				Timestamp: ev.TS,
+			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "v100  run %s  %s · %s\n\n", ev.RunID[:8], p.Provider, p.Model)
 		}
 
@@ -50,21 +51,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
+			role := "user"
 			if p.Source == "system" {
-				content := p.Content
-				if p.ImageCount > 0 {
-					if content != "" {
-						content += " "
-					}
-					content += imageCount(p.ImageCount)
-				}
-				wrapped := m.wrapPlainForTranscript(content)
-				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleWarn.Render("v100"), wrapped)
-				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-				m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
-				_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", content)
-				break
+				role = "system"
 			}
 			content := p.Content
 			if p.ImageCount > 0 {
@@ -73,12 +62,18 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				}
 				content += imageCount(p.ImageCount)
 			}
-			wrapped := m.wrapPlainForTranscript(content)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
-			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-			m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: content})
-			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", userMessageLabel, content)
+			m.addItem(&TranscriptItem{
+				Type:      ItemMessage,
+				Role:      role,
+				Text:      content,
+				Timestamp: ev.TS,
+				Images:    nil, // Note: The TUI current event doesn't carry raw bytes for UserMsg attachments yet
+			})
+			label := userMessageLabel
+			if role == "system" {
+				label = "v100"
+			}
+			_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", label, content)
 		}
 
 	case core.EventModelResp:
@@ -86,49 +81,88 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		m.noteModelEvent(ev.TS)
 		if sub {
-			break // suppress sub-agent model responses from transcript
+			break
 		}
 		if p.Text != "" {
-			rendered := m.renderMarkdownForPane(p.Text)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
-			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-			m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-			m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: p.Text})
+			m.addItem(&TranscriptItem{
+				Type:      ItemMessage,
+				Role:      "v100",
+				Text:      p.Text,
+				Timestamp: ev.TS,
+			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", p.Text)
 		}
-		for _, tc := range p.ToolCalls {
-			args := TruncateOutput(tc.ArgsJSON, m.verbose)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(tc.Name), styleMuted.Render("("+args+")"))
+		if len(p.ToolCalls) > 0 {
+			group := m.getOrCreateToolGroup()
+			for _, tc := range p.ToolCalls {
+				group.ToolExecs = append(group.ToolExecs, &ToolExecution{
+					CallID:    tc.ID,
+					Name:      tc.Name,
+					Args:      tc.ArgsJSON,
+					Timestamp: ev.TS,
+				})
+			}
 		}
 
 	case core.EventToolCall:
+		var p core.ToolCallPayload
+		_ = json.Unmarshal(ev.Payload, &p)
 		m.noteToolEvent(ev.TS)
 		if sub {
-			break // suppress sub-agent tool calls from transcript
+			break
+		}
+		// If this call ID is already in the current group, skip (already added from ModelResp).
+		// Otherwise, add it.
+		group := m.getOrCreateToolGroup()
+		found := false
+		for _, ex := range group.ToolExecs {
+			if ex.CallID == p.CallID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			group.ToolExecs = append(group.ToolExecs, &ToolExecution{
+				CallID:    p.CallID,
+				Name:      p.Name,
+				Args:      p.Args,
+				Timestamp: ev.TS,
+			})
 		}
 
 	case core.EventToolResult:
 		var p core.ToolResultPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if sub {
-			break // suppress sub-agent tool results from transcript
+			break
 		}
-		icon, nameStr := styleOK.Render("✓"), styleOK.Render(p.Name)
-		if !p.OK {
-			icon, nameStr = styleFail.Render("✗"), styleFail.Render(p.Name)
+		// Find the tool execution in the current group and update it
+		group := m.getOrCreateToolGroup()
+		for i := len(group.ToolExecs) - 1; i >= 0; i-- {
+			if group.ToolExecs[i].CallID == p.CallID {
+				group.ToolExecs[i].Result = p.Output
+				group.ToolExecs[i].OK = p.OK
+				group.ToolExecs[i].Duration = p.DurationMS
+				break
+			}
 		}
-		out := SmartSummary(p.Name, p.Output, m.verbose)
-		head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)))
-		body := m.wrapTranscriptBlock(out, "             ")
-		_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n%s\n", head, body)
 
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleMuted.Render(fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d", p.Reason, p.UsedSteps, p.UsedTokens)))
+			m.addItem(&TranscriptItem{
+				Type:      ItemRunEnd,
+				Text:      fmt.Sprintf("■ run ended: %s  steps=%d  tokens=%d\n  run: %s", p.Reason, p.UsedSteps, p.UsedTokens, ev.RunID),
+				Timestamp: ev.TS,
+			})
 			if p.Summary != "" {
-				_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n", styleInfo.Render("Summary: "+p.Summary))
+				m.addItem(&TranscriptItem{
+					Type:      ItemMessage,
+					Role:      "system",
+					Text:      "Summary: " + p.Summary,
+					Timestamp: ev.TS,
+				})
 			}
 			_, _ = fmt.Fprintf(&m.plainBuf, "\n■ run ended: %s  steps=%d  tokens=%d\n", p.Reason, p.UsedSteps, p.UsedTokens)
 			if p.Summary != "" {
@@ -139,10 +173,12 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunError:
 		var p core.RunErrorPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		if sub {
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "       %s %s\n", styleMuted.Render("◆"), styleFail.Render("error: "+p.Error))
-		} else {
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n", styleFail.Render("✗ error"), styleFail.Render(p.Error))
+		if !sub {
+			m.addItem(&TranscriptItem{
+				Type:      ItemError,
+				Text:      p.Error,
+				Timestamp: ev.TS,
+			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "\nerror: %s\n", p.Error)
 		}
 
@@ -167,7 +203,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if strings.TrimSpace(p.Agent) != "" {
 			label = "Dispatch:" + p.Agent
 		}
-		_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleInfo.Render(fmt.Sprintf("● %s(%s)", label, task)))
+		m.addItem(&TranscriptItem{
+			Type:      ItemAgentStart,
+			Text:      fmt.Sprintf("● %s(%s)", label, task),
+			Timestamp: ev.TS,
+		})
 		_, _ = fmt.Fprintf(&m.plainBuf, "\n● %s(%s)\n", label, task)
 
 	case core.EventAgentEnd:
@@ -184,18 +224,23 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		m.inSubAgent = len(m.activeAgents)
 		summary := fmt.Sprintf("%d tool uses · %s · %s",
 			p.ToolUses, FormatTokens(p.UsedTokens), FormatDuration(dur.Milliseconds()))
-		if p.CostUSD > 0 {
-			summary += fmt.Sprintf(" · $%.4f", p.CostUSD)
-		}
 		if p.OK {
 			m.agentDoneCount++
-			m.lastAgentNote = fmt.Sprintf("done (%s)", summary)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleOK.Render("Done")+" "+styleMuted.Render("("+summary+")"))
+			m.addItem(&TranscriptItem{
+				Type:      ItemAgentEnd,
+				Text:      "Done (" + summary + ")",
+				Expanded:  true, // Always true for AgentEnd
+				Timestamp: ev.TS,
+			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "  ⎿  Done (%s)\n", summary)
 		} else {
 			m.agentFailCount++
-			m.lastAgentNote = fmt.Sprintf("failed (%s)", summary)
-			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleFail.Render("Failed")+" "+styleMuted.Render("("+summary+")"))
+			m.addItem(&TranscriptItem{
+				Type:      ItemAgentEnd,
+				Text:      "Failed (" + summary + ")",
+				Expanded:  false, // Collapsed by default for failure? Or maybe always true.
+				Timestamp: ev.TS,
+			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "  ⎿  Failed (%s)\n", summary)
 		}
 
@@ -209,15 +254,162 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		m.usedCost = p.CostUSD
 		m.lastStepMS = p.DurationMS
 		m.lastStepTools = p.ToolCalls
+
+	case core.EventImageInline:
+		var p core.ImageInlinePayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if !sub {
+			data, _ := base64.StdEncoding.DecodeString(p.Data)
+			m.addItem(&TranscriptItem{
+				Type:      ItemImage,
+				Images:    [][]byte{data},
+				Timestamp: ev.TS,
+			})
+			// Emit Kitty graphics protocol directly to terminal device, bypassing all buffering
+			if os.Getenv("KITTY_WINDOW_ID") != "" {
+				w, h := GetPNGDimensions(data)
+				if w > 0 && h > 0 {
+					meta := fmt.Sprintf("a=T,s=%d,v=%d,c=80", w, h)
+					kittySeq := fmt.Sprintf("\x1b_%s;%s\x1b\\\n", meta, p.Data)
+					// Write directly to /dev/tty to bypass all buffering
+					if f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+						_, _ = f.WriteString(kittySeq)
+						_ = f.Close()
+					}
+				}
+			}
+		}
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.
-	m.traceBuf.WriteString(m.renderTraceEvent(ev) + "\n")
+	m.appendTraceLine(m.renderTraceEvent(ev), ev.Type)
 
-	m.transcript.SetContent(m.transcriptBuf.String())
-	m.transcript.GotoBottom()
+	m.rebuildTranscript(true)
 	m.traceView.SetContent(m.traceBuf.String())
 	m.traceView.GotoBottom()
+}
+
+func (m *TUIModel) addItem(item *TranscriptItem) {
+	item.ID = m.nextItemID
+	m.nextItemID++
+	m.history = append(m.history, item)
+}
+
+func (m *TUIModel) getOrCreateToolGroup() *TranscriptItem {
+	if len(m.history) > 0 {
+		last := m.history[len(m.history)-1]
+		if last.Type == ItemToolGroup {
+			return last
+		}
+	}
+	item := &TranscriptItem{
+		Type:      ItemToolGroup,
+		Timestamp: time.Now(),
+		Expanded:  false, // Collapsed by default
+	}
+	m.addItem(item)
+	return item
+}
+
+func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
+	m.transcriptBuf.Reset()
+	m.copyTargets = nil
+	m.toggleTargets = nil
+
+	for _, item := range m.history {
+		ts := styleMuted.Render(item.Timestamp.Local().Format(time.TimeOnly))
+		switch item.Type {
+		case ItemWelcome:
+			m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+item.Text) + "\n\n")
+			m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
+			m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
+			m.transcriptBuf.WriteString(styleMuted.Render("Type a task below and press Enter."))
+
+		case ItemImage:
+			if len(item.Images) > 0 {
+				// Use a safe width, slightly less than panel width
+				maxWidth := m.width / 2
+				if maxWidth < 20 {
+					maxWidth = 20
+				}
+				img := RenderImageInlineAuto(item.Images[0], maxWidth)
+				if img != "" {
+					// Direct write to buffer without any lipgloss/wrap intervention
+					m.transcriptBuf.WriteString("\n\n" + img + "\n\n")
+				}
+			}
+
+		case ItemMessage:
+			switch item.Role {
+			case "system":
+				if strings.HasPrefix(item.Text, "v100  run") {
+					m.transcriptBuf.WriteString(
+						stylePrimary.Render("v100") +
+							styleMuted.Render("  "+item.Text[6:]) +
+							"\n\n",
+					)
+				} else {
+					wrapped := m.wrapPlainForTranscript(item.Text)
+					_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleWarn.Render("v100"), wrapped)
+					iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+					m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+					m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+				}
+			case "user":
+				wrapped := m.wrapPlainForTranscript(item.Text)
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
+				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+				m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+			case "v100":
+				rendered := m.renderMarkdownForPane(item.Text)
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
+				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+				m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
+				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+			}
+
+		case ItemToolGroup:
+			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
+			m.toggleTargets = append(m.toggleTargets, toggleTarget{lineNo: iconLine, itemID: item.ID})
+			if item.Expanded {
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s\n", styleTool.Render("[-]"), styleMuted.Render(fmt.Sprintf("%d tool calls", len(item.ToolExecs))))
+				for _, exec := range item.ToolExecs {
+					args := TruncateOutput(exec.Args, m.verbose)
+					_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(exec.Name), styleMuted.Render("("+args+")"))
+					if exec.Result != "" {
+						icon, nameStr := styleOK.Render("✓"), styleOK.Render(exec.Name)
+						if !exec.OK {
+							icon, nameStr = styleFail.Render("✗"), styleFail.Render(exec.Name)
+						}
+						out := SmartSummary(exec.Name, exec.Result, m.verbose)
+						head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", exec.Duration)))
+						body := m.wrapTranscriptBlock(out, "             ")
+						_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n%s\n", head, body)
+					}
+				}
+			} else {
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s\n", styleTool.Render("[+]"), styleMuted.Render(fmt.Sprintf("%d tool calls", len(item.ToolExecs))))
+			}
+
+		case ItemAgentStart:
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleInfo.Render(item.Text))
+
+		case ItemAgentEnd:
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "  %s  %s\n", styleMuted.Render("⎿"), styleInfo.Render(item.Text))
+
+		case ItemRunEnd:
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s\n", styleMuted.Render(item.Text))
+
+		case ItemError:
+			_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n", styleFail.Render("✗ error"), styleFail.Render(item.Text))
+		}
+	}
+
+	m.transcript.SetContent(m.transcriptBuf.String())
+	if gotoBottom {
+		m.transcript.GotoBottom()
+	}
 }
 
 func (m *TUIModel) renderTraceEvent(ev core.Event) string {
@@ -315,6 +507,8 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 				compressEventLabel(p.Trigger),
 				p.MessagesBefore, p.MessagesAfter,
 				p.TokensBefore/1000, p.TokensAfter/1000))
+	case core.EventImageInline:
+		return sep + "  " + styleInfo.Render("🖼🖼") + "  " + styleInfo.Render("image inline")
 	default:
 		return sep + "  " + indent + styleMuted.Render("::") + "  " + styleMuted.Render(string(ev.Type))
 	}
@@ -483,6 +677,8 @@ func toolGlyph(name string) string {
 		return " n"
 	case "sh":
 		return " $"
+	case "wiki":
+		return " W"
 	case "agent":
 		return " ◆"
 	case "dispatch":

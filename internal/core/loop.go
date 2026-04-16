@@ -33,6 +33,7 @@ type Loop struct {
 	Run              *Run
 	Provider         providers.Provider
 	CompressProvider providers.Provider // cheap model for summarization; nil = use l.Provider
+	EmbedProvider    providers.Provider // dedicated embedding provider; nil = use l.Provider
 	Tools            *tools.Registry
 	Policy           *policy.Policy
 	Trace            *TraceWriter
@@ -398,6 +399,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		HostWorkspaceDir: hostWorkspaceDir,
 		TimeoutMS:        timeout,
 		Provider:         l.Provider,
+		EmbedProvider:    l.EmbedProvider,
 		Registry:         l.Tools,
 		Session:          l.Session,
 		Mapper:           l.Mapper,
@@ -539,12 +541,17 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 		Name:       tc.Name,
 		OK:         result.OK,
 		Output:     result.Output,
+		Stdout:     result.Stdout,
 		DurationMS: result.DurationMS,
 	})
 
 	// Detect if the output contains a raw PNG image and emit it for inline terminal rendering.
-	if result.OK && strings.HasPrefix(result.Output, "\x89PNG\r\n\x1a\n") {
-		b64 := base64.StdEncoding.EncodeToString([]byte(result.Output))
+	rawOut := result.Stdout
+	if rawOut == "" {
+		rawOut = result.Output
+	}
+	if result.OK && (strings.HasPrefix(rawOut, "\x89PNG\r\n\x1a\n") || strings.HasPrefix(rawOut, "\x89PNG")) {
+		b64 := base64.StdEncoding.EncodeToString([]byte(rawOut))
 		_, _ = l.emit(EventImageInline, stepID, ImageInlinePayload{
 			Data:  b64,
 			Index: 0,
@@ -903,14 +910,27 @@ func sanitizeCompressionMessages(msgs []providers.Message) []providers.Message {
 	return out
 }
 
+// ForceCompress runs compression unconditionally, bypassing threshold checks.
+// The trigger is recorded as "manual" in the emitted CompressPayload.
+func (l *Loop) ForceCompress(ctx context.Context, stepID string) error {
+	return l.compress(ctx, stepID, true)
+}
+
 // maybeCompress implements a two-pass compression strategy:
 //   - Pass 1 (targeted): compress the N largest non-recent messages individually
 //   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
 func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
+	return l.compress(ctx, stepID, false)
+}
+
+func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	tokensBefore := estimateTokens(l.previewMessagesForStep(stepID))
 	trigger := l.compressionTrigger(tokensBefore)
-	if trigger == "" {
+	if !force && trigger == "" {
 		return nil
+	}
+	if trigger == "" {
+		trigger = "manual"
 	}
 
 	msgsBefore := len(l.Messages)
@@ -1113,8 +1133,10 @@ func (l *Loop) emit(t EventType, stepID string, payload any) (Event, error) {
 		Type:    t,
 		Payload: b,
 	}
-	if err := l.Trace.Write(ev); err != nil {
-		return ev, fmt.Errorf("trace write: %w", err)
+	if l.Trace != nil {
+		if err := l.Trace.Write(ev); err != nil {
+			return ev, fmt.Errorf("trace write: %w", err)
+		}
 	}
 	if l.OutputFn != nil {
 		l.OutputFn(ev)

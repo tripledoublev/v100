@@ -89,6 +89,11 @@
       "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "max_bytes": { "type": "integer" } } },
       "output": { "properties": { "status": { "type": "integer" }, "extract": { "type": "string" } } }
     },
+    "wiki": {
+      "dangerous": false,
+      "input":  { "required": ["action"], "properties": { "action": { "type": "string", "enum": ["read", "search", "update"] }, "title": { "type": "string" }, "query": { "type": "string" }, "lang": { "type": "string" }, "sentences": { "type": "integer" }, "max_results": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" }, "duration_ms": { "type": "integer" } } }
+    },
     "agent": {
       "dangerous": true,
       "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "budget_steps": { "type": "integer" }, "budget_tokens": { "type": "integer" } } },
@@ -123,6 +128,36 @@
       "dangerous": true,
       "input":  { "required": ["key","value"], "properties": { "key": { "type": "string" }, "value": { "type": "string" } } },
       "output": { "properties": { "stored": { "type": "boolean" } } }
+    },
+    "atproto_feed": {
+      "dangerous": false,
+      "input":  { "properties": { "limit": { "type": "integer" }, "cursor": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" }, "cursor": { "type": "string" } } }
+    },
+    "atproto_notifications": {
+      "dangerous": false,
+      "input":  { "properties": { "limit": { "type": "integer" }, "unread_only": { "type": "boolean" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
+    },
+    "atproto_post": {
+      "dangerous": true,
+      "input":  { "properties": { "text": { "type": "string" }, "reply_to_uri": { "type": "string" }, "reply_to_cid": { "type": "string" }, "root_uri": { "type": "string" }, "root_cid": { "type": "string" }, "quote_uri": { "type": "string" }, "quote_cid": { "type": "string" }, "repost_uri": { "type": "string" }, "repost_cid": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "uri": { "type": "string" }, "cid": { "type": "string" } } }
+    },
+    "atproto_resolve": {
+      "dangerous": false,
+      "input":  { "required": ["handle"], "properties": { "handle": { "type": "string" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "did": { "type": "string" }, "handle": { "type": "string" } } }
+    },
+    "atproto_vibe_check": {
+      "dangerous": false,
+      "input":  { "properties": { "hours": { "type": "integer" }, "limit": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
+    },
+    "atproto_daily_digest": {
+      "dangerous": false,
+      "input":  { "properties": { "hours": { "type": "integer" }, "limit": { "type": "integer" }, "top_n": { "type": "integer" } } },
+      "output": { "properties": { "ok": { "type": "boolean" }, "output": { "type": "string" } } }
     }
   }
 }

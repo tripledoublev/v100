@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
 	"runtime"
 )
 
@@ -17,7 +18,34 @@ func RenderImageInline(data []byte, width, height int) string {
 	if runtime.GOOS == "windows" {
 		return ""
 	}
+
+	// Check if terminal supports inline images
+	if !supportsInlineImages() {
+		// Fallback: show a visual placeholder with image info
+		w, h := GetPNGDimensions(data)
+		if w > 0 && h > 0 {
+			return fmt.Sprintf("[📷 PNG Image: %dx%d pixels, %d bytes]", w, h, len(data))
+		}
+		return "[📷 PNG Image]"
+	}
+
 	b64 := base64.StdEncoding.EncodeToString(data)
+
+	// Use Kitty graphics protocol if in Kitty
+	if os.Getenv("KITTY_WINDOW_ID") != "" || os.Getenv("TERM") == "xterm-kitty" {
+		imgWidth, imgHeight := GetPNGDimensions(data)
+		// Kitty protocol: ESC _Ga=T,s=WIDTH,v=HEIGHT[,c=COLS,r=ROWS];BASE64 ESC \
+		meta := fmt.Sprintf("a=T,s=%d,v=%d", imgWidth, imgHeight)
+		if width > 0 {
+			meta += fmt.Sprintf(",c=%d", width)
+		}
+		if height > 0 {
+			meta += fmt.Sprintf(",r=%d", height)
+		}
+		return fmt.Sprintf("\x1b_%s;%s\x1b\\", meta, b64)
+	}
+
+	// iTerm2 inline image fallback (supported by iTerm2, WezTerm, Konsole, Ghostty, VSCode)
 	widthStr := ""
 	heightStr := ""
 	if width > 0 {
@@ -26,8 +54,37 @@ func RenderImageInline(data []byte, width, height int) string {
 	if height > 0 {
 		heightStr = fmt.Sprintf("height=%d;", height)
 	}
-	// iTerm2 inline image: ESC ]1337;File=...[metadata];inline=1:BASE64... BEL
-	return fmt.Sprintf("\x1b]1337;File=%s%sinline=1:%s\x07", widthStr, heightStr, b64)
+	// iTerm2 inline image: ESC ]1337;File=[metadata];inline=1:BASE64... BEL
+	return fmt.Sprintf("\x1b]1337;File=%s%spreserveAspectRatio=1;inline=1:%s\x07", widthStr, heightStr, b64)
+}
+
+// supportsInlineImages checks if the terminal environment supports inline images.
+func supportsInlineImages() bool {
+	// Check for Kitty
+	if os.Getenv("KITTY_WINDOW_ID") != "" || os.Getenv("TERM") == "xterm-kitty" {
+		return true
+	}
+	// Check for iTerm2
+	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
+		return true
+	}
+	// Check for WezTerm
+	if os.Getenv("TERM_PROGRAM") == "WezTerm" {
+		return true
+	}
+	// Check for Ghostty
+	if os.Getenv("TERM_PROGRAM") == "ghostty" {
+		return true
+	}
+	// Check for VSCode terminal (modern versions support iTerm2 protocol)
+	if os.Getenv("TERM_PROGRAM") == "vscode" {
+		return true
+	}
+	// Check for Konsole
+	if os.Getenv("KONSOLE_VERSION") != "" {
+		return true
+	}
+	return false
 }
 
 // RenderImageInlineAuto renders an image with automatic sizing based on
