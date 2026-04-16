@@ -66,8 +66,14 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			// Reconstruct message history from trace
+			// Reconstruct message history from trace (or compressed checkpoint if present)
 			msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
+			if ckMsgs, err := loadCheckpoint(runDir); err != nil {
+				fmt.Println(ui.Warn("compress checkpoint unreadable: " + err.Error()))
+			} else if len(ckMsgs) > 0 {
+				fmt.Println(ui.Info("using compressed checkpoint (compress.checkpoint.json)"))
+				msgs = ckMsgs
+			}
 			resumeSummary := buildResumeSummary(runID, events, msgs)
 			if strings.TrimSpace(resumeSummary) != "" {
 				msgs = append([]providers.Message{{Role: "system", Content: resumeSummary}}, msgs...)

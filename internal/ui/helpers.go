@@ -76,6 +76,22 @@ func pickStatusLine(n int, lines []string) string {
 	return lines[n%len(lines)]
 }
 
+// downloadFrames holds classic braille-dot spinner frames.
+var downloadFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinFrames holds simple slash rotation: / - \ |
+var spinFrames = []string{"/", "─", "\\", "|"}
+
+// DownloadSpinner returns a spinning indicator using braille-dot chars.
+func DownloadSpinner(tick int) string {
+	return downloadFrames[tick%len(downloadFrames)]
+}
+
+// SpinSlash returns a spinning slash indicator: / - \ |
+func SpinSlash(tick int) string {
+	return spinFrames[tick%len(spinFrames)]
+}
+
 // FormatTokens formats a token count for display: 0→"0", 500→"500", 1500→"1.5k", 24000→"24k".
 func FormatTokens(n int) string {
 	if n < 1000 {
