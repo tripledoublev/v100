@@ -139,7 +139,7 @@ func (m *TUIModel) statusView(width, contentHeight int) string {
 	lines := []string{
 		tuiStatusLabelStyle.Render("status"),
 		stylePrimary.Render(wrap.String(m.runSummary, w)),
-		styleBold.Render(strings.ToUpper(m.statusMode)),
+		m.statusModeDisplay(),
 		styleMuted.Render(wrap.String(m.statusLine, w)),
 		styleMuted.Render(m.deviceStatusLine()),
 		"",
@@ -177,6 +177,25 @@ func (m *TUIModel) statusView(width, contentHeight int) string {
 		flattened = flattened[:contentHeight]
 	}
 	return strings.Join(flattened, "\n")
+}
+
+// statusModeDisplay renders the status mode line with animated effects.
+func (m *TUIModel) statusModeDisplay() string {
+	idleFor := time.Since(m.lastEventAt)
+	mode := strings.ToUpper(m.statusMode)
+
+	// Consistency with visual inspector (dashboard.go:inspectorState)
+	if m.statusMode == "thinking" && idleFor > 10*time.Second {
+		return styleFail.Render("⚠ STALLED")
+	}
+
+	switch m.statusMode {
+	case "error":
+		return styleFail.Render("✗ " + mode)
+	case "tooling":
+		return styleTool.Render(mode)
+	}
+	return styleBold.Render(mode)
 }
 
 func (m TUIModel) confirmView() string {

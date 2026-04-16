@@ -121,7 +121,6 @@ type TUIModel struct {
 	traceStepCount int             // running step count for trace pane
 	activeAgents   []agentFrame
 	agentDoneCount int
-	currentTokenGroup *TranscriptItem // active token streaming group
 	agentFailCount int
 	lastAgentNote  string
 	device         deviceStatus
@@ -137,6 +136,7 @@ type TUIModel struct {
 	statusMode   string
 	statusLine   string
 	statusTick   int
+	downloadAnimTick int
 	runSummary   string
 	leftPanePct  int
 	tracePanePct int

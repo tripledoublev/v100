@@ -76,7 +76,20 @@ func TestToolResultRendersAsIndentedBlock(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
+	callID := "test-call-id"
+	callPayload, _ := json.Marshal(core.ToolCallPayload{
+		CallID: callID,
+		Name:   "sh",
+		Args:   "ls -la",
+	})
+	m.appendEvent(core.Event{
+		TS:      time.Now(),
+		Type:    core.EventToolCall,
+		Payload: callPayload,
+	})
+
 	payload, err := json.Marshal(core.ToolResultPayload{
+		CallID:     callID,
 		Name:       "sh",
 		OK:         true,
 		DurationMS: 123,
@@ -91,6 +104,14 @@ func TestToolResultRendersAsIndentedBlock(t *testing.T) {
 		Type:    core.EventToolResult,
 		Payload: payload,
 	})
+
+	// Expand the tool group so details are rendered
+	for _, item := range m.history {
+		if item.Type == ItemToolGroup {
+			item.Expanded = true
+		}
+	}
+	m.rebuildTranscript(true)
 
 	out := stripANSI(m.transcriptBuf.String())
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -364,5 +385,25 @@ func TestCtrlVPastesClipboardImage(t *testing.T) {
 	}
 	if !strings.Contains(m.statusLine, "Image #1") {
 		t.Fatalf("expected attachment status, got %q", m.statusLine)
+	}
+}
+
+func TestStatusModeDisplay_Stalled(t *testing.T) {
+	m := NewTUIModel()
+	m.statusMode = "thinking"
+	
+	// Set lastEventAt to 11 seconds ago
+	m.lastEventAt = time.Now().Add(-11 * time.Second)
+	
+	out := m.statusModeDisplay()
+	if !strings.Contains(out, "STALLED") {
+		t.Errorf("expected STALLED in status display, got %q", out)
+	}
+	
+	// Reset lastEventAt to now
+	m.lastEventAt = time.Now()
+	out = m.statusModeDisplay()
+	if !strings.Contains(out, "THINKING") {
+		t.Errorf("expected THINKING in status display, got %q", out)
 	}
 }
