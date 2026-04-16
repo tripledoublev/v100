@@ -1,0 +1,80 @@
+name: Nightly Dogfood
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 3 AM UTC daily
+  workflow_dispatch:        # allow manual trigger for testing
+
+env:
+  GOWORK: off
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build -o ./v100 ./cmd/v100
+
+      - name: Write config
+        run: |
+          mkdir -p ~/.config/v100
+          cat > ~/.config/v100/config.toml <<'EOF'
+          [defaults]
+          provider = "codex"
+          model = "gpt-5.4"
+          confirm_tools = "never"
+
+          [providers.codex]
+          [providers.codex.auth]
+          env = "OPENAI_API_KEY"
+
+          [providers.gemini]
+          [providers.gemini.auth]
+          env = "GEMINI_API_KEY"
+          EOF
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Run dogfood bench
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: ./v100 bench dogfood/reliable.bench.toml --yolo
+
+      - name: Check results
+        run: |
+          pass=0; fail=0
+          for meta in runs/*/meta.json; do
+            [ -f "$meta" ] || continue
+            score=$(python3 -c "import json,sys; print(json.load(open('$meta')).get('score',''))" 2>/dev/null || true)
+            case "$score" in
+              pass)           ((pass++)) ;;
+              fail|partial)   ((fail++)) ;;
+            esac
+          done
+          echo "Results: PASS=$pass FAIL=$fail"
+          if [ "$fail" -gt 0 ]; then
+            echo "::error::$fail run(s) failed the dogfood smoke pack — check uploaded artifacts"
+            exit 1
+          fi
+          if [ "$pass" -eq 0 ]; then
+            echo "::warning::No scored runs found — bench may not have executed correctly"
+          fi
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-runs-${{ github.run_id }}
+          path: runs/
+          retention-days: 7
