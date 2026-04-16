@@ -259,6 +259,12 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 			authEnv = "ZHIPU_API_KEY"
 		}
 		raw, err = providers.NewGLMProvider(authEnv, pc.BaseURL, pc.DefaultModel)
+	case "mistral":
+		authEnv := pc.Auth.Env
+		if authEnv == "" {
+			authEnv = "MISTRAL_API_KEY"
+		}
+		raw, err = providers.NewMistralProvider(authEnv, pc.DefaultModel)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", pc.Type)
 	}
@@ -426,6 +432,9 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
+	reg.Register(tools.ATProtoGetFollows(cfg))
+	reg.Register(tools.ATProtoGetFollowers(cfg))
+	reg.Register(tools.ATProtoGetProfile(cfg))
 	reg.Register(tools.ATProtoVibeCheck(cfg))
 	reg.Register(tools.ATProtoDailyDigest(cfg))
 	return reg
