@@ -10,3 +10,9 @@
 - Still need to find tool registration wiring (where RegisterAndEnable is called)
 - ATProto tools already exist: feed, notifications, post, resolve, vibe_check, daily_digest
 - User is member-worker @hypha.coop, runs spores.garden and couleurs.bsky.social
+
+## 2026-04-16
+- BUG FIX: CLI mode ConfirmTool freezes — `bufio.NewScanner(os.Stdin)` blocks in raw/cooked mode conflicts
+- Fix: rewrite ConfirmTool to use `term.MakeRaw` + direct byte reads (same as promptTerminal)
+- Key file: `internal/ui/cli.go` lines 407-436
+- ConfirmTool is called via `buildConfirmFn()` in `cmd/v100/helpers.go` and `cmd/v100/cmd_resume.go`

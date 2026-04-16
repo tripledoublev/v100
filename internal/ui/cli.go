@@ -425,14 +425,42 @@ func ConfirmTool(toolName, args string) bool {
 				styleFail.Render("[N]") + " no",
 		)
 	fmt.Printf("\n%s\n\n", box)
-	fmt.Print(styleWarn.Render("▸ "))
 
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
+	// Use raw-mode reads (same as promptTerminal) instead of bufio.Scanner.
+	// bufio.Scanner expects cooked/line-buffered input, which deadlocks when
+	// the terminal is in raw mode — keyboard input appears frozen and Ctrl+C
+	// doesn't work because raw mode maps it to byte 0x03, not SIGINT.
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠  Could not set terminal to raw mode: %v\n", err)
 		return false
 	}
-	ans := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	return ans == "y" || ans == "yes"
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+
+	fmt.Print(styleWarn.Render("▸ "))
+
+	var buf [1]byte
+	for {
+		if _, err := os.Stdin.Read(buf[:]); err != nil {
+			return false
+		}
+		switch b := buf[0]; b {
+		case 'y', 'Y':
+			fmt.Fprintf(os.Stdout, "\r\n")
+			return true
+		case 'n', 'N', '\r', '\n':
+			fmt.Fprintf(os.Stdout, "\r\n")
+			return false
+		case 0x03: // Ctrl+C in raw mode
+			fmt.Fprintf(os.Stdout, "^C\r\n")
+			return false
+		case 0x1b: // escape sequence (arrow keys etc.) — drain and ignore
+			var seq [2]byte
+			_, _ = os.Stdin.Read(seq[:])
+		default:
+			// ignore other keypresses
+		}
+	}
 }
 
 // Prompt prints a styled prompt and reads a line from stdin.
