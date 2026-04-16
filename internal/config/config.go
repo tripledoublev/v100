@@ -182,7 +182,6 @@ func DefaultConfig() *Config {
 				Auth:         AuthConfig{Env: "MISTRAL_API_KEY"},
 			},
 		},
-		},
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",

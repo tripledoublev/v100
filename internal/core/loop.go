@@ -822,8 +822,7 @@ func (l *Loop) providerAwareEvidenceThreshold() int {
 	if l.ModelMetadata.ContextSize > 0 {
 		return l.ModelMetadata.ContextSize * 3 / 4
 	}
-	// GLM: allow 1 targeted call for better compression
-		return 1
+	return 0
 }
 
 // estimateTokensSingle returns the estimated token count for a single message.
@@ -850,16 +849,14 @@ func estimateTokens(msgs []providers.Message) int {
 
 func targetedCompressionLimit(p providers.Provider) int {
 	if p == nil {
-		// GLM: allow 1 targeted call for better compression
-		return 1
+		return 0
 	}
 	switch p.Name() {
 	case "glm":
 		// GLM is more likely to reject compression inputs and can hit request
 		// limits quickly when targeted compression fans out into many calls.
 		// Prefer a single bulk summary call instead.
-		// GLM: allow 1 targeted call for better compression
-		return 1
+		return 0
 	default:
 		// Keep targeted compression bounded so one overloaded step cannot
 		// explode into a long burst of extra provider requests.
@@ -911,14 +908,27 @@ func sanitizeCompressionMessages(msgs []providers.Message) []providers.Message {
 	return out
 }
 
+// ForceCompress runs compression unconditionally, bypassing threshold checks.
+// The trigger is recorded as "manual" in the emitted CompressPayload.
+func (l *Loop) ForceCompress(ctx context.Context, stepID string) error {
+	return l.compress(ctx, stepID, true)
+}
+
 // maybeCompress implements a two-pass compression strategy:
 //   - Pass 1 (targeted): compress the N largest non-recent messages individually
 //   - Pass 2 (bulk): fall back to oldest-half summarization if still over threshold
 func (l *Loop) maybeCompress(ctx context.Context, stepID string) error {
+	return l.compress(ctx, stepID, false)
+}
+
+func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	tokensBefore := estimateTokens(l.previewMessagesForStep(stepID))
 	trigger := l.compressionTrigger(tokensBefore)
-	if trigger == "" {
+	if !force && trigger == "" {
 		return nil
+	}
+	if trigger == "" {
+		trigger = "manual"
 	}
 
 	msgsBefore := len(l.Messages)
