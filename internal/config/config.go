@@ -187,7 +187,7 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_vibe_check", "atproto_daily_digest",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "atproto_post"},
 		},
@@ -315,8 +315,8 @@ base_url = "https://api.z.ai/api/coding/paas/v4"
 env = "ZHIPU_API_KEY"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -412,6 +412,10 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "wiki")
 	ensureString(&cfg.Tools.Enabled, "git_commit")
 	ensureString(&cfg.Tools.Dangerous, "git_commit")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_follows")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_followers")
+	ensureString(&cfg.Tools.Enabled, "atproto_get_profile")
+	ensureString(&cfg.Tools.Enabled, "atproto_graph_explorer")
 	ensureString(&cfg.Tools.Enabled, "atproto_vibe_check")
 	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	if len(cfg.Agents) == 0 {
