@@ -83,7 +83,7 @@ func buildProvider(cfg *config.Config, providerName string) (providers.Provider,
 	if pc.Type == "smartrouter" {
 		return buildSmartRouterProvider(cfg, "")
 	}
-	return buildProviderFromConfig(pc)
+	return buildProviderFromConfig(cfg, pc)
 }
 
 func ensureProviderConfig(cfg *config.Config, providerName string) {
@@ -115,7 +115,7 @@ func buildProviderWithModel(cfg *config.Config, providerName, model string) (pro
 	if pc.Type == "smartrouter" {
 		return buildSmartRouterProvider(cfg, strings.TrimSpace(model))
 	}
-	return buildProviderFromConfig(pc)
+	return buildProviderFromConfig(cfg, pc)
 }
 
 func providerConfigType(cfg *config.Config, providerName string) string {
@@ -224,7 +224,7 @@ func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
 	return pc
 }
 
-func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, error) {
+func buildProviderFromConfig(cfg *config.Config, pc config.ProviderConfig) (providers.Provider, error) {
 	pc = normalizedProviderConfig(pc)
 	var raw providers.Provider
 	var err error
@@ -270,6 +270,17 @@ func buildProviderFromConfig(pc config.ProviderConfig) (providers.Provider, erro
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// Wrap with ResilientProvider if fallbacks are configured.
+	if len(pc.Fallbacks) > 0 {
+		fbs := make([]providers.Provider, 0, len(pc.Fallbacks))
+		for _, fbName := range pc.Fallbacks {
+			if fb, err := buildProvider(cfg, fbName); err == nil {
+				fbs = append(fbs, fb)
+			}
+		}
+		raw = providers.NewResilientProvider(raw, fbs)
 	}
 	return providers.WithRetry(raw, providers.DefaultRetryConfig()), nil
 }
@@ -616,7 +627,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 				pc.DefaultModel = model
 			}
 		}
-		prov, err := buildProviderFromConfig(pc)
+		prov, err := buildProviderFromConfig(cfg, pc)
 		return prov, pc.DefaultModel, err
 	}
 

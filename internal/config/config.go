@@ -33,9 +33,9 @@ type EmbeddingConfig struct {
 // ATProtoConfig holds Bluesky/ATProto credentials and connection settings.
 type ATProtoConfig struct {
 	Handle         string `toml:"handle"`           // e.g. "alice.bsky.social"
-	AppPassword    string `toml:"app_password"`      // direct value (fallback)
-	AppPasswordEnv string `toml:"app_password_env"`  // env var name (preferred)
-	PDSURL         string `toml:"pds_url"`           // default "https://bsky.social"
+	AppPassword    string `toml:"app_password"`     // direct value (fallback)
+	AppPasswordEnv string `toml:"app_password_env"` // env var name (preferred)
+	PDSURL         string `toml:"pds_url"`          // default "https://bsky.social"
 }
 
 // UpdateConfig defines auto-update behavior.
@@ -74,6 +74,7 @@ type ProviderConfig struct {
 	Type         string     `toml:"type"`
 	DefaultModel string     `toml:"default_model"`
 	BaseURL      string     `toml:"base_url"`
+	Fallbacks    []string   `toml:"fallbacks"`    // ordered list of provider names to try on failure
 	Auth         AuthConfig `toml:"auth"`
 }
 
@@ -166,8 +167,14 @@ func DefaultConfig() *Config {
 				DefaultModel: "gemini-2.5-flash",
 			},
 			"anthropic": {
+				Fallbacks:    []string{"gemini", "openai"},
 				Type:         "anthropic",
 				DefaultModel: "claude-sonnet-4-20250514",
+				Auth:         AuthConfig{Env: "ANTHROPIC_API_KEY"},
+			},
+			"claude": {
+				Type:         "anthropic",
+				DefaultModel: "claude-opus-4-7",
 				Auth:         AuthConfig{Env: "ANTHROPIC_API_KEY"},
 			},
 			"minimax": {
@@ -248,7 +255,7 @@ func DefaultConfig() *Config {
 		Sandbox: SandboxConfig{
 			Enabled:     false,
 			Backend:     "host",
-			Image:       "google/gemini-v100-research:latest",
+			Image:       "google/v100-agent-runtime:latest",
 			NetworkTier: "off",
 			MemoryMB:    512,
 			CPUs:        1.0,
@@ -275,7 +282,7 @@ func DefaultConfig() *Config {
 
 // DefaultTOML returns the default config as a TOML string.
 func DefaultTOML() string {
-	return `# v100 agent harness configuration
+	return `# v100 configuration
 
 [providers.smartrouter]
 type = "smartrouter"
@@ -308,7 +315,14 @@ default_model = "gemini-2.5-flash"
 [providers.anthropic]
 type = "anthropic"
 default_model = "claude-sonnet-4-20250514"
+fallbacks = ["gemini", "openai"]  # automatic failover on errors/429s
 [providers.anthropic.auth]
+env = "ANTHROPIC_API_KEY"
+
+[providers.claude]
+type = "anthropic"
+default_model = "claude-opus-4-7"
+[providers.claude.auth]
 env = "ANTHROPIC_API_KEY"
 
 [providers.minimax]
@@ -357,7 +371,7 @@ compress_provider = "glm"     # provider for compression calls (empty = main pro
 [sandbox]
 enabled = false
 backend = "host"            # host | docker
-image = "google/gemini-v100-research:latest"
+image = "google/v100-agent-runtime:latest"
 network_tier = "off"        # off | research | open
 memory_mb = 512
 cpus = 1.0

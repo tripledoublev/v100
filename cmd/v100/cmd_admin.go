@@ -20,6 +20,7 @@ import (
 	"github.com/tripledoublev/v100/internal/auth"
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/policy"
+	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
 	"github.com/tripledoublev/v100/internal/ui"
 )
@@ -52,7 +53,7 @@ func toolsCmd(cfgPath *string) *cobra.Command {
 }
 
 func providersCmd(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "providers",
 		Short: "List configured providers",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,8 +69,49 @@ func providersCmd(cfgPath *string) *cobra.Command {
 			for _, name := range names {
 				pc := cfg.Providers[name]
 				pc = normalizedProviderConfig(pc)
-				fmt.Printf("%-15s type=%-10s model=%s\n", name, pc.Type, pc.DefaultModel)
+				fbs := ""
+				if len(pc.Fallbacks) > 0 {
+					fbs = "  fallbacks=[" + strings.Join(pc.Fallbacks, ", ") + "]"
+				}
+				fmt.Printf("%-15s type=%-10s model=%s%s\n", name, pc.Type, pc.DefaultModel, fbs)
 			}
+			return nil
+		},
+	}
+	cmd.AddCommand(providersHealthCmd(cfgPath))
+	return cmd
+}
+
+func providersHealthCmd(cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "health",
+		Short: "Show health status of all configured providers (requires running a provider to populate health data)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			var allStatuses []providers.HealthStatus
+			names := make([]string, 0, len(cfg.Providers))
+			for name := range cfg.Providers {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				prov, err := buildProvider(cfg, name)
+				if err != nil {
+					continue
+				}
+				if rp, ok := prov.(*providers.ResilientProvider); ok {
+					statuses := rp.HealthStatus()
+					allStatuses = append(allStatuses, statuses...)
+				}
+			}
+			if len(allStatuses) == 0 {
+				fmt.Println("No health data yet. Health tracking populates as providers are used.")
+				return nil
+			}
+			fmt.Print(providers.FormatHealthStatus(allStatuses))
 			return nil
 		},
 	}
@@ -207,7 +249,7 @@ func loginCmd() *cobra.Command {
 				fmt.Println(ui.OK("Logged in to Gemini successfully"))
 				fmt.Println(ui.Dim("Token saved to: ") + path)
 
-			case "anthropic":
+			case "anthropic", "claude":
 				fmt.Println(ui.Info("Anthropic uses API keys (no OAuth flow available)."))
 				fmt.Println(ui.Info("Get your key from: https://console.anthropic.com/settings/keys"))
 				fmt.Print("Paste your API key: ")
@@ -244,12 +286,12 @@ func loginCmd() *cobra.Command {
 				fmt.Println(ui.Dim("Token saved to: ") + path)
 
 			default:
-				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini, anthropic, minimax)", provider)
+				return fmt.Errorf("login: unknown provider %q (supported: codex, gemini, anthropic, claude, minimax)", provider)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini, anthropic, minimax)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "OAuth provider (codex, gemini, anthropic, claude, minimax)")
 	return cmd
 }
 
@@ -265,12 +307,12 @@ func logoutCmd() *cobra.Command {
 				path = auth.DefaultTokenPath()
 			case "gemini":
 				path = auth.DefaultGeminiTokenPath()
-			case "anthropic":
+			case "anthropic", "claude":
 				path = auth.DefaultClaudeTokenPath()
 			case "minimax":
 				path = auth.DefaultMiniMaxTokenPath()
 			default:
-				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini, anthropic, minimax)", provider)
+				return fmt.Errorf("logout: unknown provider %q (supported: codex, gemini, anthropic, claude, minimax)", provider)
 			}
 			if err := os.Remove(path); err != nil {
 				if os.IsNotExist(err) {
@@ -283,7 +325,7 @@ func logoutCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "provider (codex, gemini, anthropic, minimax)")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "provider (codex, gemini, anthropic, claude, minimax)")
 	return cmd
 }
 

@@ -1,23 +1,27 @@
 # v100 Memory
 
-## 2026-04-15
-- User handle: charlebois.info (DID: did:plc:y3lae7hmqiwyq7w2v3bcb2c2)
-- Building 3 new ATProto graph tools: `atproto_get_follows`, `atproto_get_followers`, `atproto_get_profile`
-- File: `internal/tools/atproto_graph.go` (new) + `atproto_graph_test.go` (new)
-- Pattern: same as existing tools in atproto.go — struct with ATProtoConfig, Safe, NeedsNetwork
-- Public API endpoint: `public.api.bsky.app` works for unauthenticated graph queries
-- Bluesky PDS endpoint: `bsky.social` requires auth
-- ATProto tools already exist: feed, notifications, post, resolve, vibe_check, daily_digest
-- User is member-worker @hypha.coop, runs spores.garden and couleurs.bsky.social
-
 ## 2026-04-16
-- BUG FIX: CLI mode ConfirmTool freezes — `bufio.NewScanner(os.Stdin)` blocks in raw/cooked mode conflicts
-- Fix: rewrite ConfirmTool to use `term.MakeRaw` + direct byte reads (same as promptTerminal)
-- Key file: `internal/ui/cli.go` lines 407-436
-- ConfirmTool is called via `buildConfirmFn()` in `cmd/v100/helpers.go` and `cmd/v100/cmd_resume.go`
-- ENHANCEMENT: Added `user_posts` source to `atproto_index` tool
-  - Fetches posts directly from a user's PDS via `com.atproto.repo.listRecords`
-  - Bypasses appview entirely — works even when bsky.social is down
-  - Resolves handle → DID → PDS endpoint via PLC directory
-  - Three fallback handle resolution: appview XRPC, well-known, DNS-over-HTTPS
-  - File: `internal/tools/atproto_rag.go`
+- ATProto index+recall pipeline working (feed, notifications, user_posts, profile)
+- URI dedup DONE: `VectorStore.HasTag` + check in `internal/tools/atproto_rag.go:115`
+- ~287 records indexed; dedup prevents growth from repeat indexing
+
+## 2026-04-17 — Phase 300 COMPLETE ✅ / Phase 400 in progress
+- Phase 300 all 4 items shipped (RSE, TPM, SBB, CGE)
+- Phase 400 spec written to `todos/phase400_spec.md` — 5 items
+
+### Phase 400 Progress
+
+**#1 PRR (Provider Resilience & Routing) — SHIPPED ✅**
+- `internal/providers/health.go` + `resilient.go`: HealthTracker + ResilientProvider (already existed)
+- `internal/config/config.go`: added `Fallbacks []string` to ProviderConfig
+- `cmd/v100/helpers.go`: wired `buildProviderFromConfig` → wraps with `ResilientProvider` when fallbacks configured
+- `cmd/v100/cmd_admin.go`: `providers health` subcommand + fallbacks shown in `providers` output
+- `internal/config/config.go`: default anthropic → [gemini, openai] fallback chain
+- `go get github.com/PuerkitoBio/goquery` — fixed missing dep
+
+**#2 CWI**: compression logic exists in `loop.go`, no real-time TUI meter yet
+**#3 CEP**: bench scaffold exists, no `bench watch` / drift detection / history
+**#4 ASH**: not started
+**#5 DA**: configs in `dogfood/`, no `v100 dogfood run/report` commands
+
+Next: operator picks next item OR runs dogfood quests.
