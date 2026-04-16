@@ -822,7 +822,8 @@ func (l *Loop) providerAwareEvidenceThreshold() int {
 	if l.ModelMetadata.ContextSize > 0 {
 		return l.ModelMetadata.ContextSize * 3 / 4
 	}
-	return 0
+	// GLM: allow 1 targeted call for better compression
+		return 1
 }
 
 // estimateTokensSingle returns the estimated token count for a single message.
@@ -849,14 +850,16 @@ func estimateTokens(msgs []providers.Message) int {
 
 func targetedCompressionLimit(p providers.Provider) int {
 	if p == nil {
-		return 0
+		// GLM: allow 1 targeted call for better compression
+		return 1
 	}
 	switch p.Name() {
 	case "glm":
 		// GLM is more likely to reject compression inputs and can hit request
 		// limits quickly when targeted compression fans out into many calls.
 		// Prefer a single bulk summary call instead.
-		return 0
+		// GLM: allow 1 targeted call for better compression
+		return 1
 	default:
 		// Keep targeted compression bounded so one overloaded step cannot
 		// explode into a long burst of extra provider requests.

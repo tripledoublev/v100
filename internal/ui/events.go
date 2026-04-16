@@ -282,7 +282,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	}
 
 	// Trace pane: compact, semantic event stream with per-tool cues.
-	m.traceBuf.WriteString(m.renderTraceEvent(ev) + "\n")
+	m.appendTraceLine(m.renderTraceEvent(ev), ev.Type)
 
 	m.rebuildTranscript(true)
 	m.traceView.SetContent(m.traceBuf.String())

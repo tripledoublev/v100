@@ -55,6 +55,7 @@ const (
 	ItemAgentStart
 	ItemAgentEnd
 	ItemRunEnd
+	ItemTokenGroup
 	ItemError
 )
 
@@ -73,6 +74,7 @@ type TranscriptItem struct {
 	Role      string // "user", "v100", "system"
 	Text      string
 	Images    [][]byte
+	Tokens    []string   // accumulated token stream for ItemTokenGroup
 	ToolExecs []*ToolExecution
 	Expanded  bool
 	ID        int
@@ -106,6 +108,9 @@ type TUIModel struct {
 
 	transcriptBuf strings.Builder
 	traceBuf      strings.Builder
+	lastTraceLine      string
+	lastTraceCount     int
+	lastTraceEventType core.EventType
 
 	history        []*TranscriptItem
 	nextItemID     int
@@ -116,6 +121,7 @@ type TUIModel struct {
 	traceStepCount int             // running step count for trace pane
 	activeAgents   []agentFrame
 	agentDoneCount int
+	currentTokenGroup *TranscriptItem // active token streaming group
 	agentFailCount int
 	lastAgentNote  string
 	device         deviceStatus

@@ -175,6 +175,13 @@ func DefaultConfig() *Config {
 				BaseURL:      "https://api.z.ai/api/coding/paas/v4",
 				Auth:         AuthConfig{Env: "ZHIPU_API_KEY"},
 			},
+			"mistral": {
+				Type:         "mistral",
+				DefaultModel: "mistral-large-latest",
+				BaseURL:      "https://api.mistral.ai/v1",
+				Auth:         AuthConfig{Env: "MISTRAL_API_KEY"},
+			},
+		},
 		},
 		Tools: ToolsConfig{
 			Enabled: []string{
@@ -230,7 +237,7 @@ func DefaultConfig() *Config {
 			ContextLimit:          80000,
 			MaxToolResultChars:    20000,
 			CompressProtectRecent: 6,
-			CompressProvider:      "glm",
+			CompressProvider:      "anthropic",
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
