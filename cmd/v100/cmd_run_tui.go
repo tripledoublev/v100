@@ -20,7 +20,7 @@ import (
 	"github.com/tripledoublev/v100/internal/ui"
 )
 
-func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
+func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embedProv providers.Provider, reg *tools.Registry, pol *policy.Policy,
 	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, verbose bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	run.Dir = workspace
@@ -151,6 +151,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg 
 	loop = &core.Loop{
 		Run:              run,
 		Provider:         prov,
+		EmbedProvider:    embedProv,
 		CompressProvider: buildCompressProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,

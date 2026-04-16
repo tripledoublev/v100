@@ -33,6 +33,7 @@ type Loop struct {
 	Run              *Run
 	Provider         providers.Provider
 	CompressProvider providers.Provider // cheap model for summarization; nil = use l.Provider
+	EmbedProvider    providers.Provider // dedicated embedding provider; nil = use l.Provider
 	Tools            *tools.Registry
 	Policy           *policy.Policy
 	Trace            *TraceWriter
@@ -398,6 +399,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		HostWorkspaceDir: hostWorkspaceDir,
 		TimeoutMS:        timeout,
 		Provider:         l.Provider,
+		EmbedProvider:    l.EmbedProvider,
 		Registry:         l.Tools,
 		Session:          l.Session,
 		Mapper:           l.Mapper,
@@ -1131,8 +1133,10 @@ func (l *Loop) emit(t EventType, stepID string, payload any) (Event, error) {
 		Type:    t,
 		Payload: b,
 	}
-	if err := l.Trace.Write(ev); err != nil {
-		return ev, fmt.Errorf("trace write: %w", err)
+	if l.Trace != nil {
+		if err := l.Trace.Write(ev); err != nil {
+			return ev, fmt.Errorf("trace write: %w", err)
+		}
 	}
 	if l.OutputFn != nil {
 		l.OutputFn(ev)

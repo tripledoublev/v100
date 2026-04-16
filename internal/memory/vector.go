@@ -58,6 +58,15 @@ func NewWorkspaceVectorStore(workspaceDir string) *VectorStore {
 	}
 }
 
+// NewNamedVectorStore initializes a named store in the given directory.
+// The backing file will be <name>.vectors.json.
+func NewNamedVectorStore(workspaceDir, name string) *VectorStore {
+	return &VectorStore{
+		runPath: filepath.Join(workspaceDir, name+".vectors.json"),
+		items:   []MemoryItem{},
+	}
+}
+
 // Load reads existing vectors from disk.
 func (s *VectorStore) Load() error {
 	data, err := os.ReadFile(s.runPath)
