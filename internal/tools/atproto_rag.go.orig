@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -37,7 +35,7 @@ func ATProtoIndex(cfg *config.Config) Tool { return &atprotoIndexTool{cfg: cfg} 
 
 func (t *atprotoIndexTool) Name() string { return "atproto_index" }
 func (t *atprotoIndexTool) Description() string {
-	return "Fetch ATProto/Bluesky records (feed, notifications, a user profile, or a user's posts directly from their PDS) and store them as vector embeddings for later semantic retrieval with atproto_recall."
+	return "Fetch ATProto/Bluesky records (feed, notifications, or a user profile) and store them as vector embeddings for later semantic retrieval with atproto_recall."
 }
 func (t *atprotoIndexTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoIndexTool) Effects() ToolEffects {
@@ -52,7 +50,7 @@ func (t *atprotoIndexTool) InputSchema() json.RawMessage {
 			"source": {
 				"type": "string",
 				"enum": ["feed", "notifications", "profile", "user_posts"],
-				"description": "What to index: feed (home timeline), notifications, a user profile, or user_posts (fetches posts directly from a user's PDS — works even when the appview/Bsky.app is down)."
+				"description": "What to index: feed (home timeline), notifications, a user profile, or user_posts (fetches posts directly from a user's PDS, works even when the appview is down)."
 			},
 			"limit": {
 				"type": "integer",
@@ -60,7 +58,7 @@ func (t *atprotoIndexTool) InputSchema() json.RawMessage {
 			},
 			"handle": {
 				"type": "string",
-				"description": "Bluesky handle (required for source=user_posts, optional for source=profile to default to authenticated user)."
+				"description": "Bluesky handle to fetch profile for (source=profile only). Defaults to the authenticated user."
 			}
 		}
 	}`)
@@ -92,12 +90,8 @@ func (t *atprotoIndexTool) Exec(ctx context.Context, call ToolCallContext, args 
 	}
 
 	cli := newATProtoClient(t.cfg.ATProto)
-	// user_posts does not require appview login — it talks directly to the
-	// target user's PDS. We still try login for other sources.
-	if in.Source != "user_posts" {
-		if err := cli.login(); err != nil {
-			return failResult(start, err.Error()), nil
-		}
+	if err := cli.login(); err != nil {
+		return failResult(start, err.Error()), nil
 	}
 
 	records, err := fetchRecordsForIndexing(cli, in.Source, in.Limit, in.Handle)
@@ -157,169 +151,9 @@ func fetchRecordsForIndexing(cli *atProtoClient, source string, limit int, handl
 		return fetchNotificationRecords(cli, limit)
 	case "profile":
 		return fetchProfileRecord(cli, handle)
-	case "user_posts":
-		return fetchUserPostsPDS(handle, limit)
 	default:
-		return nil, fmt.Errorf("unknown source %q; must be feed, notifications, profile, or user_posts", source)
+		return nil, fmt.Errorf("unknown source %q; must be feed, notifications, or profile", source)
 	}
-}
-
-// fetchUserPostsPDS resolves a handle to its PDS via PLC directory, then
-// fetches posts directly using com.atproto.repo.listRecords. This bypasses
-// the appview entirely and works even when bsky.social is down.
-func fetchUserPostsPDS(handle string, limit int) ([]indexRecord, error) {
-	if handle == "" {
-		return nil, fmt.Errorf("handle is required for source=user_posts")
-	}
-
-	// 1. Resolve handle → DID (try appview first, then PLC/handle well-known)
-	did, err := resolveHandleToDID(handle)
-	if err != nil {
-		return nil, fmt.Errorf("resolve handle %q: %w", handle, err)
-	}
-
-	// 2. Look up PDS endpoint from PLC directory
-	pdsURL, err := resolvePDSEndpoint(did)
-	if err != nil {
-		return nil, fmt.Errorf("resolve PDS for %s: %w", did, err)
-	}
-
-	// 3. Fetch posts via com.atproto.repo.listRecords directly from PDS
-	params := url.Values{
-		"repo":       {did},
-		"collection": {"app.bsky.feed.post"},
-		"limit":      {fmt.Sprintf("%d", limit)},
-	}
-	u := pdsURL + "/xrpc/com.atproto.repo.listRecords?" + params.Encode()
-
-	resp, err := http.Get(u) //nolint:gosec // PDS URL is constructed from PLC directory
-	if err != nil {
-		return nil, fmt.Errorf("fetch posts from PDS: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("PDS listRecords (%d): %s", resp.StatusCode, string(data))
-	}
-
-	var listResp struct {
-		Records []struct {
-			URI   string `json:"uri"`
-			Value struct {
-				Text      string `json:"text"`
-				CreatedAt string `json:"createdAt"`
-			} `json:"value"`
-		} `json:"records"`
-	}
-	if err := json.Unmarshal(data, &listResp); err != nil {
-		return nil, fmt.Errorf("parse posts: %w", err)
-	}
-
-	out := make([]indexRecord, 0, len(listResp.Records))
-	for _, r := range listResp.Records {
-		text := strings.TrimSpace(r.Value.Text)
-		if text == "" {
-			continue
-		}
-		out = append(out, indexRecord{
-			text:       fmt.Sprintf("@%s: %s", handle, text),
-			uri:        r.URI,
-			author:     handle,
-			recordType: "post",
-		})
-	}
-	return out, nil
-}
-
-// resolveHandleToDID resolves a Bluesky handle to its DID, trying multiple
-// methods: appview XRPC, PLC directory, and handle well-known.
-func resolveHandleToDID(handle string) (string, error) {
-	hc := &http.Client{Timeout: 10 * time.Second}
-
-	// Try appview resolveHandle
-	u := "https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=" + url.QueryEscape(handle)
-	resp, err := hc.Get(u)
-	if err == nil {
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == http.StatusOK {
-			var out struct {
-				DID string `json:"did"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&out); err == nil && out.DID != "" {
-				return out.DID, nil
-			}
-		}
-	}
-
-	// Try handle well-known
-	resp2, err := hc.Get("https://" + handle + "/.well-known/atproto-did")
-	if err == nil {
-		defer func() { _ = resp2.Body.Close() }()
-		if resp2.StatusCode == http.StatusOK {
-			body, _ := io.ReadAll(resp2.Body)
-			did := strings.TrimSpace(string(body))
-			if strings.HasPrefix(did, "did:") {
-				return did, nil
-			}
-		}
-	}
-
-	// Try DNS TXT record via DNS-over-HTTPS
-	resp3, err := hc.Get("https://dns.google/resolve?name=_atproto." + handle + "&type=TXT")
-	if err == nil {
-		defer func() { _ = resp3.Body.Close() }()
-		if resp3.StatusCode == http.StatusOK {
-			var dnsResp struct {
-				Answer []struct {
-					Data string `json:"data"`
-				} `json:"Answer"`
-			}
-			if err := json.NewDecoder(resp3.Body).Decode(&dnsResp); err == nil {
-				for _, a := range dnsResp.Answer {
-					d := strings.Trim(a.Data, `"`)
-					if strings.HasPrefix(d, "did=") {
-						return strings.TrimPrefix(d, "did="), nil
-					}
-				}
-			}
-		}
-	}
-
-	return "", fmt.Errorf("could not resolve handle %q via any method", handle)
-}
-
-// resolvePDSEndpoint looks up a DID's PDS service endpoint from the PLC directory.
-func resolvePDSEndpoint(did string) (string, error) {
-	if !strings.HasPrefix(did, "did:plc:") {
-		return "", fmt.Errorf("unsupported DID method: %s (only did:plc is supported)", did)
-	}
-	u := "https://plc.directory/" + did
-	resp, err := http.Get(u) //nolint:gosec // PLC directory URL is well-known
-	if err != nil {
-		return "", fmt.Errorf("PLC directory lookup: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("PLC directory (%d): %s", resp.StatusCode, string(data))
-	}
-
-	var doc struct {
-		Service []struct {
-			ID             string `json:"id"`
-			Type           string `json:"type"`
-			ServiceEndpoint string `json:"serviceEndpoint"`
-		} `json:"service"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return "", fmt.Errorf("parse PLC doc: %w", err)
-	}
-	for _, s := range doc.Service {
-		if s.Type == "AtprotoPersonalDataServer" {
-			return strings.TrimRight(s.ServiceEndpoint, "/"), nil
-		}
-	}
-	return "", fmt.Errorf("no AtprotoPersonalDataServer service found in DID document")
 }
 
 func fetchFeedRecords(cli *atProtoClient, limit int) ([]indexRecord, error) {
