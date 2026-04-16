@@ -1,9 +1,7 @@
 name: Nightly Dogfood
 
 on:
-  schedule:
-    - cron: '0 3 * * *'   # 3 AM UTC daily
-  workflow_dispatch:        # allow manual trigger for testing
+  workflow_dispatch:
 
 env:
   GOWORK: off
