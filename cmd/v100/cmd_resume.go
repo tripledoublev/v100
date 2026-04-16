@@ -34,6 +34,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 		unsafeFlag       bool
 		yoloFlag         bool
 		sandboxFlag      bool
+		continuousFlag   bool
 		confirmToolsFlag string
 		workspaceFlag    string
 		budgetStepsFlag  int
@@ -180,9 +181,9 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
 			if tuiFlag {
-				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, session, mapper, metadata, selectionChanged)
+				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, continuousFlag, session, mapper, metadata, selectionChanged)
 			}
-			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, session, mapper, metadata, selectionChanged)
+			return resumeWithCLI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, sandboxWorkspace, continuousFlag, session, mapper, metadata, selectionChanged)
 		},
 	}
 	cmd.Flags().StringVar(&providerFlag, "provider", "", "provider name (overrides traced run/config)")
@@ -197,6 +198,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "enable sandbox for resumed run (inherited from meta.json by default)")
 	cmd.Flags().StringVar(&confirmToolsFlag, "confirm-tools", "", "confirm mode: always|dangerous|never")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace directory for tool operations (overrides traced workspace)")
+	cmd.Flags().BoolVar(&continuousFlag, "continuous", false, "automatically continue after each step without waiting for user input")
 	cmd.Flags().IntVar(&budgetStepsFlag, "budget-steps", 0, "max steps (0=config default)")
 	cmd.Flags().IntVar(&budgetTokensFlag, "budget-tokens", 0, "max tokens (0=config default)")
 	cmd.Flags().Float64Var(&budgetCostFlag, "budget-cost", 0, "max cost in USD (0=config default)")
@@ -204,7 +206,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 }
 
 func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, workspace string, continuous bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
 
 	renderer := ui.NewCLIRenderer()
 	outputFn := core.OutputFn(renderer.RenderEvent)
@@ -253,31 +255,45 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	fmt.Println(ui.Info(ui.Dim("workspace: ") + workspace))
 
 	reason := "user_exit"
+	firstStep := true
+	var contInput string
+	var loopInput string
+	var loopImages []providers.ImageAttachment
 	for {
-		promptResult, err := ui.PromptWithImages("")
-		if err != nil {
-			break
+		if !firstStep && continuous {
+			fmt.Fprintln(os.Stderr, ui.Dim("▸ auto-continuing… (Ctrl+C to stop)"))
+			loopInput = contInput
+			loopImages = nil
+			contInput = ""
+		} else {
+			promptResult, err := ui.PromptWithImages("")
+			if err != nil {
+				break
+			}
+			loopInput = strings.TrimSpace(promptResult.Text)
+			loopImages = make([]providers.ImageAttachment, 0, len(promptResult.Images))
+			for _, img := range promptResult.Images {
+				loopImages = append(loopImages, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+			}
+			if loopInput == "" && len(loopImages) == 0 {
+				continue
+			}
+			if loopInput == "/quit" || loopInput == "/exit" {
+				break
+			}
 		}
-		input := strings.TrimSpace(promptResult.Text)
-		images := make([]providers.ImageAttachment, 0, len(promptResult.Images))
-		for _, img := range promptResult.Images {
-			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
-		}
-		if input == "" && len(images) == 0 {
-			continue
-		}
-		if input == "/quit" || input == "/exit" {
-			break
-		}
-		err = runInteractiveStep(func() error {
-			rewritten, handled, err := applyInteractiveMode(ctx, cfg, loop, input, false)
+		firstStep = false
+		capturedInput := loopInput
+		capturedImages := loopImages
+		err := runInteractiveStep(func() error {
+			rewritten, handled, err := applyInteractiveMode(ctx, cfg, loop, capturedInput, false)
 			if err != nil {
 				return err
 			}
 			if handled {
 				return nil
 			}
-			return loop.StepWithImages(ctx, rewritten, images)
+			return loop.StepWithImages(ctx, rewritten, capturedImages)
 		}, budget, func(reason string) bool {
 			return promptContinueWithoutBudgetLimit(os.Stdin, os.Stderr, reason)
 		})
@@ -288,6 +304,8 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 				break
 			}
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		} else if continuous {
+			contInput = "continue"
 		}
 	}
 	_ = loop.EmitRunEnd(reason, "")
@@ -300,7 +318,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 }
 
 func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, resumeSummary string, workspace string, useAltScreen bool, plainTTY bool, debug bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model string, events []core.Event, msgs []providers.Message, resumeSummary string, workspace string, useAltScreen bool, plainTTY bool, debug bool, continuous bool, session executor.Session, mapper *core.PathMapper, metadata providers.ModelMetadata, selectionChanged bool) error {
 
 	var logger *log.Logger
 	if debug {
@@ -333,7 +351,8 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 
 	var loop *core.Loop
 
-	submitFn := func(req ui.SubmitRequest) {
+	var submitFn func(req ui.SubmitRequest)
+	submitFn = func(req ui.SubmitRequest) {
 		if logger != nil {
 			logger.Printf("submit input_len=%d images=%d", len(req.Text), len(req.Images))
 		}
@@ -360,6 +379,9 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
 		})
 		if err == nil {
+			if continuous {
+				go submitFn(ui.SubmitRequest{Text: "continue"})
+			}
 			return
 		}
 		if logger != nil {

@@ -57,6 +57,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiDebugFlag     bool
 		verboseFlag      bool
 		exitFlag         bool
+		continuousFlag   bool
 		planFlag         bool
 		nameFlag         string
 		tagFlags         []string
@@ -315,9 +316,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, genParams, solver, initialPrompt, session, mapper)
+				return runWithTUI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, continuousFlag, genParams, solver, initialPrompt, session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
+			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, continuousFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
 		},
 	}
 
@@ -347,6 +348,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
 	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
 	cmd.Flags().BoolVar(&exitFlag, "exit", false, "exit after the initial prompt completes without entering interactive mode")
+	cmd.Flags().BoolVar(&continuousFlag, "continuous", false, "automatically continue after each step without waiting for user input")
 	cmd.Flags().BoolVar(&planFlag, "plan", false, "preview a plan and require approval before execution (CLI only)")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
@@ -401,7 +403,7 @@ func validatePlanMode(planMode bool, tuiMode bool, solverName string) error {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embedProv providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, planMode bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, continuous bool, planMode bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	// Auto-exit when stdin is piped (not a TTY) to avoid hanging after prompt
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -558,6 +560,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	fmt.Println(ui.Dim("Ctrl+C or /quit to exit"))
 
 	var providerErr bool
+	var (
+		firstStep  = true
+		contInput  string
+		contImages []providers.ImageAttachment
+		loopInput  string
+		loopImages []providers.ImageAttachment
+	)
 
 	if initialPrompt != "" {
 		stepMu.Lock()
@@ -613,30 +622,41 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	}
 
 	for {
-		promptResult, err := ui.PromptWithImages("")
-		if err != nil {
-			reason = "user_exit"
-			break
+		if !firstStep && continuous && !signalInterrupted.Load() {
+			fmt.Fprintln(os.Stderr, ui.Dim("▸ auto-continuing… (Ctrl+C to stop)"))
+			loopInput = contInput
+			loopImages = contImages
+			contInput = ""
+			contImages = nil
+		} else {
+			promptResult, err := ui.PromptWithImages("")
+			if err != nil {
+				reason = "user_exit"
+				break
+			}
+			loopInput = strings.TrimSpace(promptResult.Text)
+			loopImages = make([]providers.ImageAttachment, 0, len(promptResult.Images))
+			for _, img := range promptResult.Images {
+				loopImages = append(loopImages, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+			}
+			if loopInput == "" && len(loopImages) == 0 {
+				continue
+			}
+			if loopInput == "/quit" || loopInput == "/exit" {
+				break
+			}
 		}
-		input := strings.TrimSpace(promptResult.Text)
-		images := make([]providers.ImageAttachment, 0, len(promptResult.Images))
-		for _, img := range promptResult.Images {
-			images = append(images, providers.ImageAttachment{MIMEType: "image/png", Data: img})
-		}
-		if input == "" && len(images) == 0 {
-			continue
-		}
-		if input == "/quit" || input == "/exit" {
-			break
-		}
+		firstStep = false
 
 		stepMu.Lock()
 		var stepCtx context.Context
 		stepCtx, stepCancel = context.WithCancel(ctx)
 		stepMu.Unlock()
 
-		err = runInteractiveStep(func() error {
-			return runCLIInput(stepCtx, cfg, loop, input, images, planMode)
+		capturedInput := loopInput
+		capturedImages := loopImages
+		err := runInteractiveStep(func() error {
+			return runCLIInput(stepCtx, cfg, loop, capturedInput, capturedImages, planMode)
 		}, budget, func(reason string) bool {
 			return promptContinueWithoutBudgetLimit(os.Stdin, os.Stderr, reason)
 		})
@@ -674,6 +694,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 					fmt.Fprintln(os.Stderr, ui.Fail("step error: "+err.Error()))
 				}
 			}
+		} else if continuous {
+			contInput = "continue"
 		}
 	}
 

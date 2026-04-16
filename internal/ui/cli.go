@@ -446,13 +446,13 @@ func ConfirmTool(toolName, args string) bool {
 		}
 		switch b := buf[0]; b {
 		case 'y', 'Y':
-			fmt.Fprintf(os.Stdout, "\r\n")
+			_, _ = fmt.Fprintf(os.Stdout, "\r\n")
 			return true
 		case 'n', 'N', '\r', '\n':
-			fmt.Fprintf(os.Stdout, "\r\n")
+			_, _ = fmt.Fprintf(os.Stdout, "\r\n")
 			return false
 		case 0x03: // Ctrl+C in raw mode
-			fmt.Fprintf(os.Stdout, "^C\r\n")
+			_, _ = fmt.Fprintf(os.Stdout, "^C\r\n")
 			return false
 		case 0x1b: // escape sequence (arrow keys etc.) — drain and ignore
 			var seq [2]byte

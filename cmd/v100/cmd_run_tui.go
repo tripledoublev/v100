@@ -21,7 +21,7 @@ import (
 )
 
 func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embedProv providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, verbose bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, useAltScreen bool, plainTTY bool, debug bool, verbose bool, continuous bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	run.Dir = workspace
 
@@ -44,7 +44,8 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	var stepCancel context.CancelFunc
 	var stepMu sync.Mutex
 
-	submitFn := func(req ui.SubmitRequest) {
+	var submitFn func(req ui.SubmitRequest)
+	submitFn = func(req ui.SubmitRequest) {
 		if logger != nil {
 			logger.Printf("submit input_len=%d images=%d", len(req.Text), len(req.Images))
 		}
@@ -87,6 +88,9 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 			return tui.RequestConfirm(interactiveBudgetLabel(reason), interactiveBudgetConfirmMessage(reason))
 		})
 		if err == nil {
+			if continuous {
+				go submitFn(ui.SubmitRequest{Text: "continue"})
+			}
 			return
 		}
 		if logger != nil {
