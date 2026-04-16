@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -503,12 +502,25 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 				stepMu.Unlock()
 
 				if busy && !confirmActive.Load() {
-					oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+					fd := int(os.Stdin.Fd())
+					// Poll stdin with a 50 ms timeout using syscall.Select so we
+					// never block longer than that window. ConfirmTool may start at
+					// any moment and needs exclusive stdin access; the short timeout
+					// ensures the goroutine yields quickly when confirmActive is set.
+					tv := syscall.Timeval{Usec: 50_000}
+					rset := new(syscall.FdSet)
+					stdinFDSet(rset, fd)
+					n, serr := syscall.Select(fd+1, rset, nil, nil, &tv)
+					if serr != nil || n == 0 || confirmActive.Load() {
+						// timeout, select error, or confirm just became active — skip
+						continue
+					}
+
+					oldState, err := term.MakeRaw(fd)
 					if err == nil {
-						// Read one byte
 						var b [1]byte
 						_, _ = os.Stdin.Read(b[:])
-						_ = term.Restore(int(os.Stdin.Fd()), oldState)
+						_ = term.Restore(fd, oldState)
 
 						if b[0] == 27 { // Escape
 							stepMu.Lock()
@@ -772,12 +784,7 @@ func runCLIInput(ctx context.Context, cfg *config.Config, loop *core.Loop, input
 }
 
 func confirmPlanExecution() bool {
-	fmt.Print(ui.Warn("Execute this plan? [y/N] "))
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return false
-	}
-	return isApprovedPlanAnswer(scanner.Text())
+	return ui.ConfirmTool("plan execution", "(approve to run the plan above)")
 }
 
 func isApprovedPlanAnswer(answer string) bool {
@@ -1040,4 +1047,9 @@ func matchesFile(writePath, targetPath, targetBase string) bool {
 	}
 
 	return false
+}
+
+// stdinFDSet sets the bit for fd in a syscall.FdSet.
+func stdinFDSet(s *syscall.FdSet, fd int) {
+	s.Bits[fd/64] |= 1 << (uint(fd) % 64)
 }
