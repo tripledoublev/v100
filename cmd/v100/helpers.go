@@ -428,6 +428,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.InspectTool())
 	reg.Register(tools.NewReflect())
 	reg.Register(tools.Wiki())
+	reg.Register(tools.Fingerprint())
 	reg.Register(tools.ATProtoFeed(cfg))
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))

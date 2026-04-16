@@ -267,7 +267,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n%s\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+		fmt.Printf("\n%s\n", EndBanner(p.Reason, ev.RunID, p.UsedSteps, p.UsedTokens))
 		if p.Summary != "" {
 			fmt.Printf("%s\n", styleInfo.Render("Summary: "+p.Summary))
 		}
@@ -651,7 +651,7 @@ func PrintReplayEvent(ev core.Event) {
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, p.UsedSteps, p.UsedTokens))
+		fmt.Printf("\n%s\n\n", EndBanner(p.Reason, ev.RunID, p.UsedSteps, p.UsedTokens))
 
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
