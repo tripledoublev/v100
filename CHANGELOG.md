@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.17 — 2026-04-16
+
+**CLI Confirm Fix, Continuous Mode, and ATProto Index Improvements**
+
+### Bug Fixes
+
+- **CLI confirm freeze (root cause)** — The escape-key listener goroutine raced with `ConfirmTool` on stdin. Both goroutines could end up blocked on the same fd simultaneously, causing the confirm prompt to freeze. Fixed by replacing the blocking `os.Stdin.Read` in the escape goroutine with a `syscall.Select` poll (50 ms timeout), ensuring the goroutine yields before `ConfirmTool` needs exclusive stdin access.
+- **`confirmPlanExecution` freeze** — Plan approval prompt still used `bufio.NewScanner`, which deadlocks in raw terminal mode. Replaced with `ui.ConfirmTool` to use the same safe raw-mode read path.
+- **CLI confirm freeze (prior fix)** — `ConfirmTool` was rewritten to use `term.MakeRaw` + direct byte reads instead of `bufio.Scanner`, fixing the original cooked-mode deadlock where keyboard input appeared frozen and Ctrl+C had no effect.
+
+### Features
+
+- **`--continuous` flag on `run` and `resume`** — Automatically continues to the next step after each agent turn without waiting for user input. Ctrl+C stops the loop. Useful for unattended multi-step runs.
+- **`user_posts` source in `atproto_index`** — Direct PDS fetching for indexing a user's own posts without going through the feed API.
+
+### Maintenance
+
+- **Release workflow** — Pinned `softprops/action-gh-release` to `v2.3.2` to eliminate Node.js 20 deprecation warnings ahead of the June 2026 forced migration to Node.js 24.
+
 ## v0.2.16 — 2026-04-16
 
 **ATProto RAG, Audio Fingerprinting, Social Graph Tools, and Compress Command**
