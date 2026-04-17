@@ -88,6 +88,16 @@ func TestParseInteractiveModeCommand(t *testing.T) {
 	if ok || mode != "" || rest != "plain text" {
 		t.Fatalf("unexpected parse result for plain text: (%q, %q, %v)", mode, rest, ok)
 	}
+
+	mode, rest, ok = parseInteractiveModeCommand("/claude hello")
+	if !ok || mode != "/claude" || rest != "hello" {
+		t.Fatalf("parseInteractiveModeCommand(/claude) returned (%q, %q, %v)", mode, rest, ok)
+	}
+
+	mode, rest, ok = parseInteractiveModeCommand("/anthropic hi")
+	if !ok || mode != "/anthropic" || rest != "hi" {
+		t.Fatalf("parseInteractiveModeCommand(/anthropic) returned (%q, %q, %v)", mode, rest, ok)
+	}
 }
 
 func TestBuildProviderSupportsSmartRouterType(t *testing.T) {

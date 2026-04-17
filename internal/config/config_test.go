@@ -38,6 +38,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Providers["anthropic"].Auth.Env != "ANTHROPIC_API_KEY" {
 		t.Errorf("expected ANTHROPIC_API_KEY, got %s", cfg.Providers["anthropic"].Auth.Env)
 	}
+	if _, ok := cfg.Providers["claude"]; !ok {
+		t.Error("expected claude provider alias in defaults")
+	}
+	if cfg.Providers["claude"].Type != "anthropic" {
+		t.Errorf("expected claude provider alias to use anthropic type, got %s", cfg.Providers["claude"].Type)
+	}
+	if cfg.Providers["claude"].DefaultModel != "claude-opus-4-7" {
+		t.Errorf("expected claude-opus-4-7, got %s", cfg.Providers["claude"].DefaultModel)
+	}
+	if cfg.Providers["claude"].Auth.Env != "ANTHROPIC_API_KEY" {
+		t.Errorf("expected claude alias to use ANTHROPIC_API_KEY, got %s", cfg.Providers["claude"].Auth.Env)
+	}
 
 	// Check that minimax provider exists in defaults
 	if _, ok := cfg.Providers["minimax"]; !ok {
@@ -224,6 +236,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, "ANTHROPIC_API_KEY") {
 		t.Error("default TOML should reference ANTHROPIC_API_KEY")
 	}
+	if !contains(toml, "[providers.claude]") {
+		t.Error("default TOML should contain claude provider alias section")
+	}
+	if !contains(toml, `default_model = "claude-opus-4-7"`) {
+		t.Error("default TOML should reference claude-opus-4-7")
+	}
 	if !contains(toml, "[providers.minimax]") {
 		t.Error("default TOML should contain minimax provider section")
 	}
@@ -260,7 +278,7 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, `network_tier = "off"`) {
 		t.Error("default TOML should default sandbox network_tier to off")
 	}
-	if !contains(toml, `image = "google/gemini-v100-research:latest"`) {
+	if !contains(toml, `image = "google/v100-agent-runtime:latest"`) {
 		t.Error("default TOML should contain sandbox image")
 	}
 	if !contains(toml, `memory_mb = 512`) {

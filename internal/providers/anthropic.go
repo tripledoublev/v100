@@ -17,6 +17,7 @@ const (
 	anthropicBaseURL      = "https://api.anthropic.com/v1/messages"
 	anthropicVersion      = "2023-06-01"
 	anthropicDefaultModel = "claude-sonnet-4-20250514"
+	claudeDefaultModel    = "claude-opus-4-7"
 )
 
 // AnthropicProvider implements Provider using the Anthropic Messages API.
@@ -163,8 +164,8 @@ func (p *AnthropicProvider) Metadata(ctx context.Context, model string) (ModelMe
 
 func (p *AnthropicProvider) Models() []ModelInfo {
 	return []ModelInfo{
-		{Name: "claude-opus-4-6", Description: "powerful — flagship for agents + coding"},
-		{Name: "claude-sonnet-4-6", Description: "standard — speed/intelligence balance"},
+		{Name: "claude-opus-4-7", Description: "powerful — flagship for agents + coding"},
+		{Name: "claude-sonnet-4-20250514", Description: "standard — speed/intelligence balance"},
 		{Name: "claude-haiku-4-5-20251001", Description: "fast — lowest latency"},
 	}
 }

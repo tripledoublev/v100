@@ -32,7 +32,7 @@ func parseInteractiveModeCommand(input string) (mode string, rest string, ok boo
 	}
 	mode = strings.ToLower(fields[0])
 	switch mode {
-	case "/auto", "/local", "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/openai", "/ollama", "/llamacpp":
+	case "/auto", "/local", "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/claude", "/openai", "/ollama", "/llamacpp":
 	default:
 		return "", input, false
 	}
@@ -71,7 +71,7 @@ func buildSessionSelection(cfg *config.Config, mode string) (sessionSelection, e
 			return sessionSelection{}, fmt.Errorf("no local provider configured for /local")
 		}
 		return buildSingleProviderSelection(cfg, localName, "local")
-	case "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/openai", "/ollama", "/llamacpp":
+	case "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/claude", "/openai", "/ollama", "/llamacpp":
 		return buildSingleProviderSelection(cfg, strings.TrimPrefix(mode, "/"), strings.TrimPrefix(mode, "/"))
 	default:
 		return sessionSelection{}, fmt.Errorf("unsupported session mode %q", mode)
