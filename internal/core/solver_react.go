@@ -184,6 +184,15 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			usage = resp.Usage
 		}
 
+		if text := assistantText.String(); strings.Contains(text, "<invoke") {
+			cleaned, extracted := providers.ExtractTextualToolCalls(text)
+			if len(extracted) > 0 || cleaned != text {
+				assistantText.Reset()
+				assistantText.WriteString(cleaned)
+				toolCalls = append(toolCalls, extracted...)
+			}
+		}
+
 		if err := l.Budget.AddTokens(usage.InputTokens, usage.OutputTokens); err != nil && terminalErr == nil {
 			terminalErr = err
 		}

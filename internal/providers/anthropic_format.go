@@ -1,10 +1,16 @@
 package providers
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 )
+
+var anthropicEmptyToolInput = json.RawMessage(`{}`)
 
 // Shared Anthropic Messages API types used by both the Anthropic provider
 // and MiniMax provider (which exposes an Anthropic-compatible endpoint).
@@ -231,7 +237,7 @@ func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
 						Type:  "tool_use",
 						ID:    tc.ID,
 						Name:  tc.Name,
-						Input: tc.Args,
+						Input: anthropicNormalizeToolInput(tc.Args),
 					})
 				}
 				out = append(out, anthropicMessage{Role: "assistant", Content: content})
@@ -253,6 +259,13 @@ func anthropicConvertMessages(msgs []Message) (string, []anthropicMessage) {
 		}
 	}
 	return system, out
+}
+
+func anthropicNormalizeToolInput(args json.RawMessage) json.RawMessage {
+	if len(strings.TrimSpace(string(args))) == 0 {
+		return anthropicEmptyToolInput
+	}
+	return args
 }
 
 // anthropicBuildRequest constructs an anthropicRequest from a CompleteRequest.
@@ -309,7 +322,9 @@ func anthropicParseResponse(raw []byte, costFn func(input, output int) float64) 
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
-			text.WriteString(block.Text)
+			cleaned, extracted := ExtractTextualToolCalls(block.Text)
+			text.WriteString(cleaned)
+			toolCalls = append(toolCalls, extracted...)
 		case "tool_use":
 			input := block.Input
 			if input == nil {
@@ -332,4 +347,74 @@ func anthropicParseResponse(raw []byte, costFn func(input, output int) float64) 
 		},
 		Raw: raw,
 	}, nil
+}
+
+// Some Anthropic-compatible providers (notably MiniMax) sometimes emit
+// tool calls in a legacy XML-like text format inside a regular `text` block
+// instead of a structured `tool_use` block:
+//
+//	<minimax:tool_call>
+//	  <invoke name="fs_read">
+//	    <parameter name="path">/tmp/x</parameter>
+//	    <parameter name="start_line">1</parameter>
+//	  </invoke>
+//	</minimax:tool_call>
+//
+// Left unparsed, the TUI shows the raw XML to the user and the agent never
+// executes the tool — so we normalize it into real ToolCall entries and strip
+// the markup from assistant text. IDs are synthesized since the text form
+// omits them.
+var (
+	textualToolCallEnvelope = regexp.MustCompile(`(?s)<(?:[a-zA-Z0-9_-]+:)?tool_call>\s*(.*?)\s*</(?:[a-zA-Z0-9_-]+:)?tool_call>`)
+	textualInvokeBlock      = regexp.MustCompile(`(?s)<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>`)
+	textualParameterBlock   = regexp.MustCompile(`(?s)<parameter\s+name="([^"]+)"\s*>(.*?)</parameter>`)
+)
+
+func ExtractTextualToolCalls(s string) (string, []ToolCall) {
+	if !strings.Contains(s, "<invoke") {
+		return s, nil
+	}
+	var calls []ToolCall
+	collect := func(body string) {
+		for _, inv := range textualInvokeBlock.FindAllStringSubmatch(body, -1) {
+			name := strings.TrimSpace(inv[1])
+			params := map[string]string{}
+			for _, p := range textualParameterBlock.FindAllStringSubmatch(inv[2], -1) {
+				params[strings.TrimSpace(p[1])] = strings.TrimSpace(p[2])
+			}
+			args, err := json.Marshal(params)
+			if err != nil {
+				args = []byte("{}")
+			}
+			calls = append(calls, ToolCall{
+				ID:   synthesizeToolCallID(),
+				Name: name,
+				Args: args,
+			})
+		}
+	}
+
+	cleaned := textualToolCallEnvelope.ReplaceAllStringFunc(s, func(match string) string {
+		m := textualToolCallEnvelope.FindStringSubmatch(match)
+		if len(m) == 2 {
+			collect(m[1])
+		}
+		return ""
+	})
+	// Bare <invoke>...</invoke> outside an envelope — same provider, no wrapper.
+	if strings.Contains(cleaned, "<invoke") {
+		cleaned = textualInvokeBlock.ReplaceAllStringFunc(cleaned, func(match string) string {
+			collect(match)
+			return ""
+		})
+	}
+	return strings.TrimSpace(cleaned), calls
+}
+
+func synthesizeToolCallID() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "txt_fallback"
+	}
+	return fmt.Sprintf("txt_%s", hex.EncodeToString(b[:]))
 }

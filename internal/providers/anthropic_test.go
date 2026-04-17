@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -231,6 +232,60 @@ func TestAnthropicConvertMessagesDropsUnresolvedToolUse(t *testing.T) {
 	}
 }
 
+func TestAnthropicConvertMessagesNormalizesEmptyToolInput(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "show status"},
+		{Role: "assistant", ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "git_status"},
+		}},
+		{Role: "tool", Content: "clean", ToolCallID: "tc1", Name: "git_status"},
+	}
+
+	_, converted := anthropicConvertMessages(msgs)
+	if len(converted) < 2 {
+		t.Fatalf("expected converted tool call message, got %d messages", len(converted))
+	}
+	blocks, ok := converted[1].Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("expected content blocks, got %T", converted[1].Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 tool_use block, got %d", len(blocks))
+	}
+	if string(blocks[0].Input) != "{}" {
+		t.Fatalf("expected empty tool input to normalize to {}, got %q", string(blocks[0].Input))
+	}
+}
+
+func TestAnthropicBuildRequestKeepsInputForMixedToolArgs(t *testing.T) {
+	req := CompleteRequest{
+		Model: "claude-opus-4-7",
+		Messages: []Message{
+			{Role: "user", Content: "show staged diff and status"},
+			{Role: "assistant", ToolCalls: []ToolCall{
+				{ID: "tc-diff", Name: "git_diff", Args: json.RawMessage(`{"staged":true}`)},
+				{ID: "tc-status", Name: "git_status"},
+			}},
+			{Role: "tool", Content: "diff", ToolCallID: "tc-diff", Name: "git_diff"},
+			{Role: "tool", Content: "status", ToolCallID: "tc-status", Name: "git_status"},
+		},
+	}
+
+	aReq := anthropicBuildRequest(req.Model, req)
+	body, err := json.Marshal(aReq)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	raw := string(body)
+	if !strings.Contains(raw, `"name":"git_status","input":{}`) {
+		t.Fatalf("expected git_status tool_use to include empty input object, got %s", raw)
+	}
+	if !strings.Contains(raw, `"name":"git_diff","input":{"staged":true}`) {
+		t.Fatalf("expected git_diff tool_use to retain explicit args, got %s", raw)
+	}
+}
+
 func TestAnthropicEstimateCost(t *testing.T) {
 	tests := []struct {
 		model  string
@@ -249,6 +304,17 @@ func TestAnthropicEstimateCost(t *testing.T) {
 		if cost < tt.min || cost > tt.max {
 			t.Errorf("cost for %s: %.6f not in [%.6f, %.6f]", tt.model, cost, tt.min, tt.max)
 		}
+	}
+}
+
+func TestAnthropicModelsIncludesClaudeAliasDefault(t *testing.T) {
+	p := &AnthropicProvider{defaultModel: claudeDefaultModel}
+	models := p.Models()
+	if len(models) == 0 {
+		t.Fatal("expected anthropic model list")
+	}
+	if models[0].Name != claudeDefaultModel {
+		t.Fatalf("expected first model %q, got %q", claudeDefaultModel, models[0].Name)
 	}
 }
 
@@ -327,5 +393,71 @@ func TestResolveAnthropicKeyEmpty(t *testing.T) {
 	key := resolveAnthropicKey("ANTHROPIC_API_KEY")
 	if key != "" {
 		t.Errorf("expected empty key, got %q", key)
+	}
+}
+
+func TestExtractTextualToolCalls_MinimaxEnvelope(t *testing.T) {
+	// This is the exact payload the user saw leaking into the TUI.
+	input := "let me check\n<minimax:tool_call>\n<invoke name=\"fs_read\">\n<parameter name=\"end_line\">280</parameter>\n<parameter name=\"path\">/workspace/internal/ui/events.go</parameter>\n<parameter name=\"start_line\">255</parameter>\n</invoke>\n</minimax:tool_call>\ndone"
+
+	cleaned, calls := ExtractTextualToolCalls(input)
+
+	if strings.Contains(cleaned, "<minimax:tool_call>") || strings.Contains(cleaned, "<invoke") {
+		t.Fatalf("cleaned text still contains tool-call markup: %q", cleaned)
+	}
+	if !strings.Contains(cleaned, "let me check") || !strings.Contains(cleaned, "done") {
+		t.Errorf("surrounding prose lost: %q", cleaned)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "fs_read" {
+		t.Errorf("name=%q, want fs_read", calls[0].Name)
+	}
+	var args map[string]string
+	if err := json.Unmarshal(calls[0].Args, &args); err != nil {
+		t.Fatalf("args not valid JSON: %v", err)
+	}
+	if args["path"] != "/workspace/internal/ui/events.go" || args["start_line"] != "255" || args["end_line"] != "280" {
+		t.Errorf("args mis-parsed: %+v", args)
+	}
+	if !strings.HasPrefix(calls[0].ID, "txt_") {
+		t.Errorf("expected synthesized id with txt_ prefix, got %q", calls[0].ID)
+	}
+}
+
+func TestExtractTextualToolCalls_NoMarkup(t *testing.T) {
+	in := "just plain text, no tool calls here"
+	out, calls := ExtractTextualToolCalls(in)
+	if out != in {
+		t.Errorf("plain text mutated: %q", out)
+	}
+	if len(calls) != 0 {
+		t.Errorf("unexpected calls: %+v", calls)
+	}
+}
+
+func TestExtractTextualToolCalls_MultipleInvokes(t *testing.T) {
+	in := "<minimax:tool_call>\n<invoke name=\"a\"><parameter name=\"x\">1</parameter></invoke>\n<invoke name=\"b\"><parameter name=\"y\">2</parameter></invoke>\n</minimax:tool_call>"
+	_, calls := ExtractTextualToolCalls(in)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(calls))
+	}
+	if calls[0].Name != "a" || calls[1].Name != "b" {
+		t.Errorf("wrong order/names: %+v", calls)
+	}
+}
+
+func TestAnthropicParseResponse_ExtractsTextualToolCalls(t *testing.T) {
+	body := `{"id":"r1","type":"message","role":"assistant","content":[{"type":"text","text":"<minimax:tool_call>\n<invoke name=\"sh\">\n<parameter name=\"cmd\">ls</parameter>\n</invoke>\n</minimax:tool_call>"}],"usage":{"input_tokens":10,"output_tokens":20},"stop_reason":"end_turn"}`
+	resp, err := anthropicParseResponse([]byte(body), func(_, _ int) float64 { return 0 })
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if strings.Contains(resp.AssistantText, "<invoke") {
+		t.Errorf("assistant text leaks markup: %q", resp.AssistantText)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "sh" {
+		t.Fatalf("tool calls not extracted: %+v", resp.ToolCalls)
 	}
 }
