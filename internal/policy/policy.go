@@ -84,8 +84,6 @@ You have durable memory in this workspace.
 - Use blackboard tools for durable memory retrieval/storage when they are available.
 - MEMORY.md is optional manual/exported notes, not the primary memory transport.
 - If you update MEMORY.md manually, keep it under 100 lines and use dated bullet points.
-- IMPORTANT: Write to MEMORY.md before making changes that will trigger a hot-reload restart
-  (editing .go files under ` + "`./v100 dev`" + `), since the restart will clear your conversation history.
 
 ## Efficiency Rules
 
