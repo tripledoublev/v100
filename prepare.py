@@ -1,12 +1,13 @@
 """
-One-time data preparation for autoresearch experiments.
+One-time data preparation for the v100 training-loop research subsystem.
 Downloads data shards and trains a BPE tokenizer.
 
 Usage:
     python prepare.py                  # full prep (download + tokenizer)
     python prepare.py --num-shards 8   # download only 8 shards (for testing)
 
-Data and tokenizer are stored in ~/.cache/autoresearch/.
+Data and tokenizer are stored in ~/.cache/v100/train-loop/.
+If legacy data exists in ~/.cache/autoresearch/, it is reused automatically.
 """
 
 import os
@@ -35,7 +36,15 @@ EVAL_TOKENS = 40 * 524288  # number of tokens for val eval
 # Configuration
 # ---------------------------------------------------------------------------
 
-CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
+PRIMARY_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "v100", "train-loop")
+LEGACY_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
+
+if os.path.exists(PRIMARY_CACHE_DIR):
+    CACHE_DIR = PRIMARY_CACHE_DIR
+elif os.path.exists(LEGACY_CACHE_DIR):
+    CACHE_DIR = LEGACY_CACHE_DIR
+else:
+    CACHE_DIR = PRIMARY_CACHE_DIR
 DATA_DIR = os.path.join(CACHE_DIR, "data")
 TOKENIZER_DIR = os.path.join(CACHE_DIR, "tokenizer")
 BASE_URL = "https://huggingface.co/datasets/karpathy/climbmix-400b-shuffle/resolve/main"
@@ -369,7 +378,7 @@ def evaluate_bpb(model, tokenizer, batch_size):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Prepare data and tokenizer for autoresearch")
+    parser = argparse.ArgumentParser(description="Prepare data and tokenizer for the v100 training loop")
     parser.add_argument("--num-shards", type=int, default=10, help="Number of training shards to download (-1 = all). Val shard is always pinned.")
     parser.add_argument("--download-workers", type=int, default=8, help="Number of parallel download workers")
     args = parser.parse_args()

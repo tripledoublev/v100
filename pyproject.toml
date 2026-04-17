@@ -1,7 +1,7 @@
 [project]
-name = "autoresearch"
+name = "v100-train-loop"
 version = "0.1.0"
-description = "Autonomous pretraining research swarm"
+description = "Training-loop subsystem for v100"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

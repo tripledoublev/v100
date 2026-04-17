@@ -42,7 +42,7 @@ wheels = [
 ]
 
 [[package]]
-name = "autoresearch"
+name = "v100-train-loop"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

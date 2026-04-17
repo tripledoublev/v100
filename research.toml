@@ -1,4 +1,4 @@
-name = "autoresearch"
+name = "train-loop"
 branch_prefix = "research"
 
 [target]
@@ -9,20 +9,20 @@ program = "program.md"
 [experiment]
 workdir = "."
 log_file = "run.log"
-setup = "source /home/v/main/ai/v100/.env && rsync -az --delete ./ gpubox:~/autoresearch/"
-command = "ssh gpubox 'cd ~/autoresearch && uv run train.py | tee run.log'"
-collect = "scp gpubox:~/autoresearch/run.log {{.LogFile}}"
+setup = "source /home/v/main/ai/v100/.env && rsync -az --delete ./ gpubox:~/v100-train-loop/"
+command = "ssh gpubox 'cd ~/v100-train-loop && uv run train.py | tee run.log'"
+collect = "scp gpubox:~/v100-train-loop/run.log {{.LogFile}}"
 timeout = "10m"
 metric = "val_bpb"
 direction = "lower"
 
 [experiment.tracking.wandb]
 enabled = true
-project = "autoresearch"
+project = "v100"
 group = "cloud"
 job_type = "train"
 run_name = "remote-r{{.Round}}-{{.Commit}}"
-tags = ["remote", "cloud", "autoresearch"]
+tags = ["remote", "cloud", "v100"]
 api_key_env = "WANDB_API_KEY"
 git_auto_disable = true
 
