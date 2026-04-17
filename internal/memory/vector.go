@@ -91,6 +91,17 @@ func (s *VectorStore) Save() error {
 	return os.WriteFile(s.runPath, data, 0644)
 }
 
+// HasTag reports whether any item in the store has the given tag key=value pair.
+// Used for deduplication at indexing time.
+func (s *VectorStore) HasTag(key, value string) bool {
+	for _, item := range s.items {
+		if item.Metadata.Tags != nil && item.Metadata.Tags[key] == value {
+			return true
+		}
+	}
+	return false
+}
+
 // Add appends a new item and saves.
 func (s *VectorStore) Add(item MemoryItem) error {
 	s.items = append(s.items, item)

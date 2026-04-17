@@ -197,3 +197,28 @@ func TestVectorStore_CategoryPersistence(t *testing.T) {
 		t.Errorf("expires_at not persisted: got %v", s2.items[0].ExpiresAt)
 	}
 }
+
+func TestVectorStore_HasTag(t *testing.T) {
+	s := &VectorStore{
+		items: []MemoryItem{
+			{ID: "a", Metadata: Metadata{Tags: map[string]string{"uri": "at://x/1"}}},
+			{ID: "b", Metadata: Metadata{Tags: map[string]string{"uri": "at://x/2"}}},
+			{ID: "c", Metadata: Metadata{}},
+		},
+	}
+
+	if !s.HasTag("uri", "at://x/1") {
+		t.Error("expected HasTag to find existing uri")
+	}
+	if s.HasTag("uri", "at://x/missing") {
+		t.Error("expected HasTag false for unknown value")
+	}
+	if s.HasTag("other", "at://x/1") {
+		t.Error("expected HasTag false for unknown key")
+	}
+
+	empty := &VectorStore{items: []MemoryItem{}}
+	if empty.HasTag("uri", "anything") {
+		t.Error("expected HasTag false on empty store")
+	}
+}

@@ -67,7 +67,7 @@ func (t *atprotoIndexTool) InputSchema() json.RawMessage {
 }
 
 func (t *atprotoIndexTool) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"indexed":{"type":"integer"}}}`)
+	return json.RawMessage(`{"type":"object","properties":{"indexed":{"type":"integer"},"skipped":{"type":"integer"}}}`)
 }
 
 func (t *atprotoIndexTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
@@ -109,7 +109,13 @@ func (t *atprotoIndexTool) Exec(ctx context.Context, call ToolCallContext, args 
 	_ = store.Load()
 
 	indexed := 0
+	skipped := 0
 	for _, r := range records {
+		// Dedup: skip records whose URI is already in the store.
+		if r.uri != "" && store.HasTag("uri", r.uri) {
+			skipped++
+			continue
+		}
 		embResp, embErr := ep.Embed(ctx, providers.EmbedRequest{Text: r.text, Model: t.cfg.Embedding.Model})
 		if embErr != nil {
 			return failResult(start, fmt.Sprintf("embedding record: %s (use --embedding <provider> to specify an embedding provider)", embErr)), nil
@@ -136,7 +142,7 @@ func (t *atprotoIndexTool) Exec(ctx context.Context, call ToolCallContext, args 
 
 	return ToolResult{
 		OK:         true,
-		Output:     fmt.Sprintf(`{"indexed":%d}`, indexed),
+		Output:     fmt.Sprintf(`{"indexed":%d,"skipped":%d}`, indexed, skipped),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -306,8 +312,8 @@ func resolvePDSEndpoint(did string) (string, error) {
 
 	var doc struct {
 		Service []struct {
-			ID             string `json:"id"`
-			Type           string `json:"type"`
+			ID              string `json:"id"`
+			Type            string `json:"type"`
 			ServiceEndpoint string `json:"serviceEndpoint"`
 		} `json:"service"`
 	}
