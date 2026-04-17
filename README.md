@@ -1,149 +1,193 @@
-# autoresearch
+# v100
 
 ![teaser](progress.png)
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+v100 is my engine for agentic research.
 
-The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org. The default `program.md` in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this [tweet](https://x.com/karpathy/status/2029701092347630069) and [this tweet](https://x.com/karpathy/status/2031135152349524125).
+I use it to build, run, study, and evolve autonomous coding agents under real constraints. The core of the project is a Go-based agent runtime with a CLI, TUI, tool safety controls, durable memory, trace replay, benchmarking, eval, policy evolution, and long-running execution paths. Research is one feature of the system, but not the definition of it.
 
-## How it works
+I built v100 to close the loop between idea, execution, observation, and iteration.
 
-The repo is deliberately kept small and only really has three files that matter:
+## What v100 is
 
-- **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
-- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
-- **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
+v100 is the engine I use for agentic research work:
 
-By design, training runs for a **fixed 5-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
+- running interactive agent sessions against real workspaces
+- resuming and replaying runs to understand what happened
+- evaluating runs, comparing them, and distilling traces into training data
+- evolving agent policies against benchmark suites
+- keeping durable memory and retrieval close to the agent runtime
+- experimenting with tool use, safety boundaries, and provider routing
+- running autonomous research loops when I want the system to execute experiments on its own
 
-If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) looks pretty good for a lot more context.
+The `research` command is one feature inside that engine. It matters, but it is not the center of gravity of the repo.
+
+## Current shape of the repo
+
+The high-level mental model is:
+
+- `cmd/v100/` contains the CLI surface
+- `internal/core/` contains the run loop, solvers, tracing, checkpoints, and research orchestration
+- `internal/tools/` contains built-in tools the agent can call
+- `internal/providers/` wraps model backends behind one interface
+- `internal/eval/` contains scoring, analysis, benchmarks, and experiment support
+- `internal/memory/` contains durable memory and vector storage
+- `internal/ui/` contains the terminal UI pieces
+- a few Python files remain for experiment targets, but they are not the center of the system
+
+## Main commands
+
+The CLI surface is fairly broad now. The commands I reach for most often are:
+
+- `v100 run` - start an agent run
+- `v100 resume <run_id>` - resume a previous run
+- `v100 replay <run_id>` - inspect a run trace as a transcript
+- `v100 runs` - browse recent runs
+- `v100 memory ...` - inspect and manage durable memory
+- `v100 research --config research.toml` - run the autonomous research loop
+- `v100 bench run <bench.toml>` - run benchmark suites
+- `v100 analyze`, `v100 eval`, `v100 metrics`, `v100 diff`, `v100 verify` - inspect run behavior and outcomes
+- `v100 evolve ...` - mutate and benchmark agent policy
+- `v100 compress <run_id>` - force-compress long run histories
+- `v100 wake ...` - run recurring autonomous wake cycles
+
+## Recent development direction
+
+Recent work has been concentrated in three areas:
+
+- interactive reliability: fixing CLI confirmation freezes and raw-tty edge cases
+- unattended execution: `--continuous` on `run` and `resume` for longer hands-off sessions
+- retrieval and external context: ATProto indexing/recall and direct `user_posts` fetching from a user's PDS
+
+That direction matches how I use the tool: longer runs, less babysitting, better recall, better observability.
 
 ## Install
 
-Prebuilt releases are published on GitHub for:
+Prebuilt releases are published on GitHub for Linux, macOS, and Windows. The release page also includes `checksums.txt`.
 
-- Linux: `v100-linux-amd64`, `v100-linux-arm64`
-- macOS: `v100-darwin-amd64`, `v100-darwin-arm64`
-- Windows: `v100-windows-amd64.exe`, `v100-windows-arm64.exe`
-
-The release page also includes `checksums.txt` for verifying downloads.
-
-For most users, the easiest path is the installer script for your platform:
+Installer scripts:
 
 - macOS / Linux: `curl -fsSL https://raw.githubusercontent.com/tripledoublev/v100/main/scripts/install.sh | bash`
 - Windows PowerShell: `irm https://raw.githubusercontent.com/tripledoublev/v100/main/scripts/install.ps1 | iex`
 
-If you want to build from source instead, use the quick start below.
+If you prefer to build from source:
+
+```bash
+go build ./cmd/v100
+```
+
+That gives you a local `v100` binary built from the current checkout.
 
 ## Quick start
 
-**Requirements:** A single NVIDIA GPU (tested on H100), Python 3.10+, [uv](https://docs.astral.sh/uv/).
+### 1. Bootstrap config
 
 ```bash
-
-# 1. Install uv project manager (if you don't already have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install dependencies
-uv sync
-
-# 3. Download data and train tokenizer (one-time, ~2 min)
-uv run prepare.py
-
-# 4. Manually run a single training experiment (~5 min)
-uv run train.py
+v100 config init
+v100 doctor
 ```
 
-If the above commands all work ok, your setup is working and you can go into autonomous research mode.
+That writes the default config to the XDG config path and checks the local setup.
 
-## No local GPU: remote research
+### 2. Start an interactive run
 
-If you do not have a local GPU, the research loop can now launch training remotely and still keep the agent, results history, and metric parsing local.
-
-`research.toml` supports:
-
-- `workdir` and `log_file` for where the local launcher runs and where logs are read from.
-- `setup`, `command`, and `collect` hooks so you can sync code to a remote box, submit a cloud job, and pull logs back.
-- Go-template placeholders in those hooks, including `{{.Round}}`, `{{.Commit}}`, `{{.Branch}}`, `{{.RunID}}`, `{{.LogFile}}`, and `{{.WandB.RunName}}`.
-- optional Weights & Biases export via `[experiment.tracking.wandb]`, which injects `WANDB_*` env vars into the launched job.
-
-That means you can drive training in a few different ways without changing Go code:
-
-- SSH to your own rented GPU box.
-- Wrap `setup` / `command` / `collect` around RunPod, Modal, Vast, Lambda, or any other CLI/API script.
-- Keep using a local command when you do have a GPU.
-
-Example pattern:
-
-```toml
-[experiment]
-workdir = "."
-log_file = "run.log"
-setup = "rsync -az --delete ./ gpubox:~/autoresearch/"
-command = "ssh gpubox 'cd ~/autoresearch && uv run train.py | tee run.log'"
-collect = "scp gpubox:~/autoresearch/run.log {{.LogFile}}"
-timeout = "10m"
-metric = "val_bpb"
-direction = "lower"
-
-[experiment.tracking.wandb]
-enabled = true
-project = "autoresearch"
-group = "cloud"
-run_name = "remote-r{{.Round}}-{{.Commit}}"
-tags = ["remote", "cloud"]
-api_key_env = "WANDB_API_KEY"
+```bash
+v100 run --provider codex --workspace .
 ```
 
-For provider-specific cloud launches, the intended pattern is to keep the provider logic in shell scripts or CLIs and let `v100 research` stay responsible for the agent loop, metric comparison, and result bookkeeping.
+Add `--tui` if you want the Bubble Tea interface instead of plain CLI streaming.
 
-## Running the agent
+If you want unattended multi-step execution:
 
-Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
-
-```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
+```bash
+v100 run --provider codex --workspace . --continuous
 ```
 
-The `program.md` file is essentially a super lightweight "skill".
+### 3. Resume, inspect, and compare
+
+```bash
+v100 runs
+v100 resume <run_id>
+v100 replay <run_id>
+v100 metrics <run_id>
+```
+
+## Research
+
+`v100 research` is the subsystem for autonomous experiment loops.
+
+It lets me define:
+
+- the target file and context for the agent
+- the experiment command and metric to parse
+- setup and collect hooks for remote execution
+- local or provider-backed compute
+- round budgets and optional tracking integration
+
+That is useful when I want the system to drive experiments on its own, but it remains one capability inside the broader engine.
+
+## Tooling model
+
+v100 treats tools as a first-class part of the runtime.
+
+- tools are registered centrally and exposed to the model with schemas
+- tools can be marked safe or dangerous
+- dangerous tools can require confirmation
+- reflective steps can be inserted before risky actions
+- traces, checkpoints, and replay make tool behavior inspectable after the fact
+
+This is one of the main reasons I use the project: I want agent autonomy, but I also want to see exactly how it behaves when the environment gets messy.
+
+## Providers
+
+The harness supports multiple model backends behind one interface, including:
+
+- Codex
+- OpenAI
+- Anthropic
+- Gemini
+- GLM
+- MiniMax
+- Ollama
+- llama.cpp
+
+There is also separate embedding-provider support for retrieval tools, so I do not have to use the same backend for chat and vector indexing.
 
 ## Project structure
 
+```text
+cmd/v100/          CLI commands
+internal/core/     loop, solvers, tracing, checkpoints, research
+internal/tools/    tool implementations
+internal/providers/ provider adapters
+internal/eval/     scoring, benchmarks, experiments, analysis
+internal/memory/   durable memory and vector stores
+internal/ui/       terminal UI components
+docs/              architecture notes and issue packs
+research.toml      research loop configuration
 ```
-prepare.py      — constants, data prep + runtime utilities (do not modify)
-train.py        — model, optimizer, training loop (agent modifies this)
-program.md      — agent instructions
-pyproject.toml  — dependencies
-```
 
-## Design choices
+## Notes on tone and scope
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
-- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
-- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
+This is not meant to be a polished general-purpose framework in the abstract. It is my working engine for agentic research. I use it to try ideas quickly, keep the sharp edges visible, and evolve the system in public through actual use.
 
-## Platform support
+That means the repo sometimes carries a mix of:
 
-This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
+- serious runtime and eval infrastructure
+- rough-edged experimental features
+- tooling that exists because I needed it last week
 
-Seeing as there seems to be a lot of interest in tinkering with autoresearch on much smaller compute platforms than an H100, a few extra words. If you're going to try running autoresearch on smaller computers (Macbooks etc.), I'd recommend one of the forks below. On top of this, here are some recommendations for how to tune the defaults for much smaller models for aspiring forks:
+I think that is the right shape for this project.
 
-1. To get half-decent results I'd use a dataset with a lot less entropy, e.g. this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean). These are GPT-4 generated short stories. Because the data is a lot narrower in scope, you will see reasonable results with a lot smaller models (if you try to sample from them after training).
-2. You might experiment with decreasing `vocab_size`, e.g. from 8192 down to 4096, 2048, 1024, or even - simply byte-level tokenizer with 256 possibly bytes after utf-8 encoding.
-3. In `prepare.py`, you'll want to lower `MAX_SEQ_LEN` a lot, depending on the computer even down to 256 etc. As you lower `MAX_SEQ_LEN`, you may want to experiment with increasing `DEVICE_BATCH_SIZE` in `train.py` slightly to compensate. The number of tokens per fwd/bwd pass is the product of these two.
-4. Also in `prepare.py`, you'll want to decrease `EVAL_TOKENS` so that your validation loss is evaluated on a lot less data.
-5. In `train.py`, the primary single knob that controls model complexity is the `DEPTH` (default 8, here). A lot of variables are just functions of this, so e.g. lower it down to e.g. 4.
-6. You'll want to most likely use `WINDOW_PATTERN` of just "L", because "SSSL" uses alternating banded attention pattern that may be very inefficient for you. Try it.
-7. You'll want to lower `TOTAL_BATCH_SIZE` a lot, but keep it powers of 2, e.g. down to `2**14` (~16K) or so even, hard to tell.
+## Development priorities
 
-I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
+The highest-value areas to keep pushing on next are:
 
-## Notable forks
-
-- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)
-- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (MacOS)
-- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
-- [andyluo7/autoresearch](https://github.com/andyluo7/autoresearch) (AMD)
+1. provider and tool integration reliability under long unattended runs
+2. README and docs alignment so the public surface matches the actual product
+3. eval and benchmark coverage for new runtime behaviors
+4. research-loop ergonomics for remote and cloud-backed experiments
+5. memory and retrieval quality, especially around external context sources
 
 ## License
 
