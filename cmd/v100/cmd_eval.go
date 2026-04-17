@@ -240,7 +240,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 	}
 
 	addBenchRunFlags(cmd, opts)
-	cmd.AddCommand(benchRunCmd(cfgPath), benchBootstrapCmd())
+	cmd.AddCommand(benchRunCmd(cfgPath), benchBootstrapCmd(cfgPath))
 	return cmd
 }
 
@@ -260,14 +260,17 @@ func benchRunCmd(cfgPath *string) *cobra.Command {
 	return cmd
 }
 
-func benchBootstrapCmd() *cobra.Command {
+func benchBootstrapCmd(cfgPath *string) *cobra.Command {
 	var provider string
 	var solver string
 	var force bool
+	var toolName string
+	var count int
+	var model string
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap <name>",
-		Short: "Generate a starter bench.toml scaffold",
+		Short: "Generate a bench.toml scaffold (use --tool for LLM-generated adversarial cases)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -303,6 +306,45 @@ expected = "TODO: describe expected output"
 scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, model_graded
 `, name, name, provider, solver)
 
+			// --tool mode: replace the placeholder [[prompts]] block with
+			// LLM-generated adversarial cases for that tool.
+			if toolName != "" {
+				cfg, err := loadConfig(*cfgPath)
+				if err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+				reg := buildToolRegistry(cfg)
+				tool, ok := reg.Lookup(toolName)
+				if !ok {
+					return fmt.Errorf("tool %q not found in registry", toolName)
+				}
+				provName := provider
+				if provName == "" {
+					provName = cfg.Defaults.Provider
+				}
+				prov, err := buildProvider(cfg, provName)
+				if err != nil {
+					return fmt.Errorf("build provider: %w", err)
+				}
+				genModel := model
+				if genModel == "" {
+					genModel = resolveModel(cfg, provName)
+				}
+				fmt.Printf("%s Generating %d adversarial cases for tool %q via %s...\n",
+					ui.Info("→"), count, toolName, provName)
+				cases, err := eval.GenerateAdversarialPrompts(cmd.Context(), prov, genModel,
+					eval.ToolTarget{Name: tool.Name(), Description: tool.Description(), InputSchema: tool.InputSchema()},
+					count)
+				if err != nil {
+					return fmt.Errorf("generate adversarial prompts: %w", err)
+				}
+				fmt.Printf("%s Received %d usable cases\n", ui.OK("✓"), len(cases))
+				if idx := strings.Index(scaffold, "# Define tasks and evaluation criteria"); idx >= 0 {
+					scaffold = scaffold[:idx]
+				}
+				scaffold = eval.RenderBenchTOML(name, provName, solver, cases, scaffold)
+			}
+
 			// Write to file
 			if err := os.WriteFile(filename, []byte(scaffold), 0o644); err != nil {
 				return fmt.Errorf("failed to write %s: %w", filename, err)
@@ -322,6 +364,9 @@ scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, mo
 	cmd.Flags().StringVar(&provider, "provider", "gemini", "default provider for variants")
 	cmd.Flags().StringVar(&solver, "solver", "react", "default solver for variants")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing scaffold file")
+	cmd.Flags().StringVar(&toolName, "tool", "", "if set, generate adversarial cases for this tool via the configured provider")
+	cmd.Flags().IntVar(&count, "count", 20, "number of adversarial cases to generate (only with --tool)")
+	cmd.Flags().StringVar(&model, "model", "", "model override for generation (only with --tool)")
 
 	return cmd
 }
@@ -349,7 +394,6 @@ func addBenchRunFlags(cmd *cobra.Command, opts *benchRunOptions) {
 
 func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) error {
 	if opts.yolo {
-		opts.auto = true
 		opts.unsafe = true
 	}
 

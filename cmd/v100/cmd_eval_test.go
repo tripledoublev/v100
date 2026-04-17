@@ -173,7 +173,8 @@ func TestBenchBootstrapRefusesOverwriteWithoutForce(t *testing.T) {
 			return err
 		}
 
-		cmd := benchBootstrapCmd()
+		cfgPath := ""
+		cmd := benchBootstrapCmd(&cfgPath)
 		err := cmd.RunE(cmd, []string{"demo"})
 		if err == nil {
 			t.Fatal("expected bootstrap overwrite to fail without --force")
@@ -202,7 +203,8 @@ func TestBenchBootstrapForceOverwritesWithValidScaffold(t *testing.T) {
 			return err
 		}
 
-		cmd := benchBootstrapCmd()
+		cfgPath := ""
+		cmd := benchBootstrapCmd(&cfgPath)
 		if err := cmd.Flags().Set("force", "true"); err != nil {
 			return err
 		}
