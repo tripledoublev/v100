@@ -272,15 +272,25 @@ func buildProviderFromConfig(cfg *config.Config, pc config.ProviderConfig) (prov
 		return nil, err
 	}
 
-	// Wrap with ResilientProvider if fallbacks are configured.
+	// Wrap with ResilientProvider if fallbacks are configured. Skip names
+	// equal to the primary (self-reference) and any that fail to build —
+	// missing credentials for a fallback shouldn't break the primary path.
 	if len(pc.Fallbacks) > 0 {
 		fbs := make([]providers.Provider, 0, len(pc.Fallbacks))
 		for _, fbName := range pc.Fallbacks {
-			if fb, err := buildProvider(cfg, fbName); err == nil {
-				fbs = append(fbs, fb)
+			if fbName == raw.Name() {
+				continue
 			}
+			fb, err := buildProvider(cfg, fbName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "→ fallback %q for %q unavailable: %v\n", fbName, raw.Name(), err)
+				continue
+			}
+			fbs = append(fbs, fb)
 		}
-		raw = providers.NewResilientProvider(raw, fbs)
+		if len(fbs) > 0 {
+			raw = providers.NewResilientProvider(raw, fbs)
+		}
 	}
 	return providers.WithRetry(raw, providers.DefaultRetryConfig()), nil
 }

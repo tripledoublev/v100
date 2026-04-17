@@ -74,6 +74,19 @@ func normalizeRetryConfig(cfg RetryConfig) RetryConfig {
 func (rp *RetryProvider) Name() string               { return rp.inner.Name() }
 func (rp *RetryProvider) Capabilities() Capabilities { return rp.inner.Capabilities() }
 
+// Unwrap returns the wrapped provider so callers can reach through retry
+// middleware for type assertions (e.g. health reporting).
+func (rp *RetryProvider) Unwrap() Provider { return rp.inner }
+
+// HealthStatus forwards to the inner provider when it supports health
+// reporting (e.g. *ResilientProvider). Returns nil for plain providers.
+func (rp *RetryProvider) HealthStatus() []HealthStatus {
+	if hr, ok := rp.inner.(interface{ HealthStatus() []HealthStatus }); ok {
+		return hr.HealthStatus()
+	}
+	return nil
+}
+
 func (rp *RetryProvider) Embed(ctx context.Context, req EmbedRequest) (EmbedResponse, error) {
 	return retryCall(ctx, rp.config, func() (EmbedResponse, error) {
 		return rp.inner.Embed(ctx, req)

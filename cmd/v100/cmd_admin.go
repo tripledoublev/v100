@@ -102,9 +102,10 @@ func providersHealthCmd(cfgPath *string) *cobra.Command {
 				if err != nil {
 					continue
 				}
-				if rp, ok := prov.(*providers.ResilientProvider); ok {
-					statuses := rp.HealthStatus()
-					allStatuses = append(allStatuses, statuses...)
+				if hr, ok := prov.(interface {
+					HealthStatus() []providers.HealthStatus
+				}); ok {
+					allStatuses = append(allStatuses, hr.HealthStatus()...)
 				}
 			}
 			if len(allStatuses) == 0 {
