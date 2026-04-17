@@ -1,0 +1,65 @@
+name = "solver-comparison-v1"
+
+# Compare various non-Anthropic providers and solvers across different tasks.
+
+[[variants]]
+name = "gemini-flash-react"
+provider = "gemini"
+model = "gemini-2.5-flash"
+solver = "react"
+budget_steps = 20
+
+[[variants]]
+name = "openai-4o-react"
+provider = "openai"
+model = "gpt-4o"
+solver = "react"
+budget_steps = 20
+
+[[variants]]
+name = "glm-5-react"
+provider = "glm"
+model = "GLM-5.1"
+solver = "react"
+budget_steps = 20
+
+[[variants]]
+name = "miniglm-hybrid"
+solver = "miniglm"
+budget_steps = 20
+
+[[variants]]
+name = "gemini-flash-plan"
+provider = "gemini"
+model = "gemini-2.5-flash"
+solver = "plan_execute"
+budget_steps = 20
+
+[[variants]]
+name = "mistral-large-react"
+provider = "mistral"
+model = "mistral-large-latest"
+solver = "react"
+budget_steps = 20
+
+# Task 1: Code Generation & Idiomatic Go
+[[prompts]]
+message = "Write a Go function to calculate the SHA-256 hash of a file efficiently using `io.Copy`. Ensure it handles errors correctly and returns the hash as a hex string."
+scorer = "contains"
+expected = "crypto/sha256"
+
+# Task 2: Architectural Reasoning
+[[prompts]]
+message = "Compare the `react` solver (internal/core/solver_react.go) and `plan_execute` solver (internal/core/solver_plan.go). List three significant architectural differences in how they handle tool execution."
+scorer = "reflective"
+
+# Task 3: Tool-Assisted Search & Synthesis
+[[prompts]]
+message = "Search the codebase for all occurrences of 'Watchdog' and explain how they are used by solvers to prevent infinite loops or excessive tool usage."
+scorer = "reflective"
+
+# Task 4: Structured Data Extraction
+[[prompts]]
+message = "Examine internal/config/config.go. Extract all provider names and their default models defined in the `DefaultConfig` function. Format the output as a Markdown table with columns: Provider, Model, Type."
+scorer = "contains"
+expected = "| Provider | Model | Type |"
