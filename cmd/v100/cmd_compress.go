@@ -21,8 +21,9 @@ type CompressCheckpoint struct {
 
 func compressCmd(cfgPath *string) *cobra.Command {
 	var (
-		providerFlag string
-		dryRunFlag   bool
+		providerFlag   string
+		dryRunFlag     bool
+		recompressFlag bool
 	)
 
 	cmd := &cobra.Command{
@@ -49,7 +50,26 @@ func compressCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			msgs, _, _, _, _ := reconstructHistory(runDir, events)
+			// Decide source: --recompress uses existing checkpoint, default uses raw trace.
+			var msgs []providers.Message
+			if recompressFlag {
+				ckMsgs, err := loadCheckpoint(runDir)
+				if err != nil {
+					return fmt.Errorf("--recompress: %w", err)
+				}
+				if len(ckMsgs) == 0 {
+					return fmt.Errorf("--recompress: no existing compress.checkpoint.json found in %s; run `v100 compress` first", runDir)
+				}
+				msgs = ckMsgs
+				fmt.Fprintf(os.Stderr, "recompressing from existing checkpoint (%d messages)\n", len(msgs))
+			} else {
+				msgs, _, _, _, _ = reconstructHistory(runDir, events)
+				// Hint if a checkpoint already exists
+				if ckMsgs, _ := loadCheckpoint(runDir); len(ckMsgs) > 0 {
+					fmt.Fprintf(os.Stderr, "note: existing compress.checkpoint.json found (%d messages); use --recompress to squash it further\n", len(ckMsgs))
+				}
+			}
+
 			if len(msgs) == 0 {
 				return fmt.Errorf("no messages found in trace %s", runID)
 			}
@@ -85,6 +105,7 @@ func compressCmd(cfgPath *string) *cobra.Command {
 				fmt.Printf("messages:     %d\n", len(msgs))
 				fmt.Printf("tokens_est:   %d\n", tokensBefore)
 				fmt.Printf("provider:     %s\n", cp.Name())
+				fmt.Printf("source:       %s\n", sourceLabel(recompressFlag))
 				fmt.Println("(dry-run: no changes written)")
 				return nil
 			}
@@ -115,6 +136,7 @@ func compressCmd(cfgPath *string) *cobra.Command {
 			fmt.Printf("messages:     %d → %d\n", len(msgs), len(loop.Messages))
 			fmt.Printf("tokens_est:   %d → %d  (saved %d, %d%%)\n", tokensBefore, tokensAfter, saved, pct)
 			fmt.Printf("provider:     %s\n", cp.Name())
+			fmt.Printf("source:       %s\n", sourceLabel(recompressFlag))
 
 			// Write checkpoint for `v100 resume` to pick up
 			checkpointPath := filepath.Join(runDir, "compress.checkpoint.json")
@@ -133,7 +155,16 @@ func compressCmd(cfgPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&providerFlag, "provider", "", "provider to use for compression (overrides config compress_provider)")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "print stats without compressing or writing checkpoint")
+	cmd.Flags().BoolVar(&recompressFlag, "recompress", false, "compress the existing checkpoint instead of the original trace")
 	return cmd
+}
+
+// sourceLabel returns a human-readable label for the compression source.
+func sourceLabel(recompress bool) string {
+	if recompress {
+		return "compress.checkpoint.json (recompress)"
+	}
+	return "trace.jsonl (original)"
 }
 
 // estimateTokensSlice is a package-level wrapper so cmd_compress.go can call
@@ -167,4 +198,3 @@ func loadCheckpoint(runDir string) ([]providers.Message, error) {
 	}
 	return ck.Messages, nil
 }
-
