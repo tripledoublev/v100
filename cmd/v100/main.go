@@ -21,7 +21,7 @@ func rootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:     "v100",
-		Short:   "Modular CLI/TUI agent harness",
+		Short:   "Engine for agentic research",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Don't check for updates if we are actually running the update command itself.

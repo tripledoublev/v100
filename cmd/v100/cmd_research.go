@@ -33,7 +33,7 @@ func researchCmd(cfgPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "research",
-		Short: "Autonomous experiment loop (autoresearch-style)",
+		Short: "Run autonomous experiment loops inside v100",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if researchConfigPath == "" {
 				return fmt.Errorf("--config is required")

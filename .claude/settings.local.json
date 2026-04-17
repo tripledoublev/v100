@@ -51,7 +51,9 @@
       "WebFetch(domain:developers.minimaxi.com)",
       "Bash(GOWORK=off go test -race ./...)",
       "Bash(GOWORK=off bash scripts/lint.sh)",
-      "Bash(GOWORK=off go test:*)"
+      "Bash(GOWORK=off go test:*)",
+      "Bash(llama-cli --version)",
+      "Bash(llama-server --version)"
     ]
   }
 }
