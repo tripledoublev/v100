@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/tts"
 	"golang.org/x/term"
 )
 
@@ -29,7 +30,39 @@ type CLIRenderer struct {
 	modelCallDone  chan struct{}
 	Verbose        bool
 	streamedText   bool // set when EventModelToken prints; skip text in EventModelResp if true
+	speaker        *tts.Speaker
 	mu             sync.Mutex
+}
+
+// EnableTTS attaches a background speaker that voices assistant text.
+func (r *CLIRenderer) EnableTTS() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.speaker == nil {
+		r.speaker = tts.NewSpeaker()
+	}
+}
+
+// WaitForSpeech blocks until the TTS queue is fully drained. Safe to call
+// when TTS is disabled — it returns immediately.
+func (r *CLIRenderer) WaitForSpeech() {
+	r.mu.Lock()
+	sp := r.speaker
+	r.mu.Unlock()
+	if sp != nil {
+		sp.Wait()
+	}
+}
+
+// Close releases renderer resources (e.g. the TTS speaker).
+func (r *CLIRenderer) Close() {
+	r.mu.Lock()
+	sp := r.speaker
+	r.speaker = nil
+	r.mu.Unlock()
+	if sp != nil {
+		sp.Close()
+	}
 }
 
 type PromptResult struct {
@@ -172,6 +205,9 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 				styleAssistant.Render("agent"),
 				indented,
 			)
+		}
+		if p.Text != "" && r.speaker != nil {
+			r.speaker.Speak(p.Text)
 		}
 		// If text was streamed and there are tool calls, print a blank line for separation.
 		if streamedText && len(p.ToolCalls) > 0 {

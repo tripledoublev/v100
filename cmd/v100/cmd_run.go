@@ -57,6 +57,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		verboseFlag      bool
 		exitFlag         bool
 		continuousFlag   bool
+		speakFlag        bool
 		planFlag         bool
 		nameFlag         string
 		tagFlags         []string
@@ -317,7 +318,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if tuiFlag {
 				return runWithTUI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, continuousFlag, genParams, solver, initialPrompt, session, mapper)
 			}
-			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, continuousFlag, planFlag, genParams, solver, initialPrompt, session, mapper)
+			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, continuousFlag, planFlag, speakFlag, genParams, solver, initialPrompt, session, mapper)
 		},
 	}
 
@@ -348,6 +349,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
 	cmd.Flags().BoolVar(&exitFlag, "exit", false, "exit after the initial prompt completes without entering interactive mode")
 	cmd.Flags().BoolVar(&continuousFlag, "continuous", false, "automatically continue after each step without waiting for user input")
+	cmd.Flags().BoolVar(&speakFlag, "speak", false, "speak assistant responses via TTS (default: espeak-ng; override with V100_TTS_CMD)")
 	cmd.Flags().BoolVar(&planFlag, "plan", false, "preview a plan and require approval before execution (CLI only)")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "human-readable run name (stored in meta.json)")
 	cmd.Flags().StringSliceVar(&tagFlags, "tag", nil, "key=value tags for the run (repeatable)")
@@ -402,7 +404,7 @@ func validatePlanMode(planMode bool, tuiMode bool, solverName string) error {
 }
 
 func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embedProv providers.Provider, reg *tools.Registry, pol *policy.Policy,
-	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, continuous bool, planMode bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
+	trace *core.TraceWriter, budget *core.BudgetTracker, model, confirmMode, workspace string, verbose bool, exitAfterPrompt bool, continuous bool, planMode bool, speak bool, genParams providers.GenParams, solver core.Solver, initialPrompt string, session executor.Session, mapper *core.PathMapper) error {
 
 	// Auto-exit when stdin is piped (not a TTY) to avoid hanging after prompt
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -411,6 +413,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 
 	renderer := ui.NewCLIRenderer()
 	renderer.Verbose = verbose
+	if speak {
+		renderer.EnableTTS()
+		defer renderer.Close()
+	}
 
 	baseConfirmFn := buildConfirmFn(confirmMode)
 	var confirmActive atomic.Bool
@@ -566,7 +572,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 
 	var providerErr bool
 	var (
-		firstStep  = true
+		firstStep        = true
+		voiceInteractive = false
 		contInput  string
 		contImages []providers.ImageAttachment
 		loopInput  string
@@ -634,21 +641,59 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 			contInput = ""
 			contImages = nil
 		} else {
-			promptResult, err := ui.PromptWithImages("")
-			if err != nil {
-				reason = "user_exit"
-				break
-			}
-			loopInput = strings.TrimSpace(promptResult.Text)
-			loopImages = make([]providers.ImageAttachment, 0, len(promptResult.Images))
-			for _, img := range promptResult.Images {
-				loopImages = append(loopImages, providers.ImageAttachment{MIMEType: "image/png", Data: img})
-			}
-			if loopInput == "" && len(loopImages) == 0 {
-				continue
-			}
-			if loopInput == "/quit" || loopInput == "/exit" {
-				break
+			if voiceInteractive {
+				renderer.WaitForSpeech()
+				transcribed, verr := captureVoiceInput()
+				if verr != nil {
+					fmt.Fprintln(os.Stderr, ui.Warn("voice: "+verr.Error()))
+					voiceInteractive = false
+					continue
+				}
+				if transcribed == "" {
+					continue
+				}
+				if isStopVoicePhrase(transcribed) {
+					fmt.Println(ui.Dim("🎙  voice mode off"))
+					voiceInteractive = false
+					continue
+				}
+				fmt.Println(ui.Dim("🎙  ") + transcribed)
+				loopInput = transcribed
+				loopImages = nil
+			} else {
+				promptResult, err := ui.PromptWithImages("")
+				if err != nil {
+					reason = "user_exit"
+					break
+				}
+				loopInput = strings.TrimSpace(promptResult.Text)
+				loopImages = make([]providers.ImageAttachment, 0, len(promptResult.Images))
+				for _, img := range promptResult.Images {
+					loopImages = append(loopImages, providers.ImageAttachment{MIMEType: "image/png", Data: img})
+				}
+				if loopInput == "" && len(loopImages) == 0 {
+					continue
+				}
+				if loopInput == "/quit" || loopInput == "/exit" {
+					break
+				}
+				if loopInput == "/voice interactive" || loopInput == "/voice i" {
+					voiceInteractive = true
+					fmt.Println(ui.Dim("🎙  voice mode on — say \"stop voice\" to exit"))
+					continue
+				}
+				if loopInput == "/voice" {
+					transcribed, verr := captureVoiceInput()
+					if verr != nil {
+						fmt.Fprintln(os.Stderr, ui.Warn("voice: "+verr.Error()))
+						continue
+					}
+					if transcribed == "" {
+						continue
+					}
+					fmt.Println(ui.Dim("🎙  ") + transcribed)
+					loopInput = transcribed
+				}
 			}
 		}
 		firstStep = false
