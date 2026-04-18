@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.2.18 — 2026-04-17
+
+**Provider Resilience, Voice I/O, Bench Bootstrap, and XML Leak Fix**
+
+### Features
+
+- **Resilient provider with health tracking** — `ResilientProvider` wraps a primary provider with an ordered fallback chain and a per-provider `HealthTracker` (sliding-window error rate + cooldown-gated single-probe retry). Unhealthy primaries are short-circuited in favor of healthy fallbacks until one successful probe restores them. `v100 providers health` surfaces the live status, forwarded through `RetryProvider`.
+- **Voice input/output via `--speak`** — `run --speak` voices assistant replies through `espeak-ng` (override with `V100_TTS_CMD`). At the CLI prompt, `/voice` captures a one-shot utterance and `/voice interactive` enters continuous voice mode (say "stop voice" to exit). TTS output is drained before the next mic capture to avoid feedback.
+- **`bench bootstrap` subcommand** — Scaffolds a bench TOML from a short description using an LLM, optionally appending to an existing file. Refuses to overwrite without `--force`.
+- **`compress --recompress`** — Squashes an existing `compress.checkpoint.json` further, instead of starting from the raw trace. The default path now hints when a checkpoint is already present.
+- **`claude` provider alias** — Added as an alias of `anthropic` in defaults and `/claude` mode in interactive prompts. Default model is `claude-opus-4-7`.
+- **`atproto_index` deduplication** — Records with URIs already present in the vector store are skipped; the tool now reports `skipped` alongside `indexed`.
+
+### Bug Fixes
+
+- **MiniMax XML tool-call leak** — Anthropic-compatible providers (notably MiniMax) sometimes emit tool calls as raw `<minimax:tool_call><invoke name="...">…</invoke></minimax:tool_call>` XML inside text content blocks. `ExtractTextualToolCalls` now strips that markup from assistant text and promotes each `<invoke>` into a real `ToolCall`, in both the non-streaming (`anthropicParseResponse`) and streaming (react solver convergence) paths. The TUI transcript no longer shows XML bleed.
+- **`HealthTracker` probe gating** — After cooldown elapsed, `IsHealthy` returned true on every call, effectively disabling fallback. It now re-arms `unhealthyAt` on each probe-true so only one probe per cooldown window is allowed, and clears it on real recovery.
+- **`FileSHA256` error check** — The `file.Close` error return is now explicitly discarded (errcheck baseline).
+
+### Maintenance
+
+- **Rename** — `autoresearch` → `v100 train-loop` across `prepare.py`, `pyproject.toml`, `research.toml`, `train.py`, `program.md`. Legacy `~/.cache/autoresearch/` is still read if present.
+- **Docs** — `README.md`, `docs/architecture.md`, and new `docs/workflows.md` refreshed. CLI and research-command taglines updated.
+- **`.gitignore`** — Ignore `*.log`.
+
 ## v0.2.17 — 2026-04-16
 
 **CLI Confirm Fix, Continuous Mode, and ATProto Index Improvements**
