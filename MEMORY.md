@@ -1,27 +1,25 @@
 # MEMORY — v100 Development Log
 
-## 2025-04-18: Three Phase 400 items shipped
+## 2025-04-18: Phase 400 — COMPLETE ✓
 
-### CWI — Context Window Intelligence ✓ (aad0319)
-- `internal/core/context.go` — `PressureMonitor` PolicyHook
-- Warns at 70% context saturation, forces compress at 80.5%
+All 5 items shipped across 4 commits:
 
-### ASH — Agent Self-Healing ✓ (258fd3b)
-- `internal/core/recovery.go` — `RecoveryHook` with stuck detection, error pattern matching, graceful degradation
-- Auto-wired into all runs via lazy hook init
+| # | Item | Commit | Files |
+|---|------|--------|-------|
+| 2 | CWI — Context Window Intelligence | `aad0319` | context.go, context_test.go |
+| 4 | ASH — Agent Self-Healing | `258fd3b` | recovery.go, recovery_test.go |
+| 3 | CEP — Continuous Eval Pipeline | `846ac91` | history.go, history_test.go, cmd_eval.go |
+| 5 | DA — Dogfood Automation | `1cafa4d` | dogfood.go, dogfood_test.go, cmd_dogfood.go |
+| 1 | PRR — Provider Resilience | v0.2.18 | (pre-existing) |
 
-### CEP — Continuous Eval Pipeline ✓ (846ac91)
-- `internal/eval/history.go` — `LoadHistory`, `Sparkline`, `FormatHistoryTable`, `FormatTrendSummary`
-- `v100 bench history <name>` — table of all runs with scores
-- `v100 bench trend <name>` — sparkline + drift detection (10% regression alert)
-- `--runs` flag for custom runs directory
+### New CLI commands:
+- `v100 bench history <name>` — score history table
+- `v100 bench trend <name>` — sparkline + drift detection
+- `v100 dogfood run [quest...]` — execute self-test quests
+- `v100 dogfood report` — summary of last run
 
-### Phase 400 Status:
-- ✅ 1. Provider Resilience (PRR) — v0.2.18
-- ✅ 2. Context Window Intelligence (CWI)
-- ✅ 3. Continuous Eval Pipeline (CEP)
-- ✅ 4. Agent Self-Healing (ASH)
-- ❌ 5. Dogfood Automation (DA)
+### New hooks (auto-wired):
+- `PressureMonitor` — warns at 70% context, compresses at 80.5%
+- `RecoveryHook` — stuck detection, error pattern matching, graceful degradation
 
-## 2025-04-18: Tool Detail Pane ✓
-- 3rd column TUI, Ctrl+D / click to inspect tool calls
+### Test counts added: 31 new tests (8+10+7+6)

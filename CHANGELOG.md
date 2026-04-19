@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.2.19 — 2026-04-18
+
+**Context Intelligence, Self-Healing, Eval Pipeline, Dogfood Automation, and TUI Detail Pane**
+
+### Features
+
+- **Context Window Intelligence (CWI)** — `PressureMonitor` PolicyHook tracks estimated token usage against the model's context window. At 70% saturation, injects a guidance message encouraging conciseness. At 80.5%, forces a replan that triggers compression. Configurable via `Policy.PressureThreshold`. Exposes `ContextPressure` and `ContextWindowSize` in `LoopState` for all hooks. Emits `context.pressure` trace events.
+- **Agent Self-Healing (ASH)** — `RecoveryHook` PolicyHook detects stuck agents and intervenes: (1) stuck detection after 3+ consecutive tool failures with a reflective guidance message, (2) error pattern matching against 14 common failure signatures (missing files, permission denied, rate limits, bad patches, syntax errors) with targeted correction hints, (3) graceful degradation after 3+ failures of the same tool with optional tool disabling. Auto-wired into all runs via lazy hook initialization.
+- **Continuous Eval Pipeline (CEP)** — `v100 bench history <name>` scans run directories for matching bench runs and prints a score history table. `v100 bench trend <name>` renders an ASCII sparkline of pass/fail scores with drift detection (10% regression alert). Both support `--runs` flag for custom run directories. New `internal/eval/history.go` with `LoadHistory`, `Sparkline`, `FormatHistoryTable`, `FormatTrendSummary`.
+- **Dogfood Automation (DA)** — `v100 dogfood run [quest...]` auto-discovers bench TOML files in `dogfood/`, runs them sequentially with git commit tagging, and prints a summary report. `v100 dogfood report` shows results from the last run. Includes regression detection comparing against previous runs. New `internal/eval/dogfood.go` with quest discovery, filtering, and report formatting.
+- **TUI Tool Detail Pane** — Third column in the TUI showing full tool call details when a tool result is selected. Toggle with Ctrl+D or click on any tool result line. Scrollable viewport for long outputs. Three-column layout: transcript (35%) | detail (35%) | trace+metrics (30%), falls back to two-column on narrow terminals. Escape key dismisses. Includes inline image rendering with height capping and chunked Kitty graphics payloads.
+
+### New CLI Commands
+
+- `v100 bench history <bench-name>` — show score history for a benchmark
+- `v100 bench trend <bench-name>` — show ASCII sparkline trend with drift detection
+- `v100 dogfood run [quest...]` — execute v100's self-test quest suite
+- `v100 dogfood report` — show results from last dogfood run
+
+### New Trace Events
+
+- `context.pressure` — emitted when context pressure exceeds threshold, with `ContextPressurePayload`
+
+### New Policy Fields
+
+- `PressureThreshold float64` — context pressure ratio to trigger proactive compression (0 = disabled, default 0.70)
+
+### New Hook Types
+
+- `PressureMonitor(threshold) PolicyHook` — proactive context management
+- `RecoveryHook(config) PolicyHook` — agent self-healing with stuck detection, error patterns, degradation
+
+### Maintenance
+
+- Phase 400 roadmap complete: Provider Resilience, Context Intelligence, Eval Pipeline, Self-Healing, Dogfood Automation all shipped.
+- Phase 300 roadmap complete: Reflective Scoring, Prompt Mutation, Synthetic Bootstrapping, Constraint-Gated Evolution all shipped.
+
 ## v0.2.18 — 2026-04-17
 
 **Provider Resilience, Voice I/O, Bench Bootstrap, and XML Leak Fix**
