@@ -260,7 +260,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if !sub {
 			data, _ := base64.StdEncoding.DecodeString(p.Data)
 			if m.imageRenderer != nil {
-				_ = m.imageRenderer.Render(data, m.width/2)
+				maxRows := m.height / 2
+				if maxRows < 4 {
+					maxRows = 4
+				}
+				_ = m.imageRenderer.Render(data, m.width/2, maxRows)
 			}
 			m.addItem(&TranscriptItem{
 				Type:      ItemImage,

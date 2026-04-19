@@ -410,7 +410,7 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		data, _ := base64.StdEncoding.DecodeString(p.Data)
 		img := ""
 		if r.imageRenderer != nil {
-			img = r.imageRenderer.Render(data, 80)
+			img = r.imageRenderer.Render(data, 80, 0)
 		} else {
 			img = RenderImageInlineAuto(data, 80)
 		}

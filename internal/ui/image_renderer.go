@@ -74,9 +74,9 @@ func (r *ImageRenderer) Diagnostics() []string {
 }
 
 // Render writes an image to the terminal. maxCells is the maximum width in
-// terminal cell columns. Returns a human-readable placeholder string for the
-// transcript buffer (no escape sequences).
-func (r *ImageRenderer) Render(data []byte, maxCells int) string {
+// terminal cell columns. maxRows caps the displayed height in rows (0 = no cap).
+// Returns a human-readable placeholder string for the transcript buffer.
+func (r *ImageRenderer) Render(data []byte, maxCells int, maxRows int) string {
 	if len(data) == 0 {
 		return "[empty image]"
 	}
@@ -90,9 +90,9 @@ func (r *ImageRenderer) Render(data []byte, maxCells int) string {
 
 	switch r.backend {
 	case BackendKitty:
-		return r.renderKitty(data, pxW, pxH, maxCells)
+		return r.renderKitty(data, pxW, pxH, maxCells, maxRows)
 	case BackendIterm2:
-		return r.renderIterm2(data, pxW, pxH, maxCells)
+		return r.renderIterm2(data, pxW, pxH, maxCells, maxRows)
 	default:
 		return r.renderText(pxW, pxH, len(data))
 	}
@@ -167,7 +167,7 @@ func (r *ImageRenderer) probeKittyProtocol() bool {
 
 // ── Kitty graphics protocol ──────────────────────────────────
 
-func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells int) string {
+func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells, maxRows int) string {
 	id := r.nextID
 	r.nextID++
 	r.ids = append(r.ids, id)
@@ -179,6 +179,14 @@ func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells int) string 
 	rows := int(float64(pxH)*float64(cells)/float64(pxW) + 0.5)
 	if rows <= 0 {
 		rows = 1
+	}
+	// Cap height; rescale width to preserve aspect ratio.
+	if maxRows > 0 && rows > maxRows {
+		rows = maxRows
+		cells = int(float64(pxW)*float64(rows)/float64(pxH) + 0.5)
+		if cells <= 0 {
+			cells = 1
+		}
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(data)
@@ -217,13 +225,20 @@ func (r *ImageRenderer) writeKittyChunked(meta, b64 string) error {
 
 // ── iTerm2 inline protocol ───────────────────────────────────
 
-func (r *ImageRenderer) renderIterm2(data []byte, pxW, pxH, maxCells int) string {
+func (r *ImageRenderer) renderIterm2(data []byte, pxW, pxH, maxCells, maxRows int) string {
 	b64 := base64.StdEncoding.EncodeToString(data)
 	cells := maxCells
 	if cells <= 0 {
 		cells = 80
 	}
-	seq := fmt.Sprintf("\x1b]1337;File=width=%d;preserveAspectRatio=1;inline=1:%s\x07", cells, b64)
+	heightAttr := ""
+	if maxRows > 0 {
+		rows := int(float64(pxH)*float64(cells)/float64(pxW) + 0.5)
+		if rows > maxRows {
+			heightAttr = fmt.Sprintf("height=%d;", maxRows)
+		}
+	}
+	seq := fmt.Sprintf("\x1b]1337;File=width=%d;%spreserveAspectRatio=1;inline=1:%s\x07", cells, heightAttr, b64)
 	if err := r.writeTty(seq); err != nil {
 		r.logf("iterm2 write failed: %v", err)
 		return r.renderText(pxW, pxH, len(data))
