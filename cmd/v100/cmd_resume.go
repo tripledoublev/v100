@@ -395,7 +395,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		}
 	}
 
-	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
+	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY, ui.ReviewTargets{})
 
 	confirmFn := func(toolName, args string) bool {
 		if cfg.Defaults.ConfirmTools == "never" {

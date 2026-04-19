@@ -222,7 +222,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 }
 
 func snapshotFixtureModel(width, height int) *TUIModel {
-	m := NewTUIModel()
+	m := NewTUIModel(ReviewTargets{})
 	m.width = width
 	m.height = height
 	m.showTrace = true

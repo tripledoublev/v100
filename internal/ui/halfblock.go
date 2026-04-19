@@ -41,18 +41,18 @@ func RenderHalfBlocks(data []byte, maxCols, maxRows int, cellAspect float64) str
 		cellAspect = DefaultCellAspect
 	}
 
-	// Each cell row displays 2 source pixel rows via half-block chars.
-	// cellHeight in units where width=1: cellHeight = 1/cellAspect
-	// Visual height of one cell row = 2 pixels × cellHeight
-	// For correct aspect: srcW/srcH = targetCols / (targetRows × 2 × cellHeight)
+	// Aspect-ratio math (all in cell-width units where cell width = 1):
+	//
+	//   cellHeight = 1/cellAspect  (display height of one terminal row)
+	//   For correct aspect: srcW/srcH = targetCols / (targetRows * cellHeight)
+	//   targetRows = srcH * targetCols / (srcW * cellHeight)
 	cellHeight := 1.0 / cellAspect
-	pixelsPerCellRow := 2.0 * cellHeight
 
 	targetCols := maxCols
-	targetRows := int(float64(srcH)*float64(targetCols)/(float64(srcW)*pixelsPerCellRow) + 0.5)
+	targetRows := int(float64(srcH)*float64(targetCols)/(float64(srcW)*cellHeight) + 0.5)
 	if targetRows > maxRows {
 		targetRows = maxRows
-		targetCols = int(float64(srcW)*float64(targetRows)*pixelsPerCellRow/float64(srcH) + 0.5)
+		targetCols = int(float64(srcW)*float64(targetRows)*cellHeight/float64(srcH) + 0.5)
 	}
 	if targetCols <= 0 {
 		targetCols = 1

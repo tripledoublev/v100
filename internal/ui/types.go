@@ -41,6 +41,18 @@ type runIdentity struct {
 	Model    string
 }
 
+type reviewTargetConfig struct {
+	Enabled      bool
+	Label        string
+	ProviderName string
+	ModelName    string
+}
+
+type ReviewTargets struct {
+	Codex  reviewTargetConfig
+	Claude reviewTargetConfig
+}
+
 // toolDetailTarget maps a rendered line to a specific ToolExecution.
 type toolDetailTarget struct {
 	lineNo    int
@@ -162,6 +174,8 @@ type TUIModel struct {
 	leftPanePct      int
 	tracePanePct     int
 	detailPanePct    int
+	codexTarget      reviewTargetConfig
+	claudeTarget     reviewTargetConfig
 	verbose          bool
 	showMetrics      bool
 

@@ -20,7 +20,7 @@ func updateKey(m *TUIModel, msg tea.KeyMsg) *TUIModel {
 }
 
 func TestViewRendersHeaderInBoundedHeight(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(ReviewTargets{})
 	m.width = 140
 	m.height = 42
 	view := m.View()

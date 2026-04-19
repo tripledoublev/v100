@@ -7,7 +7,7 @@ import (
 )
 
 // NewTUIModel creates a fresh TUI model.
-func NewTUIModel() *TUIModel {
+func NewTUIModel(targets ReviewTargets) *TUIModel {
 	ti := textinput.New()
 	ti.Placeholder = "ask v100 to inspect, patch, or debug..."
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
@@ -35,6 +35,8 @@ func NewTUIModel() *TUIModel {
 		leftPanePct:        66,
 		tracePanePct:       50,
 		detailPanePct:      35,
+		codexTarget:        targets.Codex,
+		claudeTarget:       targets.Claude,
 		runIdentityByRunID: make(map[string]runIdentity),
 		radioURL:           "https://n04.radiojar.com/78cxy6wkxtzuv",
 		radioPlayer:        detectRadioPlayer(),
