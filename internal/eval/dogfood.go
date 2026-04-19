@@ -1,0 +1,275 @@
+package eval
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// DogfoodQuest represents a single dogfood bench file.
+type DogfoodQuest struct {
+	Name     string // bench name from TOML
+	File     string // relative path to bench file
+	Category string // derived from filename prefix
+}
+
+// DogfoodResult holds the outcome of running a single quest.
+type DogfoodResult struct {
+	Quest    DogfoodQuest
+	RunID    string
+	Score    string // pass, fail, partial, error, skipped
+	Duration time.Duration
+	Error    string
+}
+
+// DogfoodReport is the aggregated result of a full dogfood run.
+type DogfoodReport struct {
+	Timestamp time.Time
+	Commit    string
+	Results   []DogfoodResult
+	Total     int
+	Passed    int
+	Failed    int
+	Skipped   int
+}
+
+// DiscoverQuests finds all bench TOML files in the dogfood directory.
+// Searches for *.bench.toml and *_test.toml patterns.
+func DiscoverQuests(dogfoodDir string) ([]DogfoodQuest, error) {
+	entries, err := os.ReadDir(dogfoodDir)
+	if err != nil {
+		return nil, fmt.Errorf("read dogfood dir: %w", err)
+	}
+
+	var quests []DogfoodQuest
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".toml") {
+			continue
+		}
+		// Skip README and non-bench files
+		if strings.HasPrefix(strings.ToLower(name), "readme") {
+			continue
+		}
+
+		fullPath := filepath.Join(dogfoodDir, name)
+
+		// Try to load and extract the bench name
+		// We just use the filename as a fallback
+		category := "general"
+		base := strings.TrimSuffix(name, ".toml")
+		if idx := strings.Index(base, "-"); idx > 0 {
+			category = base[:idx]
+		}
+		// Clean up common suffixes
+		category = strings.TrimSuffix(category, ".bench")
+		category = strings.TrimSuffix(category, "_test")
+
+		quests = append(quests, DogfoodQuest{
+			Name:     base,
+			File:     fullPath,
+			Category: category,
+		})
+	}
+
+	return quests, nil
+}
+
+// FilterQuests filters quests by name. If names is empty, returns all.
+func FilterQuests(quests []DogfoodQuest, names []string) []DogfoodQuest {
+	if len(names) == 0 {
+		return quests
+	}
+
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[strings.ToLower(n)] = true
+	}
+
+	var filtered []DogfoodQuest
+	for _, q := range quests {
+		if want[strings.ToLower(q.Name)] || want[strings.ToLower(filepath.Base(q.File))] {
+			filtered = append(filtered, q)
+		}
+	}
+	return filtered
+}
+
+// FormatReport renders a DogfoodReport as a summary table.
+func FormatReport(report DogfoodReport) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Dogfood Report — %s", report.Timestamp.Format("2006-01-02 15:04:05")))
+	if report.Commit != "" {
+		sb.WriteString(fmt.Sprintf(" (commit: %s)", shortCommit(report.Commit)))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("─", 70))
+	sb.WriteString("\n")
+
+	sb.WriteString(fmt.Sprintf("%-35s %-10s %-10s %s\n",
+		"QUEST", "SCORE", "DURATION", "NOTES"))
+	sb.WriteString(strings.Repeat("─", 70))
+	sb.WriteString("\n")
+
+	for _, r := range report.Results {
+		score := strings.ToUpper(r.Score)
+		if score == "" {
+			score = "?"
+		}
+
+		duration := "-"
+		if r.Duration > 0 {
+			duration = fmt.Sprintf("%.1fs", r.Duration.Seconds())
+		}
+
+		notes := ""
+		if r.Error != "" {
+			notes = r.Error
+			if len(notes) > 40 {
+				notes = notes[:37] + "..."
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("%-35s %-10s %-10s %s\n",
+			r.Quest.Name, score, duration, notes))
+	}
+
+	sb.WriteString(strings.Repeat("─", 70))
+	sb.WriteString("\n")
+
+	passRate := 0.0
+	if report.Total > 0 {
+		passRate = float64(report.Passed) / float64(report.Total) * 100
+	}
+
+	verdict := "PASS"
+	if passRate < 100 {
+		verdict = fmt.Sprintf("PARTIAL (%.0f%%)", passRate)
+	}
+	if report.Passed == 0 && report.Total > 0 {
+		verdict = "FAIL"
+	}
+
+	sb.WriteString(fmt.Sprintf("Total: %d  |  Pass: %d  |  Fail: %d  |  Skipped: %d  |  Verdict: %s\n",
+		report.Total, report.Passed, report.Failed, report.Skipped, verdict))
+
+	return sb.String()
+}
+
+// DetectRegressions compares current results against a previous report.
+// Returns quest names that went from pass → fail.
+func DetectRegressions(current []DogfoodResult, previous []DogfoodResult) []string {
+	prevScores := make(map[string]string, len(previous))
+	for _, r := range previous {
+		key := r.Quest.Name
+		prevScores[key] = strings.ToLower(r.Score)
+	}
+
+	var regressions []string
+	for _, r := range current {
+		prev := prevScores[r.Quest.Name]
+		curr := strings.ToLower(r.Score)
+		if prev == "pass" && (curr == "fail" || curr == "error") {
+			regressions = append(regressions, r.Quest.Name)
+		}
+	}
+	return regressions
+}
+
+// LoadLastDogfoodReport scans runs for the most recent dogfood run
+// and reconstructs results from run meta.json files.
+func LoadLastDogfoodReport(runsDir string) ([]DogfoodResult, error) {
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find the most recent run with dogfood tags
+	type runInfo struct {
+		dir       string
+		createdAt time.Time
+	}
+
+	var dogfoodRuns []runInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metaPath := filepath.Join(runsDir, entry.Name(), "meta.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var raw struct {
+			Tags      map[string]string `json:"tags"`
+			CreatedAt time.Time         `json:"created_at"`
+		}
+		if err := parseJSON(data, &raw); err != nil {
+			continue
+		}
+		if raw.Tags != nil && raw.Tags["dogfood"] != "" {
+			dogfoodRuns = append(dogfoodRuns, runInfo{
+				dir:       filepath.Join(runsDir, entry.Name()),
+				createdAt: raw.CreatedAt,
+			})
+		}
+	}
+
+	if len(dogfoodRuns) == 0 {
+		return nil, nil
+	}
+
+	// Sort by time descending, take the most recent batch
+	// Group by commit hash to get a full run
+	var results []DogfoodResult
+	for _, run := range dogfoodRuns {
+		metaPath := filepath.Join(run.dir, "meta.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var raw struct {
+			RunID     string            `json:"run_id"`
+			Name      string            `json:"name"`
+			Score     string            `json:"score"`
+			Tags      map[string]string `json:"tags"`
+			CreatedAt time.Time         `json:"created_at"`
+		}
+		if err := parseJSON(data, &raw); err != nil {
+			continue
+		}
+
+		questName := raw.Tags["dogfood"]
+		if questName == "" {
+			questName = raw.Name
+		}
+
+		results = append(results, DogfoodResult{
+			Quest: DogfoodQuest{
+				Name: questName,
+			},
+			RunID: raw.RunID,
+			Score: raw.Score,
+		})
+	}
+
+	return results, nil
+}
+
+func parseJSON(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
+
+func shortCommit(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
+}
