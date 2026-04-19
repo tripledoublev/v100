@@ -259,13 +259,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
 			data, _ := base64.StdEncoding.DecodeString(p.Data)
-			if m.imageRenderer != nil {
-				maxRows := m.height / 2
-				if maxRows < 4 {
-					maxRows = 4
-				}
-				_ = m.imageRenderer.Render(data, m.width/2, maxRows)
-			}
 			m.addItem(&TranscriptItem{
 				Type:      ItemImage,
 				Images:    [][]byte{data},
@@ -320,15 +313,19 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 
 		case ItemImage:
 			if len(item.Images) > 0 {
-				img := renderImageSummary(item.Images[0])
-				if m.imageRenderer != nil {
-					w, h := GetPNGDimensions(item.Images[0])
-					img = m.imageRenderer.renderText(w, h, len(item.Images[0]))
+				maxCols := m.transcriptWrapWidth()
+				if maxCols < 8 {
+					maxCols = 8
 				}
-				if img != "" {
-					// Direct write to buffer without any lipgloss/wrap intervention
-					m.transcriptBuf.WriteString("\n\n" + img + "\n\n")
+				maxRows := m.height / 2
+				if maxRows < 4 {
+					maxRows = 4
 				}
+				img := RenderHalfBlocks(item.Images[0], maxCols, maxRows, DefaultCellAspect)
+				if img == "" {
+					img = renderImageSummary(item.Images[0])
+				}
+				m.transcriptBuf.WriteString("\n" + img + "\n")
 			}
 
 		case ItemMessage:
