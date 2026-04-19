@@ -165,6 +165,67 @@ func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
 	}
 }
 
+func TestAssistantProducerMetadataStaysBoundToOriginalRun(t *testing.T) {
+	m := NewTUIModel()
+	now := time.Now()
+
+	runStartA, err := json.Marshal(core.RunStartPayload{
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.appendEvent(core.Event{
+		TS:      now,
+		RunID:   "run-aaaa",
+		Type:    core.EventRunStart,
+		Payload: runStartA,
+	})
+
+	modelRespA, err := json.Marshal(core.ModelRespPayload{Text: "first response"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.appendEvent(core.Event{
+		TS:      now.Add(time.Second),
+		RunID:   "run-aaaa",
+		Type:    core.EventModelResp,
+		Payload: modelRespA,
+	})
+
+	runStartB, err := json.Marshal(core.RunStartPayload{
+		Provider: "codex",
+		Model:    "gpt-5.4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.appendEvent(core.Event{
+		TS:      now.Add(2 * time.Second),
+		RunID:   "run-bbbb",
+		Type:    core.EventRunStart,
+		Payload: runStartB,
+	})
+
+	var firstAssistant *TranscriptItem
+	for _, item := range m.history {
+		if item.Type == ItemMessage && item.Role == "v100" {
+			firstAssistant = item
+			break
+		}
+	}
+	if firstAssistant == nil {
+		t.Fatal("expected assistant transcript item")
+	}
+	if firstAssistant.Provider != "anthropic" {
+		t.Fatalf("provider = %q, want anthropic", firstAssistant.Provider)
+	}
+	if firstAssistant.Model != "claude-sonnet-4" {
+		t.Fatalf("model = %q, want claude-sonnet-4", firstAssistant.Model)
+	}
+}
+
 func TestUserMessageAppearsInTranscript(t *testing.T) {
 	m := NewTUIModel()
 	m.width = 100

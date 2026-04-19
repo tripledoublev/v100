@@ -31,6 +31,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		m.runIdentityByRunID[ev.RunID] = runIdentity{Provider: p.Provider, Model: p.Model}
 		m.maxSteps = 50
 		m.maxTokens = p.ModelMetadata.ContextSize
 		if m.maxTokens == 0 {
@@ -82,11 +83,14 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if sub {
 			break
 		}
+		identity := m.runIdentityByRunID[ev.RunID]
 		if p.Text != "" {
 			m.addItem(&TranscriptItem{
 				Type:      ItemMessage,
 				Role:      "v100",
 				Text:      p.Text,
+				Provider:  identity.Provider,
+				Model:     identity.Model,
 				Timestamp: ev.TS,
 			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", p.Text)
@@ -184,6 +188,8 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		parentIdentity := m.runIdentityByRunID[ev.RunID]
+		m.runIdentityByRunID[p.AgentRunID] = runIdentity{Provider: parentIdentity.Provider, Model: p.Model}
 		m.activeAgents = append(m.activeAgents, agentFrame{
 			RunID:    p.AgentRunID,
 			CallID:   p.ParentCallID,

@@ -36,6 +36,11 @@ type copyTarget struct {
 	content string
 }
 
+type runIdentity struct {
+	Provider string
+	Model    string
+}
+
 // toolDetailTarget maps a rendered line to a specific ToolExecution.
 type toolDetailTarget struct {
 	lineNo    int
@@ -82,6 +87,8 @@ type TranscriptItem struct {
 	Type      TranscriptItemType
 	Role      string // "user", "v100", "system"
 	Text      string
+	Provider  string
+	Model     string
 	Images    [][]byte
 	Tokens    []string // accumulated token stream for ItemTokenGroup
 	ToolExecs []*ToolExecution
@@ -122,23 +129,24 @@ type TUIModel struct {
 	lastTraceCount     int
 	lastTraceEventType core.EventType
 
-	history        []*TranscriptItem
-	nextItemID     int
-	toggleTargets  []toggleTarget
-	copyTargets    []copyTarget
-	detailTargets  []toolDetailTarget // maps transcript line -> tool exec for click handling
-	plainBuf       strings.Builder // plain-text transcript for full-copy
-	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
-	traceStepCount int             // running step count for trace pane
-	activeAgents   []agentFrame
-	agentDoneCount int
-	agentFailCount int
-	lastAgentNote  string
-	device         deviceStatus
-	modelEvents    []time.Time
-	toolEvents     []time.Time
-	compressEvents []time.Time
-	lastEventAt    time.Time
+	history            []*TranscriptItem
+	nextItemID         int
+	toggleTargets      []toggleTarget
+	copyTargets        []copyTarget
+	runIdentityByRunID map[string]runIdentity
+	detailTargets      []toolDetailTarget // maps transcript line -> tool exec for click handling
+	plainBuf           strings.Builder    // plain-text transcript for full-copy
+	inSubAgent         int                // nesting depth; >0 means inside agent.start..agent.end
+	traceStepCount     int                // running step count for trace pane
+	activeAgents       []agentFrame
+	agentDoneCount     int
+	agentFailCount     int
+	lastAgentNote      string
+	device             deviceStatus
+	modelEvents        []time.Time
+	toolEvents         []time.Time
+	compressEvents     []time.Time
+	lastEventAt        time.Time
 
 	focus            focus
 	showTrace        bool
