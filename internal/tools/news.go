@@ -24,6 +24,7 @@ type newsFetchArgs struct {
 	Sources    []string `json:"sources"`
 	MaxItems   int      `json:"max_items"`
 	FreshHours int      `json:"fresh_hours"`
+	Fresh      bool     `json:"fresh"`
 }
 
 type newsItem struct {
@@ -181,7 +182,8 @@ func (t *newsFetchTool) InputSchema() json.RawMessage {
 			"language": {"type": "string", "description": "Preferred language: en, fr, or any.", "default": "any"},
 			"sources": {"type": "array", "items": {"type": "string"}, "description": "Optional explicit source names or URLs. If omitted, sensible defaults are chosen for the region/topic."},
 			"max_items": {"type": "integer", "description": "Maximum number of headlines to return.", "default": 8},
-			"fresh_hours": {"type": "integer", "description": "If positive, prefer items published within this many hours when timestamps are available.", "default": 24}
+			"fresh_hours": {"type": "integer", "description": "If positive, prefer items published within this many hours when timestamps are available.", "default": 24},
+			"fresh": {"type": "boolean", "description": "Force a fresh fetch, bypassing intermediate caches.", "default": false}
 		}
 	}`)
 }
@@ -265,6 +267,8 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		perSourceLimit = 1
 	}
 
+	fresh := a.Fresh
+
 	items := make([]newsItem, 0, a.MaxItems)
 	failures := make([]newsFailure, 0)
 	seen := map[string]struct{}{}
@@ -281,7 +285,7 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 			sourceCall.TimeoutMS = 15000
 		}
 
-		got, fail := fetchNewsSource(ctx, sourceCall, req, a.FreshHours)
+		got, fail := fetchNewsSource(ctx, sourceCall, req, a.FreshHours, fresh)
 		if fail.Error != "" {
 			failures = append(failures, fail)
 		}
@@ -351,9 +355,9 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	return sanitizeToolResult(call, result), nil
 }
 
-func fetchNewsSource(ctx context.Context, call ToolCallContext, req newsSourceRequest, freshHours int) ([]newsItem, newsFailure) {
+func fetchNewsSource(ctx context.Context, call ToolCallContext, req newsSourceRequest, freshHours int, fresh bool) ([]newsItem, newsFailure) {
 	start := time.Now()
-	resp, fail, err := fetchHTTP(ctx, call, start, req.URL, 256*1024)
+	resp, fail, err := fetchHTTP(ctx, call, start, req.URL, 256*1024, fresh)
 	if err != nil {
 		return nil, newsFailure{Source: req.Name, URL: req.URL, Error: err.Error()}
 	}

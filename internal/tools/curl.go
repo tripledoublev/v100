@@ -84,7 +84,7 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	if a.MaxBytes <= 0 || a.MaxBytes > 2*1024*1024 {
 		a.MaxBytes = 128 * 1024
 	}
-	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes)
+	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes, false)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -101,8 +101,8 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	}, nil
 }
 
-func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPBody, *ToolResult, error) {
-	resp, fail, err := fetchHTTP(ctx, call, start, url, maxBytes)
+func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64, fresh bool) (fetchedHTTPBody, *ToolResult, error) {
+	resp, fail, err := fetchHTTP(ctx, call, start, url, maxBytes, fresh)
 	if err != nil {
 		return fetchedHTTPBody{}, nil, err
 	}
@@ -116,9 +116,9 @@ func fetchHTTPBody(ctx context.Context, call ToolCallContext, start time.Time, u
 	}, nil, nil
 }
 
-func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPResponse, *ToolResult, error) {
+func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64, fresh bool) (fetchedHTTPResponse, *ToolResult, error) {
 	if call.Session != nil && call.Session.Type() == "docker" {
-		return fetchHTTPInSession(ctx, call, start, url, maxBytes)
+		return fetchHTTPInSession(ctx, call, start, url, maxBytes, fresh)
 	}
 
 	timeout := 20 * time.Second
@@ -134,6 +134,10 @@ func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url s
 		return fetchedHTTPResponse{}, &res, nil
 	}
 	req.Header.Set("User-Agent", "v100/1.0 (+https://github.com/tripledoublev/v100)")
+	if fresh {
+		req.Header.Set("Cache-Control", "no-cache")
+		req.Header.Set("Pragma", "no-cache")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -141,7 +145,7 @@ func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url s
 		// This handles environments where the Go HTTP client is blocked for specific
 		// hosts but shell curl can reach them (e.g. cbc.ca in some sandboxes).
 		if call.Session != nil {
-			return fetchHTTPInSession(ctx, call, start, url, maxBytes)
+			return fetchHTTPInSession(ctx, call, start, url, maxBytes, fresh)
 		}
 		fail := failResult(start, "request failed: "+err.Error())
 		return fetchedHTTPResponse{}, &fail, nil
@@ -162,7 +166,7 @@ func fetchHTTP(ctx context.Context, call ToolCallContext, start time.Time, url s
 	}, nil, nil
 }
 
-func fetchHTTPInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64) (fetchedHTTPResponse, *ToolResult, error) {
+func fetchHTTPInSession(ctx context.Context, call ToolCallContext, start time.Time, url string, maxBytes int64, fresh bool) (fetchedHTTPResponse, *ToolResult, error) {
 	timeout := 20 * time.Second
 	if call.TimeoutMS > 0 {
 		timeout = time.Duration(call.TimeoutMS) * time.Millisecond

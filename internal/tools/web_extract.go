@@ -66,7 +66,7 @@ func (t *webExtractTool) Exec(ctx context.Context, call ToolCallContext, args js
 		a.MaxBytes = 128 * 1024
 	}
 
-	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes)
+	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes, false)
 	if err != nil {
 		return ToolResult{}, err
 	}
