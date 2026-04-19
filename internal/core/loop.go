@@ -48,6 +48,7 @@ type Loop struct {
 	ModelMetadata    providers.ModelMetadata
 	NetworkTier      string
 	Hooks            []PolicyHook
+	pressureHook     PolicyHook // lazily initialized from Policy.PressureThreshold
 
 	Snapshots SnapshotManager
 	stepCount int // running step counter for step.summary events
@@ -72,24 +73,43 @@ const (
 )
 
 func (l *Loop) runHooks(stepID string, stage HookStage) HookResult {
-	if len(l.Hooks) == 0 {
+	// Lazily initialize pressure monitor hook from policy.
+	if l.pressureHook == nil && l.Policy != nil {
+		if l.Policy.PressureThreshold > 0 || l.Policy.PressureThreshold == 0 {
+			// Always initialize with default threshold (0 means use default 0.70)
+			l.pressureHook = PressureMonitor(l.Policy.PressureThreshold)
+		}
+	}
+
+	allHooks := l.Hooks
+	if l.pressureHook != nil {
+		allHooks = append(allHooks, l.pressureHook)
+	}
+	if len(allHooks) == 0 {
 		return HookResult{Action: HookContinue}
 	}
 
 	state := LoopState{
-		RunID:           l.Run.ID,
-		Stage:           stage,
-		StepCount:       l.stepCount,
-		MessageCount:    len(l.Messages),
-		LastToolOK:      l.lastToolOK,
-		LastToolOutput:  l.lastToolOutput,
-		LastToolName:    l.lastToolName,
-		LastToolArgs:    l.lastToolArgs,
-		BudgetRemaining: l.Budget.Budget(),
+		RunID:             l.Run.ID,
+		Stage:             stage,
+		StepCount:         l.stepCount,
+		MessageCount:      len(l.Messages),
+		LastToolOK:        l.lastToolOK,
+		LastToolOutput:    l.lastToolOutput,
+		LastToolName:      l.lastToolName,
+		LastToolArgs:      l.lastToolArgs,
+		BudgetRemaining:   l.Budget.Budget(),
 		// CompressionCount could be tracked if needed, using stats for now
 	}
 
-	for _, hook := range l.Hooks {
+	// Compute context pressure from model metadata.
+	if l.ModelMetadata.ContextSize > 0 {
+		estTokens := estimateTokens(l.Messages)
+		state.ContextPressure = float64(estTokens) / float64(l.ModelMetadata.ContextSize)
+		state.ContextWindowSize = l.ModelMetadata.ContextSize
+	}
+
+	for _, hook := range allHooks {
 		res := hook(state)
 		if res.Action != HookContinue {
 			actionStr := ""

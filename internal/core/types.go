@@ -15,6 +15,7 @@ const (
 	EventRunStart         EventType = "run.start"
 	EventUserMsg          EventType = "user.message"
 	EventModelCall        EventType = "model.call"
+	EventContextPressure  EventType = "context.pressure"
 	EventModelResp        EventType = "model.response"
 	EventModelToken       EventType = "model.token"
 	EventToolCall         EventType = "tool.call"
@@ -84,6 +85,8 @@ type LoopState struct {
 	LastToolName     string
 	LastToolArgs     string
 	BudgetRemaining  Budget
+	ContextPressure  float64 // estimated tokens / context window size (0 if unknown)
+	ContextWindowSize int    // model's context window in tokens (0 if unknown)
 	CompressionCount int
 }
 
@@ -366,4 +369,14 @@ type ErrBudgetExceeded struct {
 
 func (e *ErrBudgetExceeded) Error() string {
 	return "budget exceeded: " + e.Reason
+}
+
+// ContextPressurePayload is the payload for EventContextPressure.
+type ContextPressurePayload struct {
+	TokensUsed  int     `json:"tokens_used"`
+	ContextSize int     `json:"context_size"`
+	Pressure    float64 `json:"pressure"`
+	Threshold   float64 `json:"threshold"`
+	Action      string  `json:"action"` // "warn" or "compress"
+	Triggered   bool    `json:"triggered"`
 }

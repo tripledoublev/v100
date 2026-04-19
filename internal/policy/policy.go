@@ -14,7 +14,8 @@ type Policy struct {
 	CompressProtectRecent int    // recent messages protected from compression (default 6)
 	Streaming             bool   // enable streaming for providers that support it
 	ReflectOnDangerous    bool   // if true, run an extra model call to assess confidence before dangerous tool execution
-	DisableWatchdogs      bool   // if true, disable step-level inspection/read-heavy watchdog interventions
+	DisableWatchdogs      bool     // if true, disable step-level inspection/read-heavy watchdog interventions
+	PressureThreshold   float64 // context pressure ratio to trigger proactive compression (0 = disabled, default 0.70)
 }
 
 // LegacyDefaultSystemPrompt is the historical generated default prompt kept for exact-match migrations.
