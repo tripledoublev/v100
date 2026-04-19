@@ -172,7 +172,6 @@ func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells int) string 
 	r.nextID++
 	r.ids = append(r.ids, id)
 
-	// Calculate cell dimensions: kitty uses c=columns, r=rows
 	cells := maxCells
 	if cells <= 0 {
 		cells = 80
@@ -185,14 +184,35 @@ func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells int) string 
 	b64 := base64.StdEncoding.EncodeToString(data)
 	meta := fmt.Sprintf("a=T,f=100,c=%d,r=%d,i=%d", cells, rows, id)
 
-	// Write escape sequence directly to tty
-	seq := fmt.Sprintf("\x1b_G%s;%s\x1b\\", meta, b64)
-	if err := r.writeTty(seq); err != nil {
+	if err := r.writeKittyChunked(meta, b64); err != nil {
 		r.logf("kitty write failed: %v", err)
 		return r.renderText(pxW, pxH, len(data))
 	}
 
 	return fmt.Sprintf("[🖼 image %dx%d rendered via kitty protocol]", pxW, pxH)
+}
+
+// writeKittyChunked emits a kitty graphics command, splitting the base64 payload
+// into ≤4096-byte chunks per the kitty protocol. The first chunk carries the
+// full metadata; subsequent chunks carry only m=1 (more) or m=0 (final).
+func (r *ImageRenderer) writeKittyChunked(meta, b64 string) error {
+	const chunkSize = 4096
+	if len(b64) <= chunkSize {
+		seq := fmt.Sprintf("\x1b_G%s;%s\x1b\\", meta, b64)
+		return r.writeTty(seq)
+	}
+	first := b64[:chunkSize]
+	rest := b64[chunkSize:]
+	if err := r.writeTty(fmt.Sprintf("\x1b_G%s,m=1;%s\x1b\\", meta, first)); err != nil {
+		return err
+	}
+	for len(rest) > chunkSize {
+		if err := r.writeTty(fmt.Sprintf("\x1b_Gm=1;%s\x1b\\", rest[:chunkSize])); err != nil {
+			return err
+		}
+		rest = rest[chunkSize:]
+	}
+	return r.writeTty(fmt.Sprintf("\x1b_Gm=0;%s\x1b\\", rest))
 }
 
 // ── iTerm2 inline protocol ───────────────────────────────────
