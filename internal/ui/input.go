@@ -11,6 +11,7 @@ import (
 )
 
 var clipboardImageReader = readClipboardImage
+var clipboardCopyWriter = copyToClipboard
 
 var urlRegex = regexp.MustCompile(`https?://[^\s)\]'"]+`)
 
@@ -226,7 +227,7 @@ func (m *TUIModel) tryClickMessageAction(termX, termY int) tea.Cmd {
 		}
 		switch action.action {
 		case actionCopy:
-			if err := copyToClipboard(action.content); err != nil {
+			if err := clipboardCopyWriter(action.content); err != nil {
 				m.statusLine = "copy failed: " + err.Error()
 				m.statusMode = "error"
 			} else {

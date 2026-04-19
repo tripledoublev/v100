@@ -157,7 +157,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+m":
 			m.showMetrics = !m.showMetrics
 		case "ctrl+a":
-			if err := copyToClipboard(m.plainBuf.String()); err != nil {
+			if err := clipboardCopyWriter(m.plainBuf.String()); err != nil {
 				m.statusLine = "copy failed: " + err.Error()
 				m.statusMode = "error"
 			} else {
