@@ -85,7 +85,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if p.Text != "" {
 			m.addItem(&TranscriptItem{
 				Type:      ItemMessage,
-				Role:      "v100",
+				Role:      "assistant",
 				Text:      p.Text,
 				Timestamp: ev.TS,
 			})
@@ -302,7 +302,7 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 	m.messageActions = nil
 	m.toggleTargets = nil
 
-	for _, item := range m.history {
+	for itemIndex, item := range m.history {
 		ts := styleMuted.Render(item.Timestamp.Local().Format(time.TimeOnly))
 		switch item.Type {
 		case ItemWelcome:
@@ -340,40 +340,16 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 				} else {
 					wrapped := m.wrapPlainForTranscript(item.Text)
 					_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleWarn.Render("v100"), wrapped)
-					iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-					m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-					m.messageActions = append(m.messageActions, messageActionTarget{
-						lineNo:   iconLine,
-						colStart: 11,
-						colEnd:   19,
-						action:   actionCopy,
-						content:  item.Text,
-					})
+					m.writeMessageActionRow("           ", item, itemIndex)
 				}
 			case "user":
 				wrapped := m.wrapPlainForTranscript(item.Text)
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
-				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-				m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-				m.messageActions = append(m.messageActions, messageActionTarget{
-					lineNo:   iconLine,
-					colStart: 11,
-					colEnd:   19,
-					action:   actionCopy,
-					content:  item.Text,
-				})
-			case "v100":
+				m.writeMessageActionRow("           ", item, itemIndex)
+			case "assistant":
 				rendered := m.renderMarkdownForPane(item.Text)
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
-				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
-				m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-				m.messageActions = append(m.messageActions, messageActionTarget{
-					lineNo:   iconLine,
-					colStart: 4,
-					colEnd:   12,
-					action:   actionCopy,
-					content:  item.Text,
-				})
+				m.writeMessageActionRow("    ", item, itemIndex)
 			}
 
 		case ItemToolGroup:
