@@ -6,30 +6,32 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 var clipboardImageReader = readClipboardImage
 
 var urlRegex = regexp.MustCompile(`https?://[^\s)\]'"]+`)
 
-func (m *TUIModel) handleMouseClick(x, y int) {
+func (m *TUIModel) handleMouseClick(x, y int) tea.Cmd {
 	if m.width <= 0 || m.height <= 0 {
-		return
+		return nil
 	}
 	// Input box occupies the last 3 rows (top border + content + bottom border).
 	inputStartY := m.height - 3
 	if y >= inputStartY {
 		m.focus = focusInput
 		m.input.Focus()
-		return
+		return nil
 	}
 	if !m.showTrace {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
-		m.tryClickMessageAction(x, y)
+		cmd := m.tryClickMessageAction(x, y)
 		m.activateFocus(focusTranscript)
-		return
+		return cmd
 	}
 
 	if m.showDetail && m.selectedToolExec != nil {
@@ -38,16 +40,16 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 			m.tryClickURL(x, y)
 			m.tryClickToggleTarget(y)
 			m.tryClickToolDetail(y)
-			m.tryClickMessageAction(x, y)
+			cmd := m.tryClickMessageAction(x, y)
 			m.activateFocus(focusTranscript)
-			return
+			return cmd
 		}
 		if x <= detailEnd {
 			m.activateFocus(focusDetail)
-			return
+			return nil
 		}
 		m.focusRightColumn(y)
-		return
+		return nil
 	}
 
 	// Left pane outer width = leftW(inner) + 2 borders. Right pane starts at leftW+2+1.
@@ -61,11 +63,12 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
-		m.tryClickMessageAction(x, y)
+		cmd := m.tryClickMessageAction(x, y)
 		m.activateFocus(focusTranscript)
-		return
+		return cmd
 	}
 	m.focusRightColumn(y)
+	return nil
 }
 
 func (m *TUIModel) tryClickURL(termX, termY int) {
@@ -210,10 +213,10 @@ func (m *TUIModel) threeColumnBoundaries() (int, int) {
 }
 
 // tryClickMessageAction checks if the click matches a message action hitbox and dispatches it.
-func (m *TUIModel) tryClickMessageAction(termX, termY int) bool {
+func (m *TUIModel) tryClickMessageAction(termX, termY int) tea.Cmd {
 	const contentStartRow = 2
 	if termY < contentStartRow {
-		return false
+		return nil
 	}
 	contentLine := (termY - contentStartRow) + m.transcript.YOffset
 	localX := termX - 1
@@ -230,11 +233,11 @@ func (m *TUIModel) tryClickMessageAction(termX, termY int) bool {
 				m.statusLine = "copied to clipboard!"
 			}
 		default:
-			_ = action.contextUser
+			return m.startReview(action.action, action)
 		}
-		return true
+		return nil
 	}
-	return false
+	return nil
 }
 
 func copyToClipboard(text string) error {

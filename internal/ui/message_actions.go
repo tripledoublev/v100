@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"context"
+	"os/exec"
 	"strings"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
@@ -56,4 +60,70 @@ func (m *TUIModel) writeMessageActionRow(indent string, item *TranscriptItem, it
 		})
 	}
 	m.transcriptBuf.WriteByte('\n')
+}
+
+func buildReviewPrompt(contextUser, assistantText string) string {
+	if strings.TrimSpace(contextUser) == "" {
+		return "Please review the following assistant response.\n\nAssistant response:\n" + assistantText
+	}
+	return "Please review the following assistant response.\n\nOriginal user request:\n" + contextUser + "\n\nAssistant response:\n" + assistantText
+}
+
+func realRunReview(ctx context.Context, kind messageActionKind, prompt string) (string, error) {
+	var cmd *exec.Cmd
+	switch kind {
+	case actionAskCodex:
+		cmd = exec.CommandContext(ctx, "codex", "exec", prompt)
+	case actionAskClaude:
+		cmd = exec.CommandContext(ctx, "claude", "-p", prompt)
+	default:
+		return "", nil
+	}
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func reviewLabel(kind messageActionKind) string {
+	switch kind {
+	case actionAskCodex:
+		return "codex"
+	case actionAskClaude:
+		return "claude"
+	default:
+		return "assistant"
+	}
+}
+
+func truncateReviewStatus(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) > 200 {
+		return s[:200]
+	}
+	return s
+}
+
+func (m *TUIModel) startReview(action messageActionKind, target messageActionTarget) tea.Cmd {
+	if m.reviewCancel != nil || m.runReview == nil {
+		return nil
+	}
+
+	item := &TranscriptItem{
+		Type:      ItemMessage,
+		Role:      reviewLabel(action),
+		Text:      "",
+		Timestamp: time.Now(),
+	}
+	m.addItem(item)
+	m.rebuildTranscript(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	m.reviewCancel = cancel
+	m.statusMode = "thinking"
+	m.statusLine = "asking " + reviewLabel(action) + "..."
+
+	prompt := buildReviewPrompt(target.contextUser, target.content)
+	return func() tea.Msg {
+		output, err := m.runReview(ctx, action, prompt)
+		return reviewDoneMsg{action: action, itemID: item.ID, output: output, err: err}
+	}
 }

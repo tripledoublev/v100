@@ -346,10 +346,16 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 				wrapped := m.wrapPlainForTranscript(item.Text)
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
 				m.writeMessageActionRow("           ", item, itemIndex)
-			case "assistant":
+			case "assistant", "codex", "claude":
+				label := "v100"
+				if item.Role != "assistant" {
+					label = item.Role
+				}
 				rendered := m.renderMarkdownForPane(item.Text)
-				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
-				m.writeMessageActionRow("    ", item, itemIndex)
+				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render(label), rendered)
+				if item.Role == "assistant" {
+					m.writeMessageActionRow("    ", item, itemIndex)
+				}
 			}
 
 		case ItemToolGroup:

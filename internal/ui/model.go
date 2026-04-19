@@ -40,6 +40,7 @@ func NewTUIModel(codexAvailable, claudeAvailable bool) *TUIModel {
 		radioURL:        "https://n04.radiojar.com/78cxy6wkxtzuv",
 		radioPlayer:     detectRadioPlayer(),
 		radioVolume:     60,
+		runReview:       realRunReview,
 		imageRenderer:   NewImageRenderer(),
 	}
 	m.seedWelcomeContent()

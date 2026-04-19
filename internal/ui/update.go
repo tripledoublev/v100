@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -88,8 +90,41 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			m.handleMouseClick(msg.X, msg.Y)
+			if cmd := m.handleMouseClick(msg.X, msg.Y); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
+
+	case reviewDoneMsg:
+		if m.reviewCancel != nil {
+			m.reviewCancel = nil
+		}
+		for _, item := range m.history {
+			if item.ID == msg.itemID {
+				item.Text = msg.output
+				if strings.TrimSpace(item.Text) == "" && msg.err != nil {
+					item.Text = truncateReviewStatus(msg.err.Error())
+				}
+				break
+			}
+		}
+		if msg.err != nil {
+			if errors.Is(msg.err, context.Canceled) {
+				m.statusMode = "idle"
+				m.statusLine = reviewLabel(msg.action) + " canceled"
+				m.rebuildTranscript(true)
+				break
+			}
+			m.statusMode = "error"
+			m.statusLine = reviewLabel(msg.action) + " failed: " + truncateReviewStatus(msg.output)
+			if strings.TrimSpace(msg.output) == "" {
+				m.statusLine = reviewLabel(msg.action) + " failed: " + truncateReviewStatus(msg.err.Error())
+			}
+		} else {
+			m.statusMode = "idle"
+			m.statusLine = reviewLabel(msg.action) + " replied"
+		}
+		m.rebuildTranscript(true)
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -219,6 +254,13 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "esc":
+			if m.reviewCancel != nil {
+				m.reviewCancel()
+				m.reviewCancel = nil
+				m.statusMode = "idle"
+				m.statusLine = "review canceled"
+				return m, nil
+			}
 			if m.showRadioSelect {
 				m.showRadioSelect = false
 				return m, nil

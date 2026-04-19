@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"time"
@@ -116,6 +117,13 @@ type SubmitRequest struct {
 	Images [][]byte
 }
 
+type reviewDoneMsg struct {
+	action messageActionKind
+	itemID int
+	output string
+	err    error
+}
+
 // TUIModel is the Bubble Tea application model for the agent harness.
 type TUIModel struct {
 	width, height int
@@ -194,6 +202,8 @@ type TUIModel struct {
 
 	showRadioSelect bool
 	radioSelectIdx  int
+	reviewCancel    context.CancelFunc
+	runReview       func(ctx context.Context, kind messageActionKind, prompt string) (string, error)
 
 	// clipboard images attached to current input
 	pastedImages [][]byte
