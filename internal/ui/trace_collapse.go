@@ -27,10 +27,18 @@ func (m *TUIModel) appendTraceLine(rendered string, evType core.EventType) {
 
 	if collapse {
 		m.lastTraceCount++
-		// Remove the last line from traceBuf and rewrite with count.
+		// Remove the last line entirely from traceBuf and rewrite with count.
+		// Strip back to the second-to-last newline so we remove the full last line.
 		content := m.traceBuf.String()
+		// Find the last newline...
 		if idx := strings.LastIndex(content, "\n"); idx >= 0 {
-			content = content[:idx]
+			// ...then find the newline before that to remove the full last line
+			prefix := content[:idx]
+			if idx2 := strings.LastIndex(prefix, "\n"); idx2 >= 0 {
+				content = content[:idx2+1] // keep up to and including the second-to-last \n
+			} else {
+				content = "" // no prior line — the last line was the only line
+			}
 		}
 		m.traceBuf.Reset()
 		m.traceBuf.WriteString(content)
