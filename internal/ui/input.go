@@ -28,10 +28,28 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
 		m.tryClickCopyTarget(y)
-		m.focus = focusTranscript
-		m.input.Blur()
+		m.activateFocus(focusTranscript)
 		return
 	}
+
+	if m.showDetail && m.selectedToolExec != nil {
+		transcriptEnd, detailEnd := m.threeColumnBoundaries()
+		if x <= transcriptEnd {
+			m.tryClickURL(x, y)
+			m.tryClickToggleTarget(y)
+			m.tryClickToolDetail(y)
+			m.tryClickCopyTarget(y)
+			m.activateFocus(focusTranscript)
+			return
+		}
+		if x <= detailEnd {
+			m.activateFocus(focusDetail)
+			return
+		}
+		m.focusRightColumn(y)
+		return
+	}
+
 	// Left pane outer width = leftW(inner) + 2 borders. Right pane starts at leftW+2+1.
 	total := m.width - 5
 	leftW := total * m.leftPanePct / 100
@@ -44,30 +62,10 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
 		m.tryClickCopyTarget(y)
-		m.focus = focusTranscript
-		m.input.Blur()
+		m.activateFocus(focusTranscript)
 		return
 	}
-	// Right half — trace vs status
-	if !m.showStatus {
-		m.focus = focusTrace
-		m.input.Blur()
-		return
-	}
-	// Row where status pane starts: panes begin at row 1, trace outer = traceH+2, status starts after.
-	remaining := m.height - 1 - 3 // header=1, input=3, no extra separators
-	rightBudget := remaining - 4
-	traceH := rightBudget * m.tracePanePct / 100
-	if traceH < 4 {
-		traceH = 4
-	}
-	tracePaneEndY := 1 + traceH + 2 // panes start row + trace outer height
-	if y < tracePaneEndY {
-		m.focus = focusTrace
-	} else {
-		m.focus = focusStatus
-	}
-	m.input.Blur()
+	m.focusRightColumn(y)
 }
 
 func (m *TUIModel) tryClickURL(termX, termY int) {
@@ -151,6 +149,7 @@ func (m *TUIModel) tryClickToolDetail(termY int) {
 						if exec := item.ToolExecs[0]; exec != nil && exec.Result != "" {
 							m.selectedToolExec = exec
 							m.showDetail = true
+							m.activateFocus(focusDetail)
 						}
 					}
 				}
@@ -158,9 +157,56 @@ func (m *TUIModel) tryClickToolDetail(termY int) {
 			}
 			m.selectedToolExec = dt.exec
 			m.showDetail = true
+			m.activateFocus(focusDetail)
 			return
 		}
 	}
+}
+
+func (m *TUIModel) focusRightColumn(y int) {
+	if !m.showStatus {
+		m.activateFocus(focusTrace)
+		return
+	}
+	// Row where status pane starts: panes begin at row 1, trace outer = traceH+2, status starts after.
+	remaining := m.height - 1 - 3 // header=1, input=3, no extra separators
+	rightBudget := remaining - 4
+	traceH := rightBudget * m.tracePanePct / 100
+	if traceH < 4 {
+		traceH = 4
+	}
+	tracePaneEndY := 1 + traceH + 2
+	if y < tracePaneEndY {
+		m.activateFocus(focusTrace)
+		return
+	}
+	m.activateFocus(focusStatus)
+}
+
+func (m *TUIModel) threeColumnBoundaries() (int, int) {
+	availableWidth := m.width - splitBorderCols - 2
+	transcriptWidth := availableWidth * 35 / 100
+	detailWidth := availableWidth * 35 / 100
+	rightWidth := availableWidth - transcriptWidth - detailWidth
+
+	if transcriptWidth < 30 {
+		transcriptWidth = 30
+	}
+	if detailWidth < 30 {
+		detailWidth = 30
+	}
+	if rightWidth < 24 {
+		rightWidth = 24
+		detailWidth = availableWidth - transcriptWidth - rightWidth
+		if detailWidth < 30 {
+			detailWidth = 30
+			transcriptWidth = availableWidth - detailWidth - rightWidth
+		}
+	}
+
+	transcriptEnd := transcriptWidth + 1
+	detailEnd := transcriptEnd + 1 + detailWidth + 1
+	return transcriptEnd, detailEnd
 }
 
 // tryClickCopyTarget checks if the click row matches a copy icon and copies if so.

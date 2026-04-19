@@ -232,6 +232,107 @@ func TestViewResponsiveLayoutsPreservePanelsAndWidthBounds(t *testing.T) {
 	}
 }
 
+func TestCtrlDOpensAndFocusesDetailPane(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 140
+	m.height = 40
+	m.focus = focusTranscript
+	m.input.Blur()
+	m.selectedToolExec = &ToolExecution{Name: "sh", Result: "done"}
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlD})
+
+	if !m.showDetail {
+		t.Fatal("expected detail pane to open")
+	}
+	if m.focus != focusDetail {
+		t.Fatalf("focus = %v, want detail", m.focus)
+	}
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if m.showDetail {
+		t.Fatal("expected detail pane to close")
+	}
+	if m.focus != focusTranscript {
+		t.Fatalf("focus = %v, want transcript after closing detail", m.focus)
+	}
+}
+
+func TestCycleFocusIncludesDetailPaneWhenVisible(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 140
+	m.height = 40
+	m.showTrace = true
+	m.showStatus = true
+	m.showDetail = true
+	m.selectedToolExec = &ToolExecution{Name: "sh", Result: "done"}
+	m.focus = focusTranscript
+
+	m.cycleFocus()
+	if m.focus != focusDetail {
+		t.Fatalf("focus after transcript = %v, want detail", m.focus)
+	}
+	m.cycleFocus()
+	if m.focus != focusTrace {
+		t.Fatalf("focus after detail = %v, want trace", m.focus)
+	}
+	m.cycleFocus()
+	if m.focus != focusStatus {
+		t.Fatalf("focus after trace = %v, want status", m.focus)
+	}
+	m.cycleFocus()
+	if m.focus != focusInput {
+		t.Fatalf("focus after status = %v, want input", m.focus)
+	}
+	m.cycleFocus()
+	if m.focus != focusTranscript {
+		t.Fatalf("focus after input = %v, want transcript", m.focus)
+	}
+}
+
+func TestMouseClickInDetailColumnFocusesDetailPane(t *testing.T) {
+	m := NewTUIModel()
+	m.width = 150
+	m.height = 40
+	m.showTrace = true
+	m.showStatus = true
+	m.showDetail = true
+	m.selectedToolExec = &ToolExecution{Name: "sh", Result: "done"}
+	m.focus = focusTranscript
+
+	transcriptEnd, detailEnd := m.threeColumnBoundaries()
+	clickX := transcriptEnd + 2
+	if clickX > detailEnd {
+		t.Fatalf("computed click x=%d outside detail bounds ending at %d", clickX, detailEnd)
+	}
+
+	m.handleMouseClick(clickX, 5)
+
+	if m.focus != focusDetail {
+		t.Fatalf("focus = %v, want detail", m.focus)
+	}
+}
+
+func TestClickToolDetailOpensAndFocusesDetailPane(t *testing.T) {
+	m := NewTUIModel()
+	m.detailTargets = []toolDetailTarget{{
+		lineNo: 0,
+		exec:   &ToolExecution{Name: "sh", Result: "done"},
+	}}
+
+	m.tryClickToolDetail(2)
+
+	if !m.showDetail {
+		t.Fatal("expected detail pane to open")
+	}
+	if m.focus != focusDetail {
+		t.Fatalf("focus = %v, want detail", m.focus)
+	}
+	if m.selectedToolExec == nil || m.selectedToolExec.Name != "sh" {
+		t.Fatalf("selected tool = %#v, want sh execution", m.selectedToolExec)
+	}
+}
+
 func TestViewResizeKeepsPanelsVisibleAndBounded(t *testing.T) {
 	m := NewTUIModel()
 	m.showTrace = true
@@ -391,15 +492,15 @@ func TestCtrlVPastesClipboardImage(t *testing.T) {
 func TestStatusModeDisplay_Stalled(t *testing.T) {
 	m := NewTUIModel()
 	m.statusMode = "thinking"
-	
+
 	// Set lastEventAt to 11 seconds ago
 	m.lastEventAt = time.Now().Add(-11 * time.Second)
-	
+
 	out := m.statusModeDisplay()
 	if !strings.Contains(out, "STALLED") {
 		t.Errorf("expected STALLED in status display, got %q", out)
 	}
-	
+
 	// Reset lastEventAt to now
 	m.lastEventAt = time.Now()
 	out = m.statusModeDisplay()

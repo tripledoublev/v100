@@ -99,21 +99,25 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+t":
 			m.showTrace = !m.showTrace
-			if !m.showTrace && (m.focus == focusTrace || m.focus == focusStatus || m.focus == focusDetail) {
-				m.focus = focusTranscript
-				m.input.Blur()
+			if !m.showTrace && (m.focus == focusTrace || m.focus == focusStatus) {
+				m.activateFocus(focusTranscript)
 			}
 
 		case "ctrl+d":
 			if m.selectedToolExec != nil {
 				m.showDetail = !m.showDetail
+				if m.showDetail {
+					m.activateFocus(focusDetail)
+				} else if m.focus == focusDetail {
+					m.activateFocus(focusTranscript)
+				}
 			}
 			return m, nil
 
 		case "ctrl+s":
 			m.showStatus = !m.showStatus
 			if !m.showStatus && m.focus == focusStatus {
-				m.focus = focusTrace
+				m.activateFocus(focusTrace)
 			}
 		case "ctrl+m":
 			m.showMetrics = !m.showMetrics
@@ -219,14 +223,14 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showRadioSelect = false
 				return m, nil
 			}
-			if m.showDetail {
+			if m.showDetail && m.focus == focusDetail {
 				m.showDetail = false
+				m.activateFocus(focusTranscript)
 				return m, nil
 			}
 			if m.InterruptFn != nil && (m.statusMode == "thinking" || m.statusMode == "tooling") {
 				m.InterruptFn()
-				m.focus = focusInput
-				m.input.Focus()
+				m.activateFocus(focusInput)
 				return m, nil
 			}
 		}
@@ -274,71 +278,122 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *TUIModel) cycleFocus() {
-	if m.isInRightHalf() {
-		if m.focus == focusTrace && m.showStatus {
-			m.focus = focusStatus
-			m.input.Blur()
+	if m.showDetail && m.selectedToolExec != nil {
+		order := m.visibleFocusOrder()
+		if len(order) == 0 {
 			return
 		}
-		m.focus = focusTrace
-		m.input.Blur()
+		current := m.focusOrderIndex(order)
+		if current < 0 {
+			current = 0
+		}
+		m.activateFocus(order[(current+1)%len(order)])
 		return
 	}
 
-	// Left half: transcript <-> input
-	if m.focus == focusInput {
-		m.focus = focusTranscript
-		m.input.Blur()
+	if m.isInRightHalf() {
+		if m.focus == focusTrace && m.showStatus {
+			m.activateFocus(focusStatus)
+			return
+		}
+		m.activateFocus(focusTrace)
 		return
 	}
-	m.focus = focusInput
-	m.input.Focus()
+
+	order := m.visibleLeftFocusOrder()
+	if len(order) == 0 {
+		return
+	}
+	current := m.focusOrderIndex(order)
+	if current < 0 {
+		current = 0
+	}
+	m.activateFocus(order[(current+1)%len(order)])
 }
 
 func (m *TUIModel) cycleFocusBack() {
+	if m.showDetail && m.selectedToolExec != nil {
+		order := m.visibleFocusOrder()
+		if len(order) == 0 {
+			return
+		}
+		current := m.focusOrderIndex(order)
+		if current < 0 {
+			current = 0
+		}
+		prev := current - 1
+		if prev < 0 {
+			prev = len(order) - 1
+		}
+		m.activateFocus(order[prev])
+		return
+	}
+
 	if m.isInRightHalf() {
 		if m.focus == focusStatus {
-			m.focus = focusTrace
-			m.input.Blur()
+			m.activateFocus(focusTrace)
 			return
 		}
 		if m.showStatus {
-			m.focus = focusStatus
-			m.input.Blur()
+			m.activateFocus(focusStatus)
 			return
 		}
-		m.focus = focusTrace
-		m.input.Blur()
+		m.activateFocus(focusTrace)
 		return
 	}
 
-	// Left half: input <-> transcript
-	if m.focus == focusInput {
-		m.focus = focusTranscript
-		m.input.Blur()
+	order := m.visibleLeftFocusOrder()
+	if len(order) == 0 {
 		return
 	}
-	m.focus = focusInput
-	m.input.Focus()
+	current := m.focusOrderIndex(order)
+	if current < 0 {
+		current = 0
+	}
+	prev := current - 1
+	if prev < 0 {
+		prev = len(order) - 1
+	}
+	m.activateFocus(order[prev])
 }
 
 func (m *TUIModel) switchFocusHalf() {
+	if m.focus == focusInput {
+		if m.showTrace {
+			m.activateFocus(focusTrace)
+		} else {
+			m.activateFocus(focusTranscript)
+		}
+		return
+	}
+	if m.focus == focusTranscript {
+		if m.showTrace {
+			m.activateFocus(focusTrace)
+		} else {
+			m.activateFocus(focusInput)
+		}
+		return
+	}
+
+	if m.showDetail && m.focus == focusDetail {
+		m.activateFocus(focusTranscript)
+		return
+	}
+
 	if m.isInRightHalf() {
-		m.focus = focusTranscript
-		m.input.Blur()
+		if m.showDetail {
+			m.activateFocus(focusDetail)
+		} else {
+			m.activateFocus(focusTranscript)
+		}
 		return
 	}
-	if m.showTrace {
-		m.focus = focusTrace
-		m.input.Blur()
-		return
-	}
-	m.focus = focusTranscript
-	m.input.Blur()
+
+	m.activateFocus(focusTranscript)
 }
 
 func (m *TUIModel) isInRightHalf() bool {
-	return m.focus == focusTrace || m.focus == focusStatus || m.focus == focusDetail
+	return m.focus == focusTrace || m.focus == focusStatus
 }
 
 func (m *TUIModel) resizeFocused(dxPct, dyPct int) {
@@ -353,6 +408,48 @@ func (m *TUIModel) resizeFocused(dxPct, dyPct int) {
 		m.leftPanePct = clampInt(m.leftPanePct-dxPct, 45, 80)
 		m.tracePanePct = clampInt(m.tracePanePct-dyPct, 35, 85)
 	}
+}
+
+func (m *TUIModel) activateFocus(next focus) {
+	m.focus = next
+	if next == focusInput {
+		m.input.Focus()
+		return
+	}
+	m.input.Blur()
+}
+
+func (m *TUIModel) visibleLeftFocusOrder() []focus {
+	order := []focus{focusTranscript}
+	if m.showDetail && m.selectedToolExec != nil {
+		order = append(order, focusDetail)
+	}
+	order = append(order, focusInput)
+	return order
+}
+
+func (m *TUIModel) visibleFocusOrder() []focus {
+	order := []focus{focusTranscript}
+	if m.showDetail && m.selectedToolExec != nil {
+		order = append(order, focusDetail)
+	}
+	if m.showTrace {
+		order = append(order, focusTrace)
+		if m.showStatus {
+			order = append(order, focusStatus)
+		}
+	}
+	order = append(order, focusInput)
+	return order
+}
+
+func (m *TUIModel) focusOrderIndex(order []focus) int {
+	for i, candidate := range order {
+		if candidate == m.focus {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *TUIModel) handleBuiltInCommand(input string) tea.Cmd {
