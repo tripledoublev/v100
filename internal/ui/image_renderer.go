@@ -3,7 +3,6 @@ package ui
 import (
 	"encoding/base64"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -269,7 +268,6 @@ func (r *ImageRenderer) writeTty(s string) error {
 func (r *ImageRenderer) logf(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	r.log = append(r.log, msg)
-	log.Printf("[image-renderer] %s", msg)
 }
 
 func humanBytes(n int) string {
