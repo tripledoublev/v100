@@ -49,6 +49,7 @@ type Loop struct {
 	NetworkTier      string
 	Hooks            []PolicyHook
 	pressureHook     PolicyHook // lazily initialized from Policy.PressureThreshold
+	recoveryHook     PolicyHook // lazily initialized with DefaultRecoveryConfig
 
 	Snapshots SnapshotManager
 	stepCount int // running step counter for step.summary events
@@ -73,17 +74,20 @@ const (
 )
 
 func (l *Loop) runHooks(stepID string, stage HookStage) HookResult {
-	// Lazily initialize pressure monitor hook from policy.
+	// Lazily initialize built-in hooks.
 	if l.pressureHook == nil && l.Policy != nil {
-		if l.Policy.PressureThreshold > 0 || l.Policy.PressureThreshold == 0 {
-			// Always initialize with default threshold (0 means use default 0.70)
-			l.pressureHook = PressureMonitor(l.Policy.PressureThreshold)
-		}
+		l.pressureHook = PressureMonitor(l.Policy.PressureThreshold)
+	}
+	if l.recoveryHook == nil {
+		l.recoveryHook = RecoveryHook(DefaultRecoveryConfig())
 	}
 
 	allHooks := l.Hooks
 	if l.pressureHook != nil {
 		allHooks = append(allHooks, l.pressureHook)
+	}
+	if l.recoveryHook != nil {
+		allHooks = append(allHooks, l.recoveryHook)
 	}
 	if len(allHooks) == 0 {
 		return HookResult{Action: HookContinue}
