@@ -4,6 +4,7 @@ runs/
 /v100
 /v100_binary
 .gocache/
+.gomodcache/
 /.cache/
 /.config/
 /.codex

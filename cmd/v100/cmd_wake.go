@@ -783,8 +783,8 @@ func buildWakeIssuePrompt(cfg *config.Config, workspace string, issue wakeIssue)
 			"2. Make the code changes.\n"+
 			"3. Run exactly these verification commands if relevant:\n"+
 			"   - ./scripts/lint.sh\n"+
-			"   - env GOCACHE=.gocache go test ./...\n"+
-			"   - env GOCACHE=.gocache go build ./...\n"+
+			"   - env GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache go test ./...\n"+
+			"   - env GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache go build ./...\n"+
 			"4. Review your own diff for regressions and incomplete edge cases.\n"+
 			"5. Commit with a focused message only if verification passes.\n"+
 			"6. Do not push and do not close the GitHub issue yourself; the daemon will handle that after verifying your commit.\n"+

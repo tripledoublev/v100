@@ -28,27 +28,27 @@ go build ./...
 ## Test
 
 ```bash
-go test ./...
+env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./...
 ```
 
 With race detector (matches CI):
 
 ```bash
-go test -race ./...
+env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test -race ./...
 ```
 
 With coverage:
 
 ```bash
-go test -race -coverprofile=coverage.out ./...
+env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test -race -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out | tail -1
 ```
 
 Run a single package:
 
 ```bash
-go test ./internal/core/...
-go test ./cmd/v100/...
+env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./internal/core/...
+env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./cmd/v100/...
 ```
 
 ---
@@ -84,9 +84,9 @@ Every new feature or bug fix should follow this pipeline:
    - Unit tests for new functions/methods in the relevant package
    - Integration-style tests in `cmd/v100/main_test.go` for CLI-level behaviour
    - If touching providers, add cases to the existing provider or retry tests
-4. **Run the full suite** — `go test ./...` must be green
+4. **Run the full suite** — `env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./...` must be green
 5. **Run lint** — `bash scripts/lint.sh` must report 0 issues
-6. **Build** — `go build ./...` must succeed
+6. **Build** — `env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go build ./...` must succeed
 
 Do not open a PR if tests or lint fail.
 

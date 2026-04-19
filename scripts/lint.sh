@@ -16,6 +16,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
+export GOMODCACHE="${GOMODCACHE:-$ROOT_DIR/.gomodcache}"
 export GOWORK=off
 TARGETS=(./cmd/... ./internal/...)
 
