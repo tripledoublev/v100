@@ -233,6 +233,11 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activateFocus(focusInput)
 				return m, nil
 			}
+			if m.imageRenderer != nil {
+				m.imageRenderer.ClearAll()
+				m.statusLine = "cleared inline images"
+				return m, nil
+			}
 		}
 	}
 
