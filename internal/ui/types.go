@@ -30,27 +30,19 @@ type confirmState struct {
 	approved chan bool
 }
 
-// copyTarget records a copy-icon line and its associated content.
-type copyTarget struct {
-	lineNo  int
-	content string
-}
+type messageActionKind int
 
-type runIdentity struct {
-	Provider string
-	Model    string
-}
+const (
+	actionCopy messageActionKind = iota
+	actionAskCodex
+	actionAskClaude
+)
 
-type reviewTargetConfig struct {
-	Enabled      bool
-	Label        string
-	ProviderName string
-	ModelName    string
-}
-
-type ReviewTargets struct {
-	Codex  reviewTargetConfig
-	Claude reviewTargetConfig
+type messageActionTarget struct {
+	lineNo, colStart, colEnd int
+	action                   messageActionKind
+	content                  string
+	contextUser              string
 }
 
 // toolDetailTarget maps a rendered line to a specific ToolExecution.
@@ -97,10 +89,8 @@ type ToolExecution struct {
 
 type TranscriptItem struct {
 	Type      TranscriptItemType
-	Role      string // "user", "v100", "system"
+	Role      string // "user", "assistant", "system"
 	Text      string
-	Provider  string
-	Model     string
 	Images    [][]byte
 	Tokens    []string // accumulated token stream for ItemTokenGroup
 	ToolExecs []*ToolExecution
@@ -141,24 +131,23 @@ type TUIModel struct {
 	lastTraceCount     int
 	lastTraceEventType core.EventType
 
-	history            []*TranscriptItem
-	nextItemID         int
-	toggleTargets      []toggleTarget
-	copyTargets        []copyTarget
-	runIdentityByRunID map[string]runIdentity
-	detailTargets      []toolDetailTarget // maps transcript line -> tool exec for click handling
-	plainBuf           strings.Builder    // plain-text transcript for full-copy
-	inSubAgent         int                // nesting depth; >0 means inside agent.start..agent.end
-	traceStepCount     int                // running step count for trace pane
-	activeAgents       []agentFrame
-	agentDoneCount     int
-	agentFailCount     int
-	lastAgentNote      string
-	device             deviceStatus
-	modelEvents        []time.Time
-	toolEvents         []time.Time
-	compressEvents     []time.Time
-	lastEventAt        time.Time
+	history        []*TranscriptItem
+	nextItemID     int
+	toggleTargets  []toggleTarget
+	messageActions []messageActionTarget
+	detailTargets  []toolDetailTarget // maps transcript line -> tool exec for click handling
+	plainBuf       strings.Builder    // plain-text transcript for full-copy
+	inSubAgent     int                // nesting depth; >0 means inside agent.start..agent.end
+	traceStepCount int                // running step count for trace pane
+	activeAgents   []agentFrame
+	agentDoneCount int
+	agentFailCount int
+	lastAgentNote  string
+	device         deviceStatus
+	modelEvents    []time.Time
+	toolEvents     []time.Time
+	compressEvents []time.Time
+	lastEventAt    time.Time
 
 	focus            focus
 	showTrace        bool
@@ -174,8 +163,6 @@ type TUIModel struct {
 	leftPanePct      int
 	tracePanePct     int
 	detailPanePct    int
-	codexTarget      reviewTargetConfig
-	claudeTarget     reviewTargetConfig
 	verbose          bool
 	showMetrics      bool
 

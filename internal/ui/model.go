@@ -7,7 +7,7 @@ import (
 )
 
 // NewTUIModel creates a fresh TUI model.
-func NewTUIModel(targets ReviewTargets) *TUIModel {
+func NewTUIModel() *TUIModel {
 	ti := textinput.New()
 	ti.Placeholder = "ask v100 to inspect, patch, or debug..."
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
@@ -20,28 +20,25 @@ func NewTUIModel(targets ReviewTargets) *TUIModel {
 	detail := viewport.New(40, 20)
 
 	m := &TUIModel{
-		input:              ti,
-		transcript:         tv,
-		traceView:          trace,
-		detailView:         detail,
-		focus:              focusInput,
-		showTrace:          true,
-		showStatus:         true,
-		showMetrics:        true,
-		showDetail:         false,
-		statusMode:         "idle",
-		statusLine:         "ready and waiting",
-		runSummary:         "v100 run pending",
-		leftPanePct:        66,
-		tracePanePct:       50,
-		detailPanePct:      35,
-		codexTarget:        targets.Codex,
-		claudeTarget:       targets.Claude,
-		runIdentityByRunID: make(map[string]runIdentity),
-		radioURL:           "https://n04.radiojar.com/78cxy6wkxtzuv",
-		radioPlayer:        detectRadioPlayer(),
-		radioVolume:        60,
-		imageRenderer:      NewImageRenderer(),
+		input:         ti,
+		transcript:    tv,
+		traceView:     trace,
+		detailView:    detail,
+		focus:         focusInput,
+		showTrace:     true,
+		showStatus:    true,
+		showMetrics:   true,
+		showDetail:    false,
+		statusMode:    "idle",
+		statusLine:    "ready and waiting",
+		runSummary:    "v100 run pending",
+		leftPanePct:   66,
+		tracePanePct:  50,
+		detailPanePct: 35,
+		radioURL:      "https://n04.radiojar.com/78cxy6wkxtzuv",
+		radioPlayer:   detectRadioPlayer(),
+		radioVolume:   60,
+		imageRenderer: NewImageRenderer(),
 	}
 	m.seedWelcomeContent()
 	return m

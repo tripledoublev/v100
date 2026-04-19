@@ -27,7 +27,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
-		m.tryClickCopyTarget(y)
+		m.tryClickMessageAction(x, y)
 		m.activateFocus(focusTranscript)
 		return
 	}
@@ -38,7 +38,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 			m.tryClickURL(x, y)
 			m.tryClickToggleTarget(y)
 			m.tryClickToolDetail(y)
-			m.tryClickCopyTarget(y)
+			m.tryClickMessageAction(x, y)
 			m.activateFocus(focusTranscript)
 			return
 		}
@@ -61,7 +61,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
 		m.tryClickToolDetail(y)
-		m.tryClickCopyTarget(y)
+		m.tryClickMessageAction(x, y)
 		m.activateFocus(focusTranscript)
 		return
 	}
@@ -209,24 +209,32 @@ func (m *TUIModel) threeColumnBoundaries() (int, int) {
 	return transcriptEnd, detailEnd
 }
 
-// tryClickCopyTarget checks if the click row matches a copy icon and copies if so.
-func (m *TUIModel) tryClickCopyTarget(termY int) {
+// tryClickMessageAction checks if the click matches a message action hitbox and dispatches it.
+func (m *TUIModel) tryClickMessageAction(termX, termY int) bool {
 	const contentStartRow = 2
 	if termY < contentStartRow {
-		return
+		return false
 	}
 	contentLine := (termY - contentStartRow) + m.transcript.YOffset
-	for _, ct := range m.copyTargets {
-		if contentLine == ct.lineNo || contentLine == ct.lineNo+1 {
-			if err := copyToClipboard(ct.content); err != nil {
+	localX := termX - 1
+	for _, action := range m.messageActions {
+		if contentLine != action.lineNo || localX < action.colStart || localX >= action.colEnd {
+			continue
+		}
+		switch action.action {
+		case actionCopy:
+			if err := copyToClipboard(action.content); err != nil {
 				m.statusLine = "copy failed: " + err.Error()
 				m.statusMode = "error"
 			} else {
 				m.statusLine = "copied to clipboard!"
 			}
-			return
+		default:
+			_ = action.contextUser
 		}
+		return true
 	}
+	return false
 }
 
 func copyToClipboard(text string) error {

@@ -14,12 +14,12 @@ type TUI struct {
 }
 
 // NewTUI creates a new TUI instance.
-func NewTUI(submitFn func(SubmitRequest), useAltScreen bool, plainTTY bool, targets ReviewTargets) *TUI {
+func NewTUI(submitFn func(SubmitRequest), useAltScreen bool, plainTTY bool) *TUI {
 	if plainTTY {
 		EnablePlainTTY()
 	}
 	ready := make(chan struct{})
-	m := NewTUIModel(targets)
+	m := NewTUIModel()
 	m.SubmitFn = submitFn
 	m.onReady = func() { close(ready) }
 	var p *tea.Program

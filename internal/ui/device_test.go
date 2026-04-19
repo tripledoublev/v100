@@ -23,7 +23,7 @@ func TestNormalizeBatteryState(t *testing.T) {
 }
 
 func TestDeviceStatusLine(t *testing.T) {
-	m := NewTUIModel(ReviewTargets{})
+	m := NewTUIModel()
 	m.device = deviceStatus{}
 	if got := m.deviceStatusLine(); got != "device: no battery" {
 		t.Fatalf("deviceStatusLine() = %q, want no-battery fallback", got)

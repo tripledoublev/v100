@@ -31,7 +31,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		m.runIdentityByRunID[ev.RunID] = runIdentity{Provider: p.Provider, Model: p.Model}
 		m.maxSteps = 50
 		m.maxTokens = p.ModelMetadata.ContextSize
 		if m.maxTokens == 0 {
@@ -83,14 +82,11 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		if sub {
 			break
 		}
-		identity := m.runIdentityByRunID[ev.RunID]
 		if p.Text != "" {
 			m.addItem(&TranscriptItem{
 				Type:      ItemMessage,
 				Role:      "v100",
 				Text:      p.Text,
-				Provider:  identity.Provider,
-				Model:     identity.Model,
 				Timestamp: ev.TS,
 			})
 			_, _ = fmt.Fprintf(&m.plainBuf, "\nv100: %s\n", p.Text)
@@ -188,8 +184,6 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
-		parentIdentity := m.runIdentityByRunID[ev.RunID]
-		m.runIdentityByRunID[p.AgentRunID] = runIdentity{Provider: parentIdentity.Provider, Model: p.Model}
 		m.activeAgents = append(m.activeAgents, agentFrame{
 			RunID:    p.AgentRunID,
 			CallID:   p.ParentCallID,
@@ -305,7 +299,7 @@ func (m *TUIModel) getOrCreateToolGroup() *TranscriptItem {
 
 func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 	m.transcriptBuf.Reset()
-	m.copyTargets = nil
+	m.messageActions = nil
 	m.toggleTargets = nil
 
 	for _, item := range m.history {
@@ -348,20 +342,38 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 					_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleWarn.Render("v100"), wrapped)
 					iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 					m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-					m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+					m.messageActions = append(m.messageActions, messageActionTarget{
+						lineNo:   iconLine,
+						colStart: 11,
+						colEnd:   19,
+						action:   actionCopy,
+						content:  item.Text,
+					})
 				}
 			case "user":
 				wrapped := m.wrapPlainForTranscript(item.Text)
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s  %s\n", ts, styleUser.Render(userMessageLabel), wrapped)
 				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 				m.transcriptBuf.WriteString("           " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+				m.messageActions = append(m.messageActions, messageActionTarget{
+					lineNo:   iconLine,
+					colStart: 11,
+					colEnd:   19,
+					action:   actionCopy,
+					content:  item.Text,
+				})
 			case "v100":
 				rendered := m.renderMarkdownForPane(item.Text)
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "\n%s  %s\n%s\n", ts, styleAssistant.Render("v100"), rendered)
 				iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 				m.transcriptBuf.WriteString("    " + tuiCopyIconStyle.Render("[⎘ copy]") + "\n")
-				m.copyTargets = append(m.copyTargets, copyTarget{lineNo: iconLine, content: item.Text})
+				m.messageActions = append(m.messageActions, messageActionTarget{
+					lineNo:   iconLine,
+					colStart: 4,
+					colEnd:   12,
+					action:   actionCopy,
+					content:  item.Text,
+				})
 			}
 
 		case ItemToolGroup:

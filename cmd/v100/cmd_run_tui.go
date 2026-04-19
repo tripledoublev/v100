@@ -135,7 +135,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		stepMu.Unlock()
 	}
 
-	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY, ui.ResolveReviewTargets(cfg))
+	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
 	tui.SetInterruptFn(interruptFn)
 	tui.SetVerbose(verbose)
 
