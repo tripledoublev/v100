@@ -240,7 +240,7 @@ func benchCmd(cfgPath *string) *cobra.Command {
 	}
 
 	addBenchRunFlags(cmd, opts)
-	cmd.AddCommand(benchRunCmd(cfgPath), benchBootstrapCmd(cfgPath))
+	cmd.AddCommand(benchRunCmd(cfgPath), benchBootstrapCmd(cfgPath), benchHistoryCmd(), benchTrendCmd())
 	return cmd
 }
 
@@ -1331,4 +1331,103 @@ func verifyCmd() *cobra.Command {
 			return core.WriteMeta(runDir, meta)
 		},
 	}
+}
+
+func benchHistoryCmd() *cobra.Command {
+	var runsDir string
+
+	cmd := &cobra.Command{
+		Use:   "history <bench-name>",
+		Short: "Show score history for a benchmark",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			dir := runsDir
+			if dir == "" {
+				dir = "runs"
+			}
+
+			entries, err := eval.LoadHistory(dir, name)
+			if err != nil {
+				return fmt.Errorf("load history: %w", err)
+			}
+
+			if len(entries) == 0 {
+				fmt.Printf("No runs found for bench %q in %s\n", name, dir)
+				return nil
+			}
+
+			fmt.Print(eval.FormatHistoryTable(entries))
+			fmt.Printf("\n%d run(s) total\n", len(entries))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&runsDir, "runs", "", "runs directory (default: ./runs)")
+	return cmd
+}
+
+func benchTrendCmd() *cobra.Command {
+	var runsDir string
+
+	cmd := &cobra.Command{
+		Use:   "trend <bench-name>",
+		Short: "Show score trend with ASCII sparkline",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			dir := runsDir
+			if dir == "" {
+				dir = "runs"
+			}
+
+			entries, err := eval.LoadHistory(dir, name)
+			if err != nil {
+				return fmt.Errorf("load history: %w", err)
+			}
+
+			if len(entries) == 0 {
+				fmt.Printf("No runs found for bench %q in %s\n", name, dir)
+				return nil
+			}
+
+			fmt.Print(eval.FormatTrendSummary(entries))
+
+			// Drift detection: compare recent 3 vs overall
+			if len(entries) >= 6 {
+				recent := entries[len(entries)-3:]
+				older := entries[:len(entries)-3]
+
+				recentPassRate := passRate(recent)
+				olderPassRate := passRate(older)
+				drift := recentPassRate - olderPassRate
+
+				if drift <= -0.10 {
+					fmt.Printf("\n%s Regression detected: recent pass rate %.0f%% vs historical %.0f%% (Δ%.0f%%)\n",
+						ui.Fail("⚠"), recentPassRate*100, olderPassRate*100, drift*100)
+				} else if drift >= 0.10 {
+					fmt.Printf("\n%s Improvement detected: recent pass rate %.0f%% vs historical %.0f%% (Δ+%.0f%%)\n",
+						ui.OK("↑"), recentPassRate*100, olderPassRate*100, drift*100)
+				}
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&runsDir, "runs", "", "runs directory (default: ./runs)")
+	return cmd
+}
+
+func passRate(entries []eval.HistoryEntry) float64 {
+	if len(entries) == 0 {
+		return 0
+	}
+	passes := 0
+	for _, e := range entries {
+		if eval.ScoreToNumeric(e.Score) >= 1 {
+			passes++
+		}
+	}
+	return float64(passes) / float64(len(entries))
 }
