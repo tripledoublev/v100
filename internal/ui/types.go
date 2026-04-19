@@ -19,6 +19,7 @@ const (
 	focusTranscript
 	focusTrace
 	focusStatus
+	focusDetail
 )
 
 // confirmState holds pending confirmation data.
@@ -33,6 +34,14 @@ type confirmState struct {
 type copyTarget struct {
 	lineNo  int
 	content string
+}
+
+// toolDetailTarget maps a rendered line to a specific ToolExecution.
+type toolDetailTarget struct {
+	lineNo    int
+	exec      *ToolExecution
+	groupID   int // Item ID of the containing tool group (for expansion check)
+	toolIndex int // index within the group's ToolExecs slice
 }
 
 type agentFrame struct {
@@ -74,7 +83,7 @@ type TranscriptItem struct {
 	Role      string // "user", "v100", "system"
 	Text      string
 	Images    [][]byte
-	Tokens    []string   // accumulated token stream for ItemTokenGroup
+	Tokens    []string // accumulated token stream for ItemTokenGroup
 	ToolExecs []*ToolExecution
 	Expanded  bool
 	ID        int
@@ -104,10 +113,11 @@ type TUIModel struct {
 
 	transcript viewport.Model
 	traceView  viewport.Model
+	detailView viewport.Model
 	input      textinput.Model
 
-	transcriptBuf strings.Builder
-	traceBuf      strings.Builder
+	transcriptBuf      strings.Builder
+	traceBuf           strings.Builder
 	lastTraceLine      string
 	lastTraceCount     int
 	lastTraceEventType core.EventType
@@ -116,6 +126,7 @@ type TUIModel struct {
 	nextItemID     int
 	toggleTargets  []toggleTarget
 	copyTargets    []copyTarget
+	detailTargets  []toolDetailTarget // maps transcript line -> tool exec for click handling
 	plainBuf       strings.Builder // plain-text transcript for full-copy
 	inSubAgent     int             // nesting depth; >0 means inside agent.start..agent.end
 	traceStepCount int             // running step count for trace pane
@@ -129,19 +140,22 @@ type TUIModel struct {
 	compressEvents []time.Time
 	lastEventAt    time.Time
 
-	focus        focus
-	showTrace    bool
-	showStatus   bool
-	pendConfirm  *confirmState
-	statusMode   string
-	statusLine   string
-	statusTick   int
+	focus            focus
+	showTrace        bool
+	showStatus       bool
+	showDetail       bool
+	selectedToolExec *ToolExecution
+	pendConfirm      *confirmState
+	statusMode       string
+	statusLine       string
+	statusTick       int
 	downloadAnimTick int
-	runSummary   string
-	leftPanePct  int
-	tracePanePct int
-	verbose      bool
-	showMetrics  bool
+	runSummary       string
+	leftPanePct      int
+	tracePanePct     int
+	detailPanePct    int
+	verbose          bool
+	showMetrics      bool
 
 	// live metrics state
 	currentStep   int
@@ -172,6 +186,9 @@ type TUIModel struct {
 
 	// clipboard images attached to current input
 	pastedImages [][]byte
+
+	// image rendering subsystem
+	imageRenderer *ImageRenderer
 
 	// callbacks
 	SubmitFn    func(SubmitRequest)

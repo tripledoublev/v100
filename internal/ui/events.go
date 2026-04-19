@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -260,24 +259,14 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
 			data, _ := base64.StdEncoding.DecodeString(p.Data)
+			if m.imageRenderer != nil {
+				_ = m.imageRenderer.Render(data, m.width/2)
+			}
 			m.addItem(&TranscriptItem{
 				Type:      ItemImage,
 				Images:    [][]byte{data},
 				Timestamp: ev.TS,
 			})
-			// Emit Kitty graphics protocol directly to terminal device, bypassing all buffering
-			if os.Getenv("KITTY_WINDOW_ID") != "" {
-				w, h := GetPNGDimensions(data)
-				if w > 0 && h > 0 {
-					meta := fmt.Sprintf("a=T,s=%d,v=%d,c=80", w, h)
-					kittySeq := fmt.Sprintf("\x1b_%s;%s\x1b\\\n", meta, p.Data)
-					// Write directly to /dev/tty to bypass all buffering
-					if f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
-						_, _ = f.WriteString(kittySeq)
-						_ = f.Close()
-					}
-				}
-			}
 		}
 	}
 
@@ -327,12 +316,11 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 
 		case ItemImage:
 			if len(item.Images) > 0 {
-				// Use a safe width, slightly less than panel width
-				maxWidth := m.width / 2
-				if maxWidth < 20 {
-					maxWidth = 20
+				img := renderImageSummary(item.Images[0])
+				if m.imageRenderer != nil {
+					w, h := GetPNGDimensions(item.Images[0])
+					img = m.imageRenderer.renderText(w, h, len(item.Images[0]))
 				}
-				img := RenderImageInlineAuto(item.Images[0], maxWidth)
 				if img != "" {
 					// Direct write to buffer without any lipgloss/wrap intervention
 					m.transcriptBuf.WriteString("\n\n" + img + "\n\n")
@@ -373,6 +361,10 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 			iconLine := strings.Count(m.transcriptBuf.String(), "\n")
 			m.toggleTargets = append(m.toggleTargets, toggleTarget{lineNo: iconLine, itemID: item.ID})
 			if item.Expanded {
+				// Record the toggle line itself for detail
+				detailLine := strings.Count(m.transcriptBuf.String(), "\n")
+				m.detailTargets = append(m.detailTargets, toolDetailTarget{lineNo: detailLine, exec: nil, groupID: item.ID, toolIndex: -1})
+
 				_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s\n", styleTool.Render("[-]"), styleMuted.Render(fmt.Sprintf("%d tool calls", len(item.ToolExecs))))
 				for _, exec := range item.ToolExecs {
 					args := TruncateOutput(exec.Args, m.verbose)
@@ -384,8 +376,12 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 						}
 						out := SmartSummary(exec.Name, exec.Result, m.verbose)
 						head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", exec.Duration)))
+						headLine := strings.Count(m.transcriptBuf.String(), "\n")
 						body := m.wrapTranscriptBlock(out, "             ")
 						_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n%s\n", head, body)
+						m.detailTargets = append(m.detailTargets, toolDetailTarget{
+							lineNo: headLine, exec: exec, groupID: item.ID, toolIndex: -1,
+						})
 					}
 				}
 			} else {

@@ -25,7 +25,7 @@ func (t *atprotoGetFollowsTool) Description() string {
 	return "List accounts followed by a given user (actor). Returns a list of profiles with handle, display name, and a cursor for pagination."
 }
 func (t *atprotoGetFollowsTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoGetFollowsTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoGetFollowsTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoGetFollowsTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -69,7 +69,7 @@ func (t *atprotoGetFollowsTool) Exec(_ context.Context, _ ToolCallContext, args 
 	cli := newATProtoClient(t.cfg)
 	// getFollows is public, but we might need login if the PDS is restrictive or for higher limits.
 	// For now, try authenticated if we have credentials.
-	_ = cli.login() 
+	_ = cli.login()
 
 	params := url.Values{
 		"actor": {in.Actor},
@@ -100,7 +100,7 @@ func (t *atprotoGetFollowersTool) Description() string {
 	return "List accounts following a given user (actor). Returns a list of profiles and a cursor for pagination."
 }
 func (t *atprotoGetFollowersTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoGetFollowersTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoGetFollowersTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoGetFollowersTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -173,7 +173,7 @@ func (t *atprotoGetProfileTool) Description() string {
 	return "Get the detailed profile of a Bluesky user (actor) including bio, follower/following counts, and association data."
 }
 func (t *atprotoGetProfileTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoGetProfileTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoGetProfileTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoGetProfileTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -225,20 +225,23 @@ func (t *atprotoGetProfileTool) Exec(_ context.Context, _ ToolCallContext, args 
 type atprotoGraphExplorerTool struct{ cfg config.ATProtoConfig }
 
 // ATProtoGraphExplorer returns the atproto_graph_explorer tool.
-func ATProtoGraphExplorer(cfg *config.Config) Tool { return &atprotoGraphExplorerTool{cfg: cfg.ATProto} }
+func ATProtoGraphExplorer(cfg *config.Config) Tool {
+	return &atprotoGraphExplorerTool{cfg: cfg.ATProto}
+}
 
 func (t *atprotoGraphExplorerTool) Name() string { return "atproto_graph_explorer" }
 func (t *atprotoGraphExplorerTool) Description() string {
 	return "Explore and map a Bluesky user's social graph. Samples the accounts they follow, fetches who those accounts follow, and surfaces the most-connected people in their 2nd-degree network. Use this when asked to graph someone, explore their network, find follow suggestions, or analyze social connections."
 }
 func (t *atprotoGraphExplorerTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoGraphExplorerTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoGraphExplorerTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoGraphExplorerTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"sample_size": {"type": "integer", "description": "Number of your follows to sample (default 10, max 25)."},
+			"actor": {"type": "string", "description": "Handle or DID of the user whose graph to explore. Defaults to the authenticated user."},
+			"sample_size": {"type": "integer", "description": "Number of follows to sample (default 10, max 25)."},
 			"follows_limit": {"type": "integer", "description": "Number of follows to fetch per sampled account (default 20, max 100)."}
 		}
 	}`)
@@ -256,8 +259,9 @@ func (t *atprotoGraphExplorerTool) OutputSchema() json.RawMessage {
 
 func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		SampleSize   int `json:"sample_size"`
-		FollowsLimit int `json:"follows_limit"`
+		Actor        string `json:"actor"`
+		SampleSize   int    `json:"sample_size"`
+		FollowsLimit int    `json:"follows_limit"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
@@ -280,29 +284,60 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	// 1. Get my own follows to know who NOT to suggest
-	myFollowsData, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
-		"actor": {cli.session.DID},
+	// 1. Determine seed actor (defaults to authenticated user)
+	seedActor := in.Actor
+	var seedDID string
+	if seedActor == "" {
+		seedActor = cli.session.DID
+		seedDID = cli.session.DID
+	} else if strings.HasPrefix(seedActor, "did:") {
+		seedDID = seedActor
+	} else {
+		profileData, err := cli.xrpcGet("app.bsky.actor.getProfile", url.Values{
+			"actor": {seedActor},
+		})
+		if err != nil {
+			return ToolResult{OK: false, Output: "failed to resolve actor: " + err.Error()}, nil
+		}
+		var profile struct {
+			DID string `json:"did"`
+		}
+		if err := json.Unmarshal(profileData, &profile); err != nil {
+			return ToolResult{OK: false, Output: "failed to parse actor profile: " + err.Error()}, nil
+		}
+		if profile.DID == "" {
+			return ToolResult{OK: false, Output: "failed to resolve actor DID"}, nil
+		}
+		seedDID = profile.DID
+	}
+
+	// 2. Get seed actor's follows as the exploration pool
+	seedData, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+		"actor": {seedActor},
 		"limit": {"100"},
 	})
 	if err != nil {
 		return ToolResult{OK: false, Output: "failed to get my follows: " + err.Error()}, nil
 	}
 
-	var myFollowsResp struct {
+	var seedResp struct {
 		Follows []struct {
 			DID    string `json:"did"`
 			Handle string `json:"handle"`
 		} `json:"follows"`
 	}
-	if err := json.Unmarshal(myFollowsData, &myFollowsResp); err != nil {
+	if err := json.Unmarshal(seedData, &seedResp); err != nil {
 		return ToolResult{OK: false, Output: "failed to parse my follows: " + err.Error()}, nil
 	}
 
+	// When exploring own graph, filter out already-followed accounts.
+	// When exploring another user's graph, show all 2nd-degree connections.
 	alreadyFollowed := make(map[string]bool)
-	alreadyFollowed[cli.session.DID] = true // Don't suggest myself
-	for _, f := range myFollowsResp.Follows {
-		alreadyFollowed[f.DID] = true
+	alreadyFollowed[seedDID] = true
+	if in.Actor == "" {
+		for _, f := range seedResp.Follows {
+			alreadyFollowed[f.DID] = true
+		}
 	}
 
 	// 2. Sample N of my follows and see who they follow
@@ -310,7 +345,7 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 	profileInfo := make(map[string]string) // DID -> handle
 
 	count := 0
-	for _, f := range myFollowsResp.Follows {
+	for _, f := range seedResp.Follows {
 		if count >= in.SampleSize {
 			break
 		}
@@ -368,8 +403,8 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Found %d suggestions from sampling %d follows:\n\n", len(sorted), count)
-	
+	fmt.Fprintf(&sb, "Found %d suggestions from sampling %d of %s's follows:\n\n", len(sorted), count, seedActor)
+
 	limit := 15
 	if len(sorted) < limit {
 		limit = len(sorted)
@@ -377,7 +412,7 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 
 	for i := 0; i < limit; i++ {
 		s := sorted[i]
-		fmt.Fprintf(&sb, "%d. %s — followed by %d of your sampled follows\n", 
+		fmt.Fprintf(&sb, "%d. %s — followed by %d of your sampled follows\n",
 			i+1, profileInfo[s.DID], s.Count)
 	}
 

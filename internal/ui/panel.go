@@ -1,6 +1,13 @@
 package ui
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	lipgloss "github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wrap"
+)
 
 // Panel is the rendering contract for a TUI section.
 // Panels are render-only views over TUIModel state — they hold no mutable
@@ -106,3 +113,103 @@ func (p StatusPanel) Render(width, height int) string {
 
 func (StatusPanel) Focusable() bool { return true }
 func (StatusPanel) FocusID() focus  { return focusStatus }
+
+// ── DetailPanel ──────────────────────────────────────────────────────────────
+
+// DetailPanel renders the tool detail pane with full args/result display.
+type DetailPanel struct {
+	m *TUIModel
+}
+
+func (p DetailPanel) Render(width, height int) string {
+	exec := p.m.selectedToolExec
+	if exec == nil {
+		return styleMuted.Render("select a tool to view details")
+	}
+
+	p.m.detailView.Width = max(1, width-4)
+	p.m.detailView.Height = max(1, height-1)
+
+	content := p.m.detailPaneContent(width - 4)
+	p.m.detailView.SetContent(content)
+	return p.m.detailView.View()
+}
+
+func (DetailPanel) Focusable() bool { return true }
+func (DetailPanel) FocusID() focus   { return focusDetail }
+
+// detailPaneContent builds the formatted content string for the detail viewport.
+func (m *TUIModel) detailPaneContent(contentWidth int) string {
+	exec := m.selectedToolExec
+	if exec == nil {
+		return ""
+	}
+
+	var lines []string
+
+	// Header: tool name and status
+	statusIcon := styleOK.Render("✓")
+	statusText := styleOK.Render("OK")
+	if !exec.OK {
+		statusIcon = styleFail.Render("✗")
+		statusText = styleFail.Render("FAILED")
+	}
+
+	lines = append(lines,
+		styleBold.Render("Tool: ")+styleTool.Render(exec.Name),
+		styleMuted.Render("Status: ")+statusIcon+" "+statusText,
+		styleMuted.Render(fmt.Sprintf("Duration: %dms", exec.Duration)),
+		styleMuted.Render(fmt.Sprintf("Call ID: %s", exec.CallID)),
+		"",
+	)
+
+	// Args section
+	lines = append(lines, styleBold.Render("Arguments:"))
+	argsContent := m.formatDetailField(exec.Args, contentWidth-2)
+	if argsContent != "" {
+		lines = append(lines, argsContent)
+	} else {
+		lines = append(lines, styleMuted.Render("  (none)"))
+	}
+	lines = append(lines, "")
+
+	// Result section
+	lines = append(lines, styleBold.Render("Result:"))
+	resultContent := m.formatDetailField(exec.Result, contentWidth-2)
+	if resultContent != "" {
+		lines = append(lines, resultContent)
+	} else {
+		lines = append(lines, styleMuted.Render("  (empty)"))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// formatDetailField formats a potentially large field (args/result) for display.
+func (m *TUIModel) formatDetailField(content string, width int) string {
+	if content == "" {
+		return ""
+	}
+
+	// Try markdown rendering for nicer JSON display
+	rendered := m.renderMarkdownForPane(content)
+	if rendered != content && rendered != "" {
+		// Markdown worked, but we need to adjust for pane width
+		rendered = strings.TrimRight(rendered, "\n")
+		// Re-wrap to fit our content width
+		lines := strings.Split(rendered, "\n")
+		var wrapped []string
+		for _, line := range lines {
+			if lipgloss.Width(line) > width {
+				wrapped = append(wrapped, wrap.String(line, width))
+			} else {
+				wrapped = append(wrapped, line)
+			}
+		}
+		return strings.Join(wrapped, "\n")
+	}
+
+	// Fall back to plain text wrapping
+	wrapped := wrap.String(content, width)
+	return wrap.String(wrapped, width)
+}

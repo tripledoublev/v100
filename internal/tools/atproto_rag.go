@@ -490,7 +490,7 @@ func (t *atprotoRecallTool) InputSchema() json.RawMessage {
 }
 
 func (t *atprotoRecallTool) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"results":{"type":"array"}}}`)
+	return json.RawMessage(`{"type":"object","properties":{"results":{"type":"array"},"count":{"type":"integer"}}}`)
 }
 
 func (t *atprotoRecallTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMessage) (ToolResult, error) {
@@ -544,7 +544,26 @@ func (t *atprotoRecallTool) Exec(ctx context.Context, call ToolCallContext, args
 		}
 	}
 
-	b, err := json.Marshal(map[string]any{"results": results})
+	// Build lightweight output without raw embedding vectors (saves ~4KB per result).
+	type recallItem struct {
+		Content    string  `json:"content"`
+		RecordType string  `json:"record_type"`
+		Author     string  `json:"author,omitempty"`
+		URI        string  `json:"uri,omitempty"`
+		Score      float32 `json:"score"`
+	}
+	var items []recallItem
+	for _, r := range results {
+		items = append(items, recallItem{
+			Content:    r.Item.Content,
+			RecordType: r.Item.Metadata.Tags["record_type"],
+			Author:     r.Item.Metadata.Tags["author"],
+			URI:        r.Item.Metadata.Tags["uri"],
+			Score:      r.Score,
+		})
+	}
+
+	b, err := json.Marshal(map[string]any{"results": items, "count": len(items)})
 	if err != nil {
 		return failResult(start, "marshal results: "+err.Error()), nil
 	}

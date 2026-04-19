@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"net/http"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -27,6 +26,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 	if !m.showTrace {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
+		m.tryClickToolDetail(y)
 		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
@@ -42,6 +42,7 @@ func (m *TUIModel) handleMouseClick(x, y int) {
 	if x <= leftOuterEnd {
 		m.tryClickURL(x, y)
 		m.tryClickToggleTarget(y)
+		m.tryClickToolDetail(y)
 		m.tryClickCopyTarget(y)
 		m.focus = focusTranscript
 		m.input.Blur()
@@ -134,8 +135,35 @@ func (m *TUIModel) tryClickToggleTarget(termY int) {
 	}
 }
 
+// tryClickToolDetail checks if the click row matches a tool detail target and opens the detail pane.
+func (m *TUIModel) tryClickToolDetail(termY int) {
+	const contentStartRow = 2
+	if termY < contentStartRow {
+		return
+	}
+	contentLine := (termY - contentStartRow) + m.transcript.YOffset
+	for _, dt := range m.detailTargets {
+		if contentLine == dt.lineNo {
+			// For toggle line (exec == nil), find first tool with a result
+			if dt.exec == nil {
+				for _, item := range m.history {
+					if item.ID == dt.groupID && item.Expanded && len(item.ToolExecs) > 0 {
+						if exec := item.ToolExecs[0]; exec != nil && exec.Result != "" {
+							m.selectedToolExec = exec
+							m.showDetail = true
+						}
+					}
+				}
+				return
+			}
+			m.selectedToolExec = dt.exec
+			m.showDetail = true
+			return
+		}
+	}
+}
+
 // tryClickCopyTarget checks if the click row matches a copy icon and copies if so.
-// Transcript content starts at terminal row 2 (header=row0, pane_top_border=row1).
 func (m *TUIModel) tryClickCopyTarget(termY int) {
 	const contentStartRow = 2
 	if termY < contentStartRow {
@@ -180,28 +208,22 @@ func sanitizeInputNoise(s string) string {
 }
 
 // readClipboardImage attempts to read an image from the clipboard.
-// Returns the image data (PNG format) or nil if no image is available.
 func readClipboardImage() ([]byte, error) {
-	// Try Wayland first
 	if data, err := tryClipboardTool("wl-paste", "-t", "image/png"); err == nil {
 		return data, nil
 	}
-	// Try X11 with xclip
 	if data, err := tryClipboardTool("xclip", "-selection", "clipboard", "-t", "image/png", "-o"); err == nil {
 		return data, nil
 	}
-	// Try X11 with xsel
 	if data, err := tryClipboardImageTool("xsel", "--clipboard", "-o"); err == nil {
 		return data, nil
 	}
-	// Try macOS
 	if data, err := tryClipboardImageTool("pbpaste"); err == nil {
 		return data, nil
 	}
 	return nil, fmt.Errorf("no image in clipboard")
 }
 
-// tryClipboardTool runs a command and returns its output if successful.
 func tryClipboardTool(name string, args ...string) ([]byte, error) {
 	if _, err := exec.LookPath(name); err != nil {
 		return nil, err
@@ -211,7 +233,6 @@ func tryClipboardTool(name string, args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Check if output looks like valid image data (not empty)
 	if len(out) == 0 {
 		return nil, fmt.Errorf("empty clipboard")
 	}
@@ -224,7 +245,7 @@ func tryClipboardImageTool(name string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	if !isPNGData(out) {
-		return nil, fmt.Errorf("clipboard data is not PNG image data (detected %s)", http.DetectContentType(out))
+		return nil, fmt.Errorf("clipboard data is not PNG image data")
 	}
 	return out, nil
 }
@@ -242,7 +263,6 @@ func isPNGData(data []byte) bool {
 	return true
 }
 
-// imageCount returns a string describing attached images, e.g. "[Image #1]".
 func imageCount(n int) string {
 	if n == 0 {
 		return ""

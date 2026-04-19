@@ -17,23 +17,28 @@ func NewTUIModel() *TUIModel {
 
 	tv := viewport.New(40, 20)
 	trace := viewport.New(40, 20)
+	detail := viewport.New(40, 20)
 
 	m := &TUIModel{
-		input:        ti,
-		transcript:   tv,
-		traceView:    trace,
-		focus:        focusInput,
-		showTrace:    true,
-		showStatus:   true,
-		showMetrics:  true,
-		statusMode:   "idle",
-		statusLine:   "ready and waiting",
-		runSummary:   "v100 run pending",
-		leftPanePct:  66,
-		tracePanePct: 50,
-		radioURL:     "https://n04.radiojar.com/78cxy6wkxtzuv",
-		radioPlayer:  detectRadioPlayer(),
-		radioVolume:  60,
+		input:         ti,
+		transcript:    tv,
+		traceView:     trace,
+		detailView:    detail,
+		focus:         focusInput,
+		showTrace:     true,
+		showStatus:    true,
+		showMetrics:   true,
+		showDetail:    false,
+		statusMode:    "idle",
+		statusLine:    "ready and waiting",
+		runSummary:    "v100 run pending",
+		leftPanePct:   66,
+		tracePanePct:  50,
+		detailPanePct: 35,
+		radioURL:      "https://n04.radiojar.com/78cxy6wkxtzuv",
+		radioPlayer:   detectRadioPlayer(),
+		radioVolume:   60,
+		imageRenderer: NewImageRenderer(),
 	}
 	m.seedWelcomeContent()
 	return m

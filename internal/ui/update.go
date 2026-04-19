@@ -99,10 +99,16 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+t":
 			m.showTrace = !m.showTrace
-			if !m.showTrace && (m.focus == focusTrace || m.focus == focusStatus) {
+			if !m.showTrace && (m.focus == focusTrace || m.focus == focusStatus || m.focus == focusDetail) {
 				m.focus = focusTranscript
 				m.input.Blur()
 			}
+
+		case "ctrl+d":
+			if m.selectedToolExec != nil {
+				m.showDetail = !m.showDetail
+			}
+			return m, nil
 
 		case "ctrl+s":
 			m.showStatus = !m.showStatus
@@ -213,6 +219,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showRadioSelect = false
 				return m, nil
 			}
+			if m.showDetail {
+				m.showDetail = false
+				return m, nil
+			}
 			if m.InterruptFn != nil && (m.statusMode == "thinking" || m.statusMode == "tooling") {
 				m.InterruptFn()
 				m.focus = focusInput
@@ -233,6 +243,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.traceView, cmd = m.traceView.Update(msg)
 			cmds = append(cmds, cmd)
+		case focusDetail:
+			var cmd tea.Cmd
+			m.detailView, cmd = m.detailView.Update(msg)
+			cmds = append(cmds, cmd)
 		case focusInput:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -249,6 +263,11 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		m.traceView, cmd = m.traceView.Update(msg)
 		cmds = append(cmds, cmd)
+		// Sync detail view when visible
+		if m.showDetail {
+			m.detailView, cmd = m.detailView.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -319,7 +338,7 @@ func (m *TUIModel) switchFocusHalf() {
 }
 
 func (m *TUIModel) isInRightHalf() bool {
-	return m.focus == focusTrace || m.focus == focusStatus
+	return m.focus == focusTrace || m.focus == focusStatus || m.focus == focusDetail
 }
 
 func (m *TUIModel) resizeFocused(dxPct, dyPct int) {

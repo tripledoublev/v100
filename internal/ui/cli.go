@@ -32,6 +32,7 @@ type CLIRenderer struct {
 	streamedText   bool // set when EventModelToken prints; skip text in EventModelResp if true
 	speaker        *tts.Speaker
 	mu             sync.Mutex
+	imageRenderer  *ImageRenderer
 }
 
 // EnableTTS attaches a background speaker that voices assistant text.
@@ -73,7 +74,8 @@ type PromptResult struct {
 // NewCLIRenderer creates a CLI renderer.
 func NewCLIRenderer() *CLIRenderer {
 	return &CLIRenderer{
-		agentStarts: make(map[string]time.Time),
+		agentStarts:   make(map[string]time.Time),
+		imageRenderer: NewImageRenderer(),
 	}
 }
 
@@ -406,7 +408,12 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		var p core.ImageInlinePayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		data, _ := base64.StdEncoding.DecodeString(p.Data)
-		img := RenderImageInlineAuto(data, 80)
+		img := ""
+		if r.imageRenderer != nil {
+			img = r.imageRenderer.Render(data, 80)
+		} else {
+			img = RenderImageInlineAuto(data, 80)
+		}
 		if img != "" {
 			fmt.Printf("\n%s\n", img)
 		}
@@ -779,7 +786,7 @@ func PrintReplayEvent(ev core.Event) {
 		var p core.ImageInlinePayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		data, _ := base64.StdEncoding.DecodeString(p.Data)
-		img := RenderImageInlineAuto(data, 80)
+		img := renderImageSummary(data)
 		if img != "" {
 			fmt.Printf("\n%s\n", img)
 		}

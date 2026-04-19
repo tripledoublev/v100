@@ -99,7 +99,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 			name: "narrow",
 			w:    92,
 			h:    26,
-			want: `v100  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+A:copy  Ctrl+C:quit      <clock>
+			want: `v100  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+D:detail  Ctrl+A:copy …  <clock>
 ╭─────────────────────────────────────────────────────────╮ ╭──────────────────────────────╮
 │transcript line one                                      │ │trace                         │
 │transcript line two                                      │ │trace line one                │
@@ -134,7 +134,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 			name: "standard",
 			w:    120,
 			h:    30,
-			want: `v100  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit              <clock>
+			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:d…  <clock>
 ╭───────────────────────────────────────────────────────────────────────────╮ ╭────────────────────────────────────────╮
 │transcript line one                                                        │ │trace                                   │
 │transcript line two                                                        │ │trace line one                          │
@@ -171,7 +171,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 			name: "wide",
 			w:    160,
 			h:    36,
-			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit  <clock>
+			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy …  <clock>
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────╮
 │transcript line one                                                                                   │ │trace                                                │
 │transcript line two                                                                                   │ │trace line one                                       │

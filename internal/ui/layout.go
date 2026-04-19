@@ -9,7 +9,7 @@ import (
 
 // Border overhead constants: how many columns/rows are consumed by lipgloss borders and padding.
 const (
-	splitBorderCols  = 5 // Each pane has 2 border cols, and split adds 1-col gap: 2 + 2 + 1
+	splitBorderCols  = 5 // Each pane has 2 border cols, and split adds a 1-col gap: 2 + 2 + 1
 	singleBorderSize = 2 // Single pane borders consume 2 rows/cols
 )
 
@@ -104,12 +104,18 @@ func (p paneLayout) withRightColumnHeights(metricsRendered, statusRendered int) 
 }
 
 func computeHeaderLayout(totalWidth int, now time.Time) headerLayout {
-	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit"
-	if totalWidth < 130 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+A:copy all  Ctrl+C:quit"
+	// Wide hint with all controls
+	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
+	// Medium hint - drop resize hint
+	if totalWidth < 140 {
+		headerHint = "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
 	}
-	if totalWidth < 100 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+A:copy  Ctrl+C:quit"
+	// Narrow hint - drop status and trace toggles
+	if totalWidth < 110 {
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
+	}
+	if totalWidth < 95 {
+		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+D:detail  Ctrl+A:copy  Ctrl+C:quit"
 	}
 
 	leftText := "v100" + headerHint

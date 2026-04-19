@@ -77,6 +77,7 @@ func topWords(posts []digestPost, n int) []string {
 func fetchFilteredFeed(ctx context.Context, cli *atProtoClient, hours int, limit int) ([]digestPost, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 	var result []digestPost
+	seenURIs := make(map[string]bool)
 	var cursor string
 
 	for len(result) < limit {
@@ -120,6 +121,10 @@ func fetchFilteredFeed(ctx context.Context, cli *atProtoClient, hours int, limit
 			if createdAt.Before(cutoff) {
 				continue // skip posts outside window
 			}
+			if seenURIs[item.Post.URI] {
+				continue // skip duplicate posts
+			}
+			seenURIs[item.Post.URI] = true
 			result = append(result, digestPost{
 				URI:          item.Post.URI,
 				Author:       item.Post.Author.DisplayName,
@@ -166,7 +171,7 @@ func (t *atprotoVibeCheckTool) Description() string {
 	return "Analyze your Bluesky network's sentiment and mood. Fetches recent posts and surfaces the vibe: what topics people are discussing and how they feel about them."
 }
 func (t *atprotoVibeCheckTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoVibeCheckTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoVibeCheckTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoVibeCheckTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
@@ -256,7 +261,7 @@ func (t *atprotoDailyDigestTool) Description() string {
 	return "Generate a daily briefing of your Bluesky feed. Fetches recent posts, ranks by engagement, and produces a curated list of what's trending in your network."
 }
 func (t *atprotoDailyDigestTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoDailyDigestTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoDailyDigestTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoDailyDigestTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

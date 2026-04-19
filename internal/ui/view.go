@@ -78,6 +78,11 @@ func (m *TUIModel) View() string {
 
 		layout = layout.withRightColumnHeights(metricsRendered, statusRendered)
 
+		// Three-column layout when detail pane is visible
+		if m.showDetail && m.selectedToolExec != nil {
+			return m.renderThreeColumnLayout(transcript, trace, metrics, status, layout, layoutPlan, inputBox)
+		}
+
 		left := m.renderPanel(transcript, layout.leftWidth, layoutPlan.leftPaneHeight)
 		tracePane := m.renderPanel(trace, layout.rightWidth, layout.traceContentHeight)
 
@@ -99,6 +104,70 @@ func (m *TUIModel) View() string {
 	transcript.viewportHeight = layoutPlan.singlePaneHeight
 	pane := m.renderPanel(transcript, layoutPlan.inputWidth, layoutPlan.singlePaneHeight)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, pane, inputBox)
+	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
+}
+
+// renderThreeColumnLayout renders the three-column view with transcript | detail | trace+metrics+status.
+func (m *TUIModel) renderThreeColumnLayout(transcript TranscriptPanel, trace TracePanel, metrics MetricsPanel, status StatusPanel, layout paneLayout, layoutPlan viewLayoutPlan, inputBox string) string {
+	detail := DetailPanel{m: m}
+
+	// Calculate widths: transcript gets ~35%, detail gets ~35%, right column gets ~30%
+	availableWidth := m.width - splitBorderCols - 2 // -2 for extra gap between columns
+	transcriptWidth := availableWidth * 35 / 100
+	detailWidth := availableWidth * 35 / 100
+	rightWidth := availableWidth - transcriptWidth - detailWidth
+
+	// Ensure minimum widths
+	if transcriptWidth < 30 {
+		transcriptWidth = 30
+	}
+	if detailWidth < 30 {
+		detailWidth = 30
+	}
+	if rightWidth < 24 {
+		rightWidth = 24
+		// Recalculate to fit
+		detailWidth = availableWidth - transcriptWidth - rightWidth
+		if detailWidth < 30 {
+			detailWidth = 30
+			transcriptWidth = availableWidth - detailWidth - rightWidth
+		}
+	}
+
+	// Render panels
+	var metricsPane string
+	var metricsRendered int
+	if m.showMetrics {
+		metricsPane = m.renderPanel(metrics, rightWidth, 0)
+		metricsRendered = lipgloss.Height(metricsPane)
+	}
+
+	var statusPane string
+	var statusRendered int
+	if m.showStatus {
+		statusPane = m.renderPanel(status, rightWidth, 0)
+		statusRendered = lipgloss.Height(statusPane)
+	}
+
+	// Recalculate trace height based on actual right column contents
+	adjustedLayout := layout.withRightColumnHeights(metricsRendered, statusRendered)
+
+	// Render all three columns
+	leftCol := m.renderPanel(transcript, transcriptWidth, layoutPlan.leftPaneHeight)
+	detailCol := m.renderPanel(detail, detailWidth, layoutPlan.leftPaneHeight)
+	tracePane := m.renderPanel(trace, rightWidth, adjustedLayout.traceContentHeight)
+
+	rightPanes := []string{tracePane}
+	if m.showMetrics {
+		rightPanes = append(rightPanes, metricsPane)
+	}
+	if m.showStatus {
+		rightPanes = append(rightPanes, statusPane)
+	}
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, rightPanes...)
+
+	panes := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, " ", detailCol, " ", rightCol)
+	view := lipgloss.JoinVertical(lipgloss.Left, panes, inputBox)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, view)
 }
 
