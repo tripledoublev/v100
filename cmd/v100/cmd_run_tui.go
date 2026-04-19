@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,6 +40,8 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	var tui *ui.TUI
 	ctx := context.Background()
 	reason := "user_exit"
+	codexAvailable := cliAvailable("codex")
+	claudeAvailable := cliAvailable("claude")
 
 	var loop *core.Loop
 	var stepCancel context.CancelFunc
@@ -135,7 +138,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		stepMu.Unlock()
 	}
 
-	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY)
+	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY, codexAvailable, claudeAvailable)
 	tui.SetInterruptFn(interruptFn)
 	tui.SetVerbose(verbose)
 
@@ -318,4 +321,9 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	maybePrintFailureDigest(os.Stderr, trace.Path(), reason)
 
 	return nil
+}
+
+func cliAvailable(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }

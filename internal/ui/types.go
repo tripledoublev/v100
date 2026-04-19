@@ -163,6 +163,8 @@ type TUIModel struct {
 	leftPanePct      int
 	tracePanePct     int
 	detailPanePct    int
+	codexAvailable   bool
+	claudeAvailable  bool
 	verbose          bool
 	showMetrics      bool
 

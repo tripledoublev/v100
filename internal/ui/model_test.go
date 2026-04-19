@@ -20,7 +20,7 @@ func updateKey(m *TUIModel, msg tea.KeyMsg) *TUIModel {
 }
 
 func TestViewRendersHeaderInBoundedHeight(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 140
 	m.height = 42
 	view := m.View()
@@ -35,7 +35,7 @@ func TestViewRendersHeaderInBoundedHeight(t *testing.T) {
 }
 
 func TestNewTUIModelEnablesVisualInspectorByDefault(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	if !m.showMetrics {
 		t.Fatal("expected visual inspector to be enabled by default")
 	}
@@ -49,7 +49,7 @@ func TestNewTUIModelEnablesVisualInspectorByDefault(t *testing.T) {
 }
 
 func TestViewKeepsClockVisibleInHeader(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 100
 	m.height = 30
 
@@ -72,7 +72,7 @@ func TestViewKeepsClockVisibleInHeader(t *testing.T) {
 }
 
 func TestToolResultRendersAsIndentedBlock(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 80
 	m.height = 24
 
@@ -137,7 +137,7 @@ func TestToolResultRendersAsIndentedBlock(t *testing.T) {
 }
 
 func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 100
 	m.height = 30
 	m.focus = focusInput
@@ -166,7 +166,7 @@ func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
 }
 
 func TestUserMessageAppearsInTranscript(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 100
 	m.height = 30
 
@@ -194,7 +194,7 @@ func TestUserMessageAppearsInTranscript(t *testing.T) {
 }
 
 func TestTranscriptWrapWidthUsesComputedPaneWidth(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 120
 	m.height = 30
 	m.showTrace = true
@@ -211,7 +211,7 @@ func TestViewResponsiveLayoutsPreservePanelsAndWidthBounds(t *testing.T) {
 	widths := []int{92, 120, 160}
 	for _, width := range widths {
 		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
-			m := NewTUIModel()
+			m := NewTUIModel(false, false)
 			m.width = width
 			m.height = 30
 			m.showTrace = true
@@ -233,7 +233,7 @@ func TestViewResponsiveLayoutsPreservePanelsAndWidthBounds(t *testing.T) {
 }
 
 func TestCtrlDOpensAndFocusesDetailPane(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 140
 	m.height = 40
 	m.focus = focusTranscript
@@ -259,7 +259,7 @@ func TestCtrlDOpensAndFocusesDetailPane(t *testing.T) {
 }
 
 func TestCycleFocusIncludesDetailPaneWhenVisible(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 140
 	m.height = 40
 	m.showTrace = true
@@ -291,7 +291,7 @@ func TestCycleFocusIncludesDetailPaneWhenVisible(t *testing.T) {
 }
 
 func TestMouseClickInDetailColumnFocusesDetailPane(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 150
 	m.height = 40
 	m.showTrace = true
@@ -314,7 +314,7 @@ func TestMouseClickInDetailColumnFocusesDetailPane(t *testing.T) {
 }
 
 func TestClickToolDetailOpensAndFocusesDetailPane(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.detailTargets = []toolDetailTarget{{
 		lineNo: 0,
 		exec:   &ToolExecution{Name: "sh", Result: "done"},
@@ -334,7 +334,7 @@ func TestClickToolDetailOpensAndFocusesDetailPane(t *testing.T) {
 }
 
 func TestViewResizeKeepsPanelsVisibleAndBounded(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.showTrace = true
 	m.showStatus = true
 	m.showMetrics = true
@@ -363,7 +363,7 @@ func TestViewResizeKeepsPanelsVisibleAndBounded(t *testing.T) {
 }
 
 func TestViewSinglePaneOmitsRightColumnPanels(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.width = 100
 	m.height = 26
 	m.showTrace = false
@@ -400,7 +400,7 @@ func assertViewWithinWidth(t *testing.T, view string, width int) {
 
 func TestFocusCycleLeftHalf(t *testing.T) {
 
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.focus = focusTranscript
 
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab})
@@ -415,7 +415,7 @@ func TestFocusCycleLeftHalf(t *testing.T) {
 }
 
 func TestFocusHalfSwitchAndRightHalfCycling(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.showTrace = true
 	m.showStatus = true
 	m.focus = focusTranscript
@@ -445,7 +445,7 @@ func TestFocusHalfSwitchAndRightHalfCycling(t *testing.T) {
 }
 
 func TestEnterSubmitsAttachedImages(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.pastedImages = [][]byte{{0x89, 0x50, 0x4e, 0x47}}
 	got := make(chan SubmitRequest, 1)
 	m.SubmitFn = func(req SubmitRequest) {
@@ -472,7 +472,7 @@ func TestEnterSubmitsAttachedImages(t *testing.T) {
 }
 
 func TestCtrlVPastesClipboardImage(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	prev := clipboardImageReader
 	clipboardImageReader = func() ([]byte, error) {
 		return []byte{0x89, 0x50, 0x4e, 0x47}, nil
@@ -490,7 +490,7 @@ func TestCtrlVPastesClipboardImage(t *testing.T) {
 }
 
 func TestStatusModeDisplay_Stalled(t *testing.T) {
-	m := NewTUIModel()
+	m := NewTUIModel(false, false)
 	m.statusMode = "thinking"
 
 	// Set lastEventAt to 11 seconds ago
