@@ -2,14 +2,11 @@ package core
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/tripledoublev/v100/internal/providers"
 )
 
 // TraceWriter writes append-only JSONL trace events to disk.
@@ -25,7 +22,7 @@ func OpenTrace(path string) (*TraceWriter, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("trace: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("trace: open %s: %w", path, err)
 	}
@@ -33,9 +30,7 @@ func OpenTrace(path string) (*TraceWriter, error) {
 }
 
 // Write marshals the event and appends it as a newline-delimited JSON record.
-// Large payloads are truncated before writing to keep trace files compact.
 func (tw *TraceWriter) Write(event Event) error {
-	event = truncateEventForTrace(event)
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
 	b, err := json.Marshal(event)
@@ -57,7 +52,9 @@ func (tw *TraceWriter) Close() error {
 }
 
 // Path returns the file path of this trace.
-func (tw *TraceWriter) Path() string { return tw.path }
+func (tw *TraceWriter) Path() string {
+	return tw.path
+}
 
 // ReadAll reads all events from a JSONL trace file.
 func ReadAll(path string) ([]Event, error) {
@@ -69,7 +66,7 @@ func ReadAll(path string) ([]Event, error) {
 
 	var events []Event
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // allow 10MB max line
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB max line
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -83,12 +80,15 @@ func ReadAll(path string) ([]Event, error) {
 		}
 		events = append(events, ev)
 	}
-	return events, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("trace: scan: %w", err)
+	}
+	return events, nil
 }
 
-// ReadLastEventOfType scans forward and returns the last event matching any
-// of the given types. It always returns a match even if the file is truncated.
-// ReadFirstMatch returns the first event of any matching type, or nil.
+// ReadFirstMatch opens path and returns the first event whose type matches
+// any of the given types, stopping as soon as it is found. This avoids
+// reading the rest of the file — useful when only the first occurrence matters.
 func ReadFirstMatch(path string, types ...EventType) (*Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -102,7 +102,7 @@ func ReadFirstMatch(path string, types ...EventType) (*Event, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		raw := scanner.Bytes()
 		if len(raw) == 0 {
@@ -119,57 +119,19 @@ func ReadFirstMatch(path string, types ...EventType) (*Event, error) {
 	return nil, nil
 }
 
-func ReadLastEventOfType(ctx context.Context, path string, types ...EventType) (*Event, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("trace: open %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
+const traceMaxEventBytes = 64 * 1024 // 64KB cap per trace event
 
-	want := make(map[EventType]struct{}, len(types))
-	for _, t := range types {
-		want[t] = struct{}{}
-	}
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
-	var lastMatch *Event
-	for scanner.Scan() {
-		raw := scanner.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
-		var ev Event
-		if json.Unmarshal(raw, &ev) != nil {
-			continue
-		}
-		if _, ok := want[ev.Type]; ok {
-			lastMatch = &ev
-		}
-	}
-	return lastMatch, nil
-}
-
-// ── Trace payload truncation ────────────────────────────────────────────
-//
-// Model call payloads carry the full message history on every model call.
-// For long runs this produces multi-GB trace files full of redundant data.
-// truncateEventForTrace shrinks large payloads before serialization.
-
-const traceMaxMsgChars    = 256   // max chars per message content in trace
-const traceMaxRespChars   = 1024  // max chars for assistant response text
-const traceMaxOutputChars = 2048  // max chars for tool result output
-
-// truncateEventForTrace returns ev with large payload fields trimmed.
-// The original event is not modified.
+// truncateEventForTrace returns a shallow copy of the event with large payloads
+// trimmed to keep trace files compact. The original event is not modified.
 func truncateEventForTrace(ev Event) Event {
+	// Only mutate payloads known to carry large data.
 	switch ev.Type {
 	case EventModelCall:
 		var p ModelCallPayload
 		if json.Unmarshal(ev.Payload, &p) != nil {
 			return ev
 		}
-		p.Messages = truncateMessages(p.Messages)
+		p.Messages = truncateMessages(p.Messages, 256)
 		if b, err := json.Marshal(p); err == nil {
 			ev.Payload = b
 		}
@@ -178,8 +140,8 @@ func truncateEventForTrace(ev Event) Event {
 		if json.Unmarshal(ev.Payload, &p) != nil {
 			return ev
 		}
-		if len(p.Text) > traceMaxRespChars {
-			p.Text = p.Text[:traceMaxRespChars] + "\n... truncated"
+		if len(p.Text) > 1024 {
+			p.Text = p.Text[:1024] + "\n... truncated"
 		}
 		if b, err := json.Marshal(p); err == nil {
 			ev.Payload = b
@@ -189,8 +151,8 @@ func truncateEventForTrace(ev Event) Event {
 		if json.Unmarshal(ev.Payload, &p) != nil {
 			return ev
 		}
-		if len(p.Output) > traceMaxOutputChars {
-			p.Output = p.Output[:traceMaxOutputChars] + "\n... truncated"
+		if len(p.Output) > 2048 {
+			p.Output = p.Output[:2048] + "\n... truncated"
 		}
 		if b, err := json.Marshal(p); err == nil {
 			ev.Payload = b
@@ -199,15 +161,13 @@ func truncateEventForTrace(ev Event) Event {
 	return ev
 }
 
-// truncateMessages returns a copy of msgs with each Content field capped
-// to traceMaxMsgChars characters.
-func truncateMessages(msgs []providers.Message) []providers.Message {
+// truncateMessages caps each message's content to maxChars.
+func truncateMessages(msgs []providers.Message, maxChars int) []providers.Message {
 	out := make([]providers.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = m
-		if len(m.Content) > traceMaxMsgChars {
-			out[i].Content = m.Content[:traceMaxMsgChars] + "\n... truncated"
+		if len(m.Content) > maxChars {
+			out[i].Content = m.Content[:maxChars] + "\n... truncated"
 		}
 	}
 	return out
-}

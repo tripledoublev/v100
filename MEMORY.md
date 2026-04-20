@@ -1,25 +1,24 @@
 # MEMORY — v100 Development Log
 
-## 2025-04-18: Phase 400 — COMPLETE ✓
+## 2025-04-19: Session cleanup & test fixes
 
-All 5 items shipped across 4 commits:
+### Commits this session:
+- `d0d4fdb` — fix missing goquery transitive dep (build fix)
+- `5ed9c06` — fix compression test I/O explosion (5000→600 char messages)
+- `f5f7d17` — remove 4 placeholder images from repo root
 
-| # | Item | Commit | Files |
-|---|------|--------|-------|
-| 2 | CWI — Context Window Intelligence | `aad0319` | context.go, context_test.go |
-| 4 | ASH — Agent Self-Healing | `258fd3b` | recovery.go, recovery_test.go |
-| 3 | CEP — Continuous Eval Pipeline | `846ac91` | history.go, history_test.go, cmd_eval.go |
-| 5 | DA — Dogfood Automation | `1cafa4d` | dogfood.go, dogfood_test.go, cmd_dogfood.go |
-| 1 | PRR — Provider Resilience | v0.2.18 | (pre-existing) |
+### Issue pack status (docs/issue-pack-2026-03-10.md):
+All 4 issues already resolved in codebase:
+1. `project_search` false negatives → ✅ exit code handling + tests
+2. `contains` scorer case sensitivity → ✅ ToLower both sides + tests
+3. Denial retry loops → ✅ per-key counting, stop at 2, cap at 5 total
+4. Exact-write verification → ✅ FileContent scorer exists
 
-### New CLI commands:
-- `v100 bench history <name>` — score history table
-- `v100 bench trend <name>` — sparkline + drift detection
-- `v100 dogfood run [quest...]` — execute self-test quests
-- `v100 dogfood report` — summary of last run
+### Test health:
+- All packages pass: `go test ./internal/...` OK
+- Core tests: 91ms (was timing out before due to 5000-char test data filling /tmp)
+- `/tmp` cleaned from 22G → 860M
 
-### New hooks (auto-wired):
-- `PressureMonitor` — warns at 70% context, compresses at 80.5%
-- `RecoveryHook` — stuck detection, error pattern matching, graceful degradation
-
-### Test counts added: 31 new tests (8+10+7+6)
+### Current version: v0.2.19
+### Phases complete: 300, 400
+### Next: Plan Phase 500 or tackle new features
