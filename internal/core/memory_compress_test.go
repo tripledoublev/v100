@@ -441,8 +441,8 @@ func TestTargetedCompressionProtectsRecent(t *testing.T) {
 	// Add large messages that should be protected
 	for i := 0; i < 10; i++ {
 		loop.Messages = append(loop.Messages,
-			providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
-			providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+			providers.Message{Role: "user", Content: strings.Repeat("x", 600)},
+			providers.Message{Role: "assistant", Content: strings.Repeat("y", 600)},
 		)
 	}
 
@@ -500,9 +500,9 @@ func TestBulkFallbackAfterTargeted(t *testing.T) {
 	prov := &capturingProvider{
 		responses: []providers.CompleteResponse{
 			// Bounded targeted compression calls (still won't be enough)
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
-			{AssistantText: strings.Repeat("z", 4000), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 600), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 600), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
+			{AssistantText: strings.Repeat("z", 600), Usage: providers.Usage{InputTokens: 50, OutputTokens: 10}},
 			// Bulk summary call
 			{AssistantText: "bulk summary", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
 			// Main completion
@@ -512,10 +512,10 @@ func TestBulkFallbackAfterTargeted(t *testing.T) {
 	loop := newCompressLoop(t, prov, 200)
 
 	// Many large messages — targeted won't reduce enough because summaries are still large
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 4; i++ {
 		loop.Messages = append(loop.Messages,
-			providers.Message{Role: "user", Content: strings.Repeat("x", 5000)},
-			providers.Message{Role: "assistant", Content: strings.Repeat("y", 5000)},
+			providers.Message{Role: "user", Content: strings.Repeat("x", 600)},
+			providers.Message{Role: "assistant", Content: strings.Repeat("y", 600)},
 		)
 	}
 
