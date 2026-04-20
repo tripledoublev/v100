@@ -16,3 +16,10 @@ runs/
 /todos/roadmap.md
 exports/
 *.log
+
+# Test/demo images at repo root (assets/v100.png is the project logo)
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
