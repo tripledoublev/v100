@@ -143,8 +143,8 @@ func FormatHistoryTable(entries []HistoryEntry) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%-28s  %-10s %-10s %-12s %-8s %-20s\n",
-		"RUN ID", "PROVIDER", "MODEL", "VARIANT", "SCORE", "TIMESTAMP"))
+	fmt.Fprintf(&sb, "%-28s  %-10s %-10s %-12s %-8s %-20s\n",
+		"RUN ID", "PROVIDER", "MODEL", "VARIANT", "SCORE", "TIMESTAMP")
 	sb.WriteString(strings.Repeat("─", 95))
 	sb.WriteString("\n")
 
@@ -154,8 +154,8 @@ func FormatHistoryTable(entries []HistoryEntry) string {
 			score = "-"
 		}
 		ts := e.CreatedAt.Format("2006-01-02 15:04:05")
-		sb.WriteString(fmt.Sprintf("%-28s  %-10s %-10s %-12s %-8s %-20s\n",
-			e.RunID, e.Provider, e.Model, e.Variant, score, ts))
+		fmt.Fprintf(&sb, "%-28s  %-10s %-10s %-12s %-8s %-20s\n",
+			e.RunID, e.Provider, e.Model, e.Variant, score, ts)
 	}
 
 	return sb.String()
@@ -185,10 +185,10 @@ func FormatTrendSummary(entries []HistoryEntry) string {
 	passRate := float64(passCount) / float64(total) * 100
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Bench: %s\n", entries[0].Name))
-	sb.WriteString(fmt.Sprintf("Runs:  %d  |  Pass: %d  |  Fail: %d  |  Pass Rate: %.0f%%\n",
-		total, passCount, failCount, passRate))
-	sb.WriteString(fmt.Sprintf("Trend: %s\n", Sparkline(values)))
+	fmt.Fprintf(&sb, "Bench: %s\n", entries[0].Name)
+	fmt.Fprintf(&sb, "Runs:  %d  |  Pass: %d  |  Fail: %d  |  Pass Rate: %.0f%%\n",
+		total, passCount, failCount, passRate)
+	fmt.Fprintf(&sb, "Trend: %s\n", Sparkline(values))
 
 	// Show last 5 results detail
 	sb.WriteString("\nRecent runs:\n")
@@ -209,13 +209,13 @@ func FormatTrendSummary(entries []HistoryEntry) string {
 				notes = notes[:57] + "..."
 			}
 		}
-		sb.WriteString(fmt.Sprintf("  %s  %s  %s/%s%s\n",
+		fmt.Fprintf(&sb, "  %s  %s  %s/%s%s\n",
 			e.CreatedAt.Format("Jan 02 15:04"),
 			score,
 			e.Provider,
 			e.Model,
 			notes,
-		))
+		)
 	}
 
 	return sb.String()

@@ -114,7 +114,7 @@ func FormatReport(report DogfoodReport) string {
 	sb.WriteString("\n")
 
 	fmt.Fprintf(&sb, "%-35s %-10s %-10s %s\n",
-		"QUEST", "SCORE", "DURATION", "NOTES")
+		"QUEST", "SCORE", "DURATION", "NOTES"))
 	sb.WriteString(strings.Repeat("─", 70))
 	sb.WriteString("\n")
 
@@ -137,8 +137,8 @@ func FormatReport(report DogfoodReport) string {
 			}
 		}
 
-		fmt.Fprintf(&sb, "%-35s %-10s %-10s %s\n",
-			r.Quest.Name, score, duration, notes)
+		sb.WriteString(fmt.Sprintf("%-35s %-10s %-10s %s\n",
+			r.Quest.Name, score, duration, notes))
 	}
 
 	sb.WriteString(strings.Repeat("─", 70))
@@ -157,8 +157,8 @@ func FormatReport(report DogfoodReport) string {
 		verdict = "FAIL"
 	}
 
-	fmt.Fprintf(&sb, "Total: %d  |  Pass: %d  |  Fail: %d  |  Skipped: %d  |  Verdict: %s\n",
-		report.Total, report.Passed, report.Failed, report.Skipped, verdict)
+	sb.WriteString(fmt.Sprintf("Total: %d  |  Pass: %d  |  Fail: %d  |  Skipped: %d  |  Verdict: %s\n",
+		report.Total, report.Passed, report.Failed, report.Skipped, verdict))
 
 	return sb.String()
 }
