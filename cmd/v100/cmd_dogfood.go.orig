@@ -90,7 +90,6 @@ func dogfoodRunCmd(cfgPath *string) *cobra.Command {
 					fmt.Printf("  %s Error: %v\n", ui.Fail("✗"), err)
 				} else {
 					result.Duration = time.Since(start)
-					result.Score = "pass"
 				}
 
 				results = append(results, result)
