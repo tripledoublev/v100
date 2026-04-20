@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/eval"
 	"github.com/tripledoublev/v100/internal/ui"
 )
@@ -83,14 +85,28 @@ func dogfoodRunCmd(cfgPath *string) *cobra.Command {
 					Quest: quest,
 				}
 
-				// Run the bench config
-				if err := runDogfoodQuest(cfgPath, quest, opts, commitHash); err != nil {
+				// Run the bench config and get the created run ID
+				runID, err := runDogfoodQuest(cfgPath, quest, opts, commitHash)
+				if err != nil {
 					result.Score = "error"
 					result.Error = err.Error()
 					fmt.Printf("  %s Error: %v\n", ui.Fail("✗"), err)
 				} else {
 					result.Duration = time.Since(start)
-					result.Score = "pass"
+					result.RunID = runID
+
+					// Read the actual score from meta.json (written by scorer)
+					if runID != "" {
+						meta, err := core.ReadMeta(filepath.Join("runs", runID))
+						if err == nil && meta.Score != "" {
+							result.Score = strings.ToLower(meta.Score)
+						} else {
+							// No scorer ran, just completion happened
+							result.Score = "pass"
+						}
+					} else {
+						result.Score = "pass"
+					}
 				}
 
 				results = append(results, result)
@@ -165,12 +181,10 @@ func dogfoodReportCmd() *cobra.Command {
 }
 
 // runDogfoodQuest executes a single bench file with dogfood tagging.
-func runDogfoodQuest(cfgPath *string, quest eval.DogfoodQuest, opts benchRunOptions, commitHash string) error {
+// Returns the created run ID and any error.
+func runDogfoodQuest(cfgPath *string, quest eval.DogfoodQuest, opts benchRunOptions, commitHash string) (string, error) {
 	// Delegate to the existing bench run infrastructure
-	if err := runBenchConfig(cfgPath, quest.File, opts); err != nil {
-		return err
-	}
-	return nil
+	return runBenchConfig(cfgPath, quest.File, opts)
 }
 
 // collectScores updates report totals from results by looking at actual run scores.
@@ -210,5 +224,3 @@ func commitTag(hash string) string {
 	}
 	return fmt.Sprintf(" (commit: %s)", hash)
 }
-
-

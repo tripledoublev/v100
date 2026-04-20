@@ -235,7 +235,11 @@ func benchCmd(cfgPath *string) *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			return runBenchConfig(cfgPath, args[0], *opts)
+			_, _err := runBenchConfig(cfgPath, args[0], *opts)
+			if _err != nil {
+				return _err
+			}
+			return nil
 		},
 	}
 
@@ -252,7 +256,11 @@ func benchRunCmd(cfgPath *string) *cobra.Command {
 		Short: "Run batch evaluation from a bench config file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBenchConfig(cfgPath, args[0], *opts)
+			_, _err := runBenchConfig(cfgPath, args[0], *opts)
+			if _err != nil {
+				return _err
+			}
+			return nil
 		},
 	}
 
@@ -392,22 +400,23 @@ func addBenchRunFlags(cmd *cobra.Command, opts *benchRunOptions) {
 	cmd.Flags().BoolVar(&opts.yolo, "yolo", false, "shorthand for --auto --unsafe")
 }
 
-func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) error {
+func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) (string, error) {
 	if opts.yolo {
 		opts.unsafe = true
 	}
 
 	bc, err := core.LoadBenchConfig(benchPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	ctx := context.Background()
+	var lastRunID string
 
 	for _, variant := range bc.Variants {
 		genParams := providers.GenParams{
@@ -425,7 +434,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 			runID := newRunID()
 			runDir := filepath.Join("runs", runID)
 			if err := os.MkdirAll(runDir, 0o755); err != nil {
-				return err
+				return "", err
 			}
 
 			meta := core.RunMeta{
@@ -442,7 +451,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 			tracePath := filepath.Join(runDir, "trace.jsonl")
 			trace, err := core.OpenTrace(tracePath)
 			if err != nil {
-				return err
+				return "", err
 			}
 
 			coreRun := &core.Run{ID: runID, Dir: runDir, TraceFile: tracePath}
@@ -453,7 +462,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 			sSession, sMapper, sWorkspace, err = buildSandboxSession(cfg, runID, ".", "runs")
 			if err != nil {
 				_ = trace.Close()
-				return err
+				return "", err
 			}
 			if cfg.Sandbox.Enabled {
 				defer func() { _ = sSession.Close() }()
@@ -462,20 +471,20 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 			reg := buildToolRegistry(cfg)
 			if err := validateToolRegistry(reg); err != nil {
 				_ = trace.Close()
-				return err
+					return "", err
 			}
 			pol := loadPolicy(cfg, "default")
 
 			solver, err := buildSolver(cfg, variant.Solver)
 			if err != nil {
 				_ = trace.Close()
-				return err
+				return "", err
 			}
 
 			prov, err := buildProvider(cfg, variant.Provider)
 			if err != nil {
 				_ = trace.Close()
-				return err
+				return "", err
 			}
 
 			budgetSteps := variant.BudgetSteps
@@ -490,7 +499,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 
 			confirmMode := "never"
 			if err := validateExecutionSafety(cfg, confirmMode, opts.unsafe); err != nil {
-				return err
+				return "", err
 			}
 
 			renderer := ui.NewCLIRenderer()
@@ -586,7 +595,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) err
 	}
 
 	fmt.Printf("\n%s\n", ui.Header("Benchmark complete"))
-	return nil
+	return lastRunID, nil
 }
 
 func queryCmd() *cobra.Command {
