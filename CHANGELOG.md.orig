@@ -488,5 +488,6 @@ All providers support tool calling and generation parameters (temperature, top_p
 ### Infrastructure
 
 - **`v100 doctor`** — health check for providers, tools, and configuration
+- **`v100 dev`** — supervisor that rebuilds on `.v100-reload`
 - **`v100 config init`** — generates default config and OAuth credential templates
 - **CI** — GitHub Actions with `go test -race`, `go vet`, pinned `golangci-lint`, and hardened semantic tool detection

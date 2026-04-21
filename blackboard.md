@@ -15,3 +15,8 @@
 - `ForceCompress(ctx, stepID)` already exists
 - `PolicyHook func(state LoopState) HookResult` is the hook interface
 - `runHooks()` in loop.go builds `LoopState` — need to add pressure fields there
+## 2025-07-13: Adding web_search tool (Brave Search API)
+- Creating `internal/tools/web_search.go` — Brave Search API integration
+- Adding to config: `web_search` in enabled tools list
+- API key via `BRAVE_SEARCH_API_KEY` env var (user already added to .env)
+- Pattern follows existing tools (wiki.go, news.go)
