@@ -344,7 +344,7 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"]
 
 [policies.default]

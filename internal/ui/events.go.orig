@@ -676,8 +676,6 @@ func toolGlyph(name string) string {
 		return " $"
 	case "wiki":
 		return " W"
-	case "web_search":
-		return " S"
 	case "agent":
 		return " ◆"
 	case "dispatch":
