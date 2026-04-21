@@ -199,11 +199,11 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
-				"git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
-				"sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
+				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
+				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
 				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "atproto_post"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -250,7 +250,7 @@ func DefaultConfig() *Config {
 			ContextLimit:          80000,
 			MaxToolResultChars:    20000,
 			CompressProtectRecent: 6,
-			CompressProvider:      "anthropic",
+			CompressProvider:      "glm",
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
@@ -344,7 +344,7 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "sh", "git_status", "git_diff", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"]
 
 [policies.default]
@@ -449,15 +449,15 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	ensureString(&cfg.Tools.Enabled, "atproto_index")
 	ensureString(&cfg.Tools.Enabled, "atproto_recall")
+	ensureString(&cfg.Tools.Enabled, "web_search")
+	ensureString(&cfg.Tools.Enabled, "fs_render_image")
+	ensureString(&cfg.Tools.Enabled, "fingerprint")
+	ensureString(&cfg.Tools.Dangerous, "fingerprint")
+	ensureString(&cfg.Tools.Enabled, "sem_diff")
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = DefaultConfig().Agents
 	}
-	if cfg.Defaults.SmartProvider == "" {
-		cfg.Defaults.SmartProvider = DefaultConfig().Defaults.SmartProvider
-	}
-	if cfg.Defaults.CheapProvider == "" {
-		cfg.Defaults.CheapProvider = DefaultConfig().Defaults.CheapProvider
-	}
+	applyDefaultsConfig(&cfg.Defaults, DefaultConfig().Defaults)
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
@@ -612,5 +612,56 @@ func applyUpdateDefaults(dst *UpdateConfig, defaults UpdateConfig) {
 	}
 	if strings.TrimSpace(dst.CheckInterval) == "" {
 		dst.CheckInterval = defaults.CheckInterval
+	}
+}
+
+func applyDefaultsConfig(dst *DefaultsConfig, defaults DefaultsConfig) {
+	if dst.Provider == "" {
+		dst.Provider = defaults.Provider
+	}
+	if dst.SmartProvider == "" {
+		dst.SmartProvider = defaults.SmartProvider
+	}
+	if dst.CheapProvider == "" {
+		dst.CheapProvider = defaults.CheapProvider
+	}
+	if dst.Solver == "" {
+		dst.Solver = defaults.Solver
+	}
+	if dst.ConfirmTools == "" {
+		dst.ConfirmTools = defaults.ConfirmTools
+	}
+	if dst.BudgetSteps == 0 {
+		dst.BudgetSteps = defaults.BudgetSteps
+	}
+	if dst.BudgetTokens == 0 {
+		dst.BudgetTokens = defaults.BudgetTokens
+	}
+	if dst.BudgetCostUSD == 0 {
+		dst.BudgetCostUSD = defaults.BudgetCostUSD
+	}
+	if dst.ToolTimeoutMS == 0 {
+		dst.ToolTimeoutMS = defaults.ToolTimeoutMS
+	}
+	if dst.MaxToolCallsPerStep == 0 {
+		dst.MaxToolCallsPerStep = defaults.MaxToolCallsPerStep
+	}
+	if dst.MemoryMode == "" {
+		dst.MemoryMode = defaults.MemoryMode
+	}
+	if dst.MemoryMaxTokens == 0 {
+		dst.MemoryMaxTokens = defaults.MemoryMaxTokens
+	}
+	if dst.ContextLimit == 0 {
+		dst.ContextLimit = defaults.ContextLimit
+	}
+	if dst.MaxToolResultChars == 0 {
+		dst.MaxToolResultChars = defaults.MaxToolResultChars
+	}
+	if dst.CompressProtectRecent == 0 {
+		dst.CompressProtectRecent = defaults.CompressProtectRecent
+	}
+	if dst.CompressProvider == "" {
+		dst.CompressProvider = defaults.CompressProvider
 	}
 }
