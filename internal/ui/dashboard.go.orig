@@ -9,7 +9,7 @@ import (
 )
 
 // LiveMetricDashboard renders the "Gaming Minimap" style visual inspector.
-func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, lastStepMS int64, lastStepTools, recentModelCalls, recentToolCalls, recentCompresses int, statusMode string, idleFor time.Duration, width int, workspacePath string) string {
+func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens, outTokens int, usedCost, maxCost float64, lastStepMS int64, lastStepTools, recentModelCalls, recentToolCalls, recentCompresses int, statusMode string, idleFor time.Duration, width int) string {
 	if width < 20 {
 		return ""
 	}
@@ -31,17 +31,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	styleGreen := lipgloss.NewStyle().Foreground(colorMoney)
 
 	w := width - 4
-
-	// Workspace path line — truncate from the left if too wide
-	pathDisplay := ""
-	if workspacePath != "" {
-		pathLine := workspacePath
-		if maxPathW := w - 6; len(pathLine) > maxPathW {
-			pathLine = "…" + pathLine[len(pathLine)-maxPathW+1:]
-		}
-		pathDisplay = styleMuted.Render("path: ") + styleCyan.Render(pathLine)
-	}
-
+	
 	// 1. Step Progress (The "Shield/Fuel" Meter)
 	stepPct := 0.0
 	if maxSteps > 0 {
@@ -167,13 +157,8 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		heartbeatLabelStyle = styleAmber
 	}
 
-	dashboardLines := []string{
+	dashboard := lipgloss.JoinVertical(lipgloss.Left,
 		inspectorTitleStyle.Render("visual inspector"),
-	}
-	if pathDisplay != "" {
-		dashboardLines = append(dashboardLines, pathDisplay)
-	}
-	dashboardLines = append(dashboardLines,
 		stepBar,
 		tokenBar,
 		ioBar,
@@ -185,10 +170,10 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		fmt.Sprintf("%s %s", heartbeatLabelStyle.Render("HEARTBEAT:"), heartbeat),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left, dashboardLines...)
-}
+	return dashboard
+	}
 
-func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) string {
+	func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) string {
 	// Account for label, space, and trailing bracket
 	barWidth := width - lipgloss.Width(label) - 2
 	if barWidth < 5 {
@@ -216,7 +201,7 @@ func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) s
 		emptyStyle.Render(strings.Repeat("·", empty)),
 		styleMuted.Render("]"),
 	)
-}
+	}
 
 func percentLabel(v float64) string {
 	if v < 0 {

@@ -89,7 +89,8 @@ func (p MetricsPanel) Render(width, _ int) string {
 		p.m.usedTokens, p.m.maxTokens, p.m.inputTokens, p.m.outputTokens,
 		p.m.usedCost, p.m.maxCost, p.m.lastStepMS, p.m.lastStepTools,
 		len(p.m.modelEvents), len(p.m.toolEvents), len(p.m.compressEvents),
-		p.m.statusMode, time.Since(p.m.lastEventAt), width)
+		p.m.statusMode, time.Since(p.m.lastEventAt), width,
+		p.m.WorkspacePath)
 }
 
 func (MetricsPanel) Focusable() bool { return false }
