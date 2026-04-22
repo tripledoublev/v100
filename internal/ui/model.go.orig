@@ -45,9 +45,6 @@ func NewTUIModel(codexAvailable, claudeAvailable bool) *TUIModel {
 		runReview:       realRunReview,
 		imageRenderer:   NewImageRenderer(),
 	}
-	if wd, err := os.Getwd(); err == nil {
-		m.WorkspacePath = wd
-	}
 	m.seedWelcomeContent()
 	return m
 }

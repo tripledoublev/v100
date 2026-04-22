@@ -174,6 +174,7 @@ type TUIModel struct {
 	codexAvailable   bool
 	claudeAvailable  bool
 	verbose          bool
+	WorkspacePath    string
 	showMetrics      bool
 
 	// live metrics state
