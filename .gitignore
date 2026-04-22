@@ -23,3 +23,7 @@ exports/
 /*.jpeg
 /*.gif
 /*.webp
+
+# Claude Code artifacts
+.claude/
+*.settings.local.json
