@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.20 — 2026-04-22
+
+**Brave Web Search, Tool Defaults Normalization, and Cleanup**
+
+### Features
+
+- **`web_search` tool** — Added a Brave Search-backed web search tool that returns ranked results with title, URL, and description. Enabled in the default tool registry and surfaced in the TUI with its own glyph. Requires `BRAVE_SEARCH_API_KEY`.
+
+### Maintenance
+
+- **Tool default normalization** — Config loading now backfills missing default providers and tool registrations more consistently, including `git_commit`, `web_search`, `fs_render_image`, `fingerprint`, and `sem_diff`.
+- **Compression default** — Default compression provider now targets `glm`.
+- **Artifact cleanup** — `.claude/` artifacts and `*.settings.local.json` are ignored, and stray `.orig`/`.rej` patch artifacts were removed from the repo.
+- **Docs cleanup** — Removed the unused `v100 dev` entry from the changelog.
+
 ## v0.2.19 — 2026-04-18
 
 **Context Intelligence, Self-Healing, Eval Pipeline, Dogfood Automation, and TUI Detail Pane**
