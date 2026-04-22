@@ -16,6 +16,7 @@ runs/
 /todos/roadmap.md
 exports/
 *.log
+/MEMORY.md
 
 # Test/demo images at repo root (assets/v100.png is the project logo)
 /*.png

@@ -1,7 +1,5 @@
 # v100
 
-![teaser](progress.png)
-
 v100 is my engine for agentic research.
 
 I use it to build, run, study, and evolve autonomous coding agents under real constraints. The core of the project is a Go-based agent runtime with a CLI, TUI, tool safety controls, durable memory, trace replay, benchmarking, eval, policy evolution, and long-running execution paths. Research is one feature of the system, but not the definition of it.

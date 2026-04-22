@@ -297,7 +297,7 @@ This patch release updates the built-in MiniMax default model to `MiniMax-M2.7` 
 ### Documentation
 
 - **README cleanup** — Corrected the default provider guidance, solver count, Go version requirement, and tool-surface description.
-- **Compression notes refreshed** — Updated `MEMORY.md` to reflect the current two-pass compression flow with targeted compression before oldest-half fallback.
+- **Compression notes refreshed** — Refreshed compression notes to reflect the current two-pass compression flow with targeted compression before oldest-half fallback.
 
 ## v0.2.5 — 2026-03-14
 
