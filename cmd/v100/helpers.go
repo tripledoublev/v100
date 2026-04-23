@@ -393,7 +393,7 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 		}
 		return &core.MiniGLMSolver{MiniMax: minimax, GLM: glm}, nil
 	case "rlm":
-		subProv, err := buildProvider(cfg, cfg.Defaults.SubProvider)
+		subProv, err := buildProvider(cfg, cfg.Defaults.Provider)
 		if err != nil {
 			return nil, fmt.Errorf("build sub-provider for rlm: %w", err)
 		}
