@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,12 +15,131 @@ import (
 // RLMSolver implements the Recursive Language Model pattern where the agent
 // can call sub-LMs with typed signatures via a `predict` tool.
 type RLMSolver struct {
-	SubProvider            providers.Provider
-	MaxConcurrentPredicts  int
-	EnableVision           bool
+	SubProvider           providers.Provider
+	MaxConcurrentPredicts int
+	EnableVision          bool
 }
 
 func (s *RLMSolver) Name() string { return "rlm" }
+
+// Signature represents a parsed DSPy-style signature.
+type Signature struct {
+	Inputs  map[string]string
+	Outputs map[string]string
+}
+
+// ParseSignature parses a DSPy-style signature string.
+// Format: "input1: Type1, input2: Type2 -> output1: Type1, output2: Type2"
+func ParseSignature(sig string) (*Signature, error) {
+	parts := strings.Split(sig, "->")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("signature must have '->' separator")
+	}
+
+	s := &Signature{
+		Inputs:  make(map[string]string),
+		Outputs: make(map[string]string),
+	}
+
+	if err := parseFields(strings.TrimSpace(parts[0]), s.Inputs); err != nil {
+		return nil, fmt.Errorf("parse inputs: %w", err)
+	}
+
+	if err := parseFields(strings.TrimSpace(parts[1]), s.Outputs); err != nil {
+		return nil, fmt.Errorf("parse outputs: %w", err)
+	}
+
+	return s, nil
+}
+
+func parseFields(fieldStr string, fields map[string]string) error {
+	fieldRe := regexp.MustCompile(`(\w+)\s*:\s*([\w\.\[\]]+)`)
+	matches := fieldRe.FindAllStringSubmatch(fieldStr, -1)
+	for _, m := range matches {
+		if len(m) >= 3 {
+			fields[m[1]] = m[2]
+		}
+	}
+	return nil
+}
+
+// PredictCall represents a parsed predict() tool call.
+type PredictCall struct {
+	Signature *Signature
+	Args      map[string]json.RawMessage
+}
+
+// ParsePredictArgs extracts the signature from predict tool call args.
+func ParsePredictArgs(args json.RawMessage) (*PredictCall, error) {
+	var raw struct {
+		Signature string `json:"signature"`
+	}
+	if err := json.Unmarshal(args, &raw); err != nil {
+		return nil, fmt.Errorf("unmarshal predict args: %w", err)
+	}
+
+	if raw.Signature == "" {
+		return nil, fmt.Errorf("predict: signature is required")
+	}
+
+	sig, err := ParseSignature(raw.Signature)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PredictCall{Signature: sig}, nil
+}
+
+// BuildPredictPrompt creates a detailed prompt for the sub-model.
+func BuildPredictPrompt(call *PredictCall) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "You are executing a DSPy-style predict call.\n\n")
+
+	fmt.Fprintf(&sb, "INPUTS:\n")
+	for name, typ := range call.Signature.Inputs {
+		fmt.Fprintf(&sb, "  - %s: %s\n", name, typ)
+	}
+
+	fmt.Fprintf(&sb, "\nOUTPUTS (return these):\n")
+	for name, typ := range call.Signature.Outputs {
+		fmt.Fprintf(&sb, "  - %s: %s\n", name, typ)
+	}
+
+	fmt.Fprintf(&sb, "\nInstructions: Based on the provided inputs, predict the outputs.")
+	fmt.Fprintf(&sb, " Return your predictions as valid JSON:\n")
+
+	fmt.Fprintf(&sb, "{\n")
+	var outFields []string
+	for name := range call.Signature.Outputs {
+		outFields = append(outFields, name)
+	}
+	for i, name := range outFields {
+		typ := call.Signature.Outputs[name]
+		comma := ","
+		if i == len(outFields)-1 {
+			comma = ""
+		}
+		switch strings.ToLower(typ) {
+		case "str", "string":
+			fmt.Fprintf(&sb, `  "%s": "<prediction>"%s`, name, comma)
+		case "int", "integer":
+			fmt.Fprintf(&sb, `  "%s": 0%s`, name, comma)
+		case "float", "double":
+			fmt.Fprintf(&sb, `  "%s": 0.0%s`, name, comma)
+		case "bool", "boolean":
+			fmt.Fprintf(&sb, `  "%s": true%s`, name, comma)
+		default:
+			fmt.Fprintf(&sb, `  "%s": "<value>"%s`, name, comma)
+		}
+		if comma != "" {
+			fmt.Fprintf(&sb, "\n")
+		}
+	}
+	fmt.Fprintf(&sb, "}\n")
+
+	return sb.String()
+}
 
 func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
 	stepID := newID()
@@ -47,7 +167,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 	predictToolSchema := `{"type":"object","properties":{"signature":{"type":"string","description":"DSPy signature (e.g., 'img: dspy.Image, question: str -> answer: str')"}},"required":["signature"]}`
 	predictTool := providers.ToolSpec{
 		Name:        predictToolName,
-		Description: `Call a sub-model with a DSPy-style signature. Format: predict("input: Type, ... -> output: Type", input=value, ...).`,
+		Description: `Call a sub-model with a DSPy-style signature. Format: predict("input: Type, ... -> output: Type", input=value, ...). Returns structured output from the sub-model.`,
 		InputSchema:  json.RawMessage(predictToolSchema),
 	}
 
@@ -263,14 +383,28 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 }
 
 func (s *RLMSolver) executePredictCall(ctx context.Context, l *Loop, stepID string, tc providers.ToolCall, subProv providers.Provider) (string, error) {
-	var args struct {
-		Signature string `json:"signature"`
+	call, err := ParsePredictArgs(tc.Args)
+	if err != nil {
+		return "", err
 	}
-	if err := json.Unmarshal(tc.Args, &args); err != nil {
-		return "", fmt.Errorf("predict: parse args: %w", err)
-	}
-	if args.Signature == "" {
-		return "", fmt.Errorf("predict: signature is required")
+
+	systemPrompt := BuildPredictPrompt(call)
+
+	var userContent strings.Builder
+	fmt.Fprintf(&userContent, "Execute the prediction for this signature.\n")
+
+	// Extract additional kwargs from args
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(tc.Args, &args); err == nil {
+		for k, v := range args {
+			if k == "signature" {
+				continue
+			}
+			var val any
+			if json.Unmarshal(v, &val) == nil {
+				fmt.Fprintf(&userContent, "\nProvided %s: %v", k, val)
+			}
+		}
 	}
 
 	temp := 0.3
@@ -278,8 +412,8 @@ func (s *RLMSolver) executePredictCall(ctx context.Context, l *Loop, stepID stri
 		RunID:  l.Run.ID,
 		StepID: stepID,
 		Messages: []providers.Message{
-			{Role: "system", Content: fmt.Sprintf("Execute predict signature: %s", args.Signature)},
-			{Role: "user", Content: fmt.Sprintf("Run prediction for: %s", args.Signature)},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userContent.String()},
 		},
 		GenParams: providers.GenParams{Temperature: &temp},
 	})
@@ -290,5 +424,16 @@ func (s *RLMSolver) executePredictCall(ctx context.Context, l *Loop, stepID stri
 	_ = l.Budget.AddTokens(subResp.Usage.InputTokens, subResp.Usage.OutputTokens)
 	_ = l.Budget.AddCost(subResp.Usage.CostUSD)
 
-	return subResp.AssistantText, nil
+	response := subResp.AssistantText
+
+	// Try to format JSON nicely
+	if strings.Contains(response, "{") {
+		var result map[string]any
+		if json.Unmarshal([]byte(response), &result) == nil {
+			formatted, _ := json.MarshalIndent(result, "", "  ")
+			response = string(formatted)
+		}
+	}
+
+	return fmt.Sprintf("Predict result:\n%s", response), nil
 }
