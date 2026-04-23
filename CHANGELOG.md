@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.21 — 2026-04-22
+
+**GLM Stream Recovery, Detail Pane Highlighting, and Repo Cleanup**
+
+### Features
+
+- **GLM streamed-response recovery** — Added a GLM-only streaming watchdog that detects partial-output stalls, cancels the dead stream, and retries the model turn once instead of hanging indefinitely.
+- **Tool detail pane JSON highlighting** — The TUI detail pane and replay detail view now pretty-print and syntax-highlight JSON tool arguments and results for better readability.
+
+### Maintenance
+
+- **Research layout cleanup** — Moved train-loop assets under `research/train-loop/`, moved research configs under `research/configs/`, moved loose benchmark configs under `benchmarks/`, and updated docs/config references accordingly.
+- **Research results location** — Default research `results.tsv` output now lives under the configured research workdir instead of repo root, and `research/train-loop/results.tsv` is no longer tracked.
+- **Repo root cleanup** — Moved `CLAUDE.md` to `docs/notes/CLAUDE.md` and ignored additional local shell/Nix artifacts to keep the root less noisy.
+
 ## v0.2.20 — 2026-04-22
 
 **Brave Web Search, Tool Defaults Normalization, and Cleanup**
