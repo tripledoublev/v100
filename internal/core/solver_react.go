@@ -219,8 +219,10 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				}
 
 				if _, ok := streamErr.(*glmStreamStallError); ok && attempt < glmStreamMaxRetries {
-					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
-						Error: fmt.Sprintf("%s; retrying once", streamErr.Error()),
+					_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
+						Action:  "stream_retry",
+						Message: fmt.Sprintf("%s; retrying once", streamErr.Error()),
+						Reason:  "glm_stream_stall_retry",
 					})
 					continue
 				}
