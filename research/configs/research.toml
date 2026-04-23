@@ -2,16 +2,16 @@ name = "train-loop"
 branch_prefix = "research"
 
 [target]
-file = "train.py"
-context = ["README.md", "program.md"]
-program = "program.md"
+file = "research/train-loop/train.py"
+context = ["README.md", "research/train-loop/program.md"]
+program = "research/train-loop/program.md"
 
 [experiment]
-workdir = "."
-log_file = "run.log"
+workdir = "research/train-loop"
+log_file = "research/train-loop/run.log"
 setup = "source /home/v/main/ai/v100/.env && rsync -az --delete ./ gpubox:~/v100-train-loop/"
-command = "ssh gpubox 'cd ~/v100-train-loop && uv run train.py | tee run.log'"
-collect = "scp gpubox:~/v100-train-loop/run.log {{.LogFile}}"
+command = "ssh gpubox 'cd ~/v100-train-loop && uv run research/train-loop/train.py | tee research/train-loop/run.log'"
+collect = "scp gpubox:~/v100-train-loop/research/train-loop/run.log {{.LogFile}}"
 timeout = "10m"
 metric = "val_bpb"
 direction = "lower"

@@ -178,7 +178,6 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 
 			mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
 			run.Dir = sandboxWorkspace
-			pol.MemoryPath = filepath.Join(sandboxWorkspace, "MEMORY.md")
 
 			if tuiFlag {
 				return resumeWithTUI(cfg, run, prov, reg, pol, trace, budget, model, events, msgs, resumeSummary, sandboxWorkspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, continuousFlag, session, mapper, metadata, selectionChanged)

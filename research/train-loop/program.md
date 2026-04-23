@@ -10,25 +10,25 @@ To set up a new experiment, work with the user to:
 2. **Create the branch**: `git checkout -b research/<tag>` from current master.
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
    - `README.md` — repository context.
-   - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
-   - `train.py` — the file you modify. Model architecture, optimizer, training loop.
-4. **Verify data exists**: Check that `~/.cache/v100/train-loop/` contains data shards and a tokenizer. Legacy data in `~/.cache/autoresearch/` is also acceptable because `prepare.py` will reuse it. If neither exists, tell the human to run `uv run prepare.py`.
-5. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
+   - `research/train-loop/prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
+   - `research/train-loop/train.py` — the file you modify. Model architecture, optimizer, training loop.
+4. **Verify data exists**: Check that `~/.cache/v100/train-loop/` contains data shards and a tokenizer. Legacy data in `~/.cache/autoresearch/` is also acceptable because `research/train-loop/prepare.py` will reuse it. If neither exists, tell the human to run `uv run research/train-loop/prepare.py`.
+5. **Initialize research/train-loop/results.tsv**: Create `research/train-loop/results.tsv` with just the header row. The baseline will be recorded after the first run.
 6. **Confirm and go**: Confirm setup looks good.
 
 Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
+Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run research/train-loop/train.py`.
 
 **What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
+- Modify `research/train-loop/train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
 
 **What you CANNOT do:**
-- Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).
+- Modify `research/train-loop/prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
-- Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
+- Modify the evaluation harness. The `evaluate_bpb` function in `research/train-loop/prepare.py` is the ground truth metric.
 
 **The goal is simple: get the lowest val_bpb.** Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
 
@@ -63,7 +63,7 @@ grep "^val_bpb:" run.log
 
 ## Logging results
 
-When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
+When an experiment is done, log it to `research/train-loop/results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
 
 The TSV has a header row and 5 columns:
 
@@ -94,12 +94,12 @@ The experiment runs on a dedicated branch (e.g. `research/mar5` or `research/mar
 LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
+2. Tune `research/train-loop/train.py` with an experimental idea by directly hacking the code.
 3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
+4. Run the experiment: `uv run research/train-loop/train.py > research/train-loop/run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" research/train-loop/run.log`
+6. If the grep output is empty, the run crashed. Run `tail -n 50 research/train-loop/run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
+7. Record the results in the tsv (NOTE: do not commit `research/train-loop/results.tsv`, leave it untracked by git)
 8. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
 9. If val_bpb is equal or worse, you git reset back to where you started
 

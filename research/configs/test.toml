@@ -2,9 +2,9 @@ name = "test"
 branch_prefix = "test"
 
 [target]
-file = "train.py"
+file = "research/train-loop/train.py"
 context = ["README.md"]
-program = "program.md"
+program = "research/train-loop/program.md"
 
 [experiment]
 command = "echo 'val_bpb: 0.987654'; sleep 1"

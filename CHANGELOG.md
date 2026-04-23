@@ -73,7 +73,7 @@
 
 ### Maintenance
 
-- **Rename** — `autoresearch` → `v100 train-loop` across `prepare.py`, `pyproject.toml`, `research.toml`, `train.py`, `program.md`. Legacy `~/.cache/autoresearch/` is still read if present.
+- **Rename** — `autoresearch` → `v100 train-loop` across `research/train-loop/prepare.py`, `pyproject.toml`, `research/configs/research.toml`, `research/train-loop/train.py`, `research/train-loop/program.md`. Legacy `~/.cache/autoresearch/` is still read if present.
 - **Docs** — `README.md`, `docs/architecture.md`, and new `docs/workflows.md` refreshed. CLI and research-command taglines updated.
 - **`.gitignore`** — Ignore `*.log`.
 

@@ -159,7 +159,7 @@ Use this when you want v100 to run autonomous experiment loops against a target 
 Typical command:
 
 ```bash
-v100 research --config research.toml
+v100 research --config research/configs/research.toml
 ```
 
 This workflow is for:
@@ -169,7 +169,7 @@ This workflow is for:
 - keep/discard style iteration
 - local or remote experiment launching
 
-`research.toml` defines:
+`research/configs/research.toml` defines:
 
 - the target file
 - context files
@@ -184,9 +184,9 @@ This is an important subsystem, but it is not the whole product.
 
 This is the specialized experiment-target path built around:
 
-- `prepare.py`
-- `train.py`
-- `program.md`
+- `research/train-loop/prepare.py`
+- `research/train-loop/train.py`
+- `research/train-loop/program.md`
 
 Use this only if you specifically want that training-loop workflow.
 
@@ -225,4 +225,4 @@ Use this shortcut if you are unsure where to start:
 - I want durable cross-run context: `v100 memory`
 - I want unattended recurring operation: `v100 run --continuous` or `v100 wake`
 - I want autonomous experiment loops: `v100 research`
-- I want the specialized training target workflow: `prepare.py`, `train.py`, `program.md`
+- I want the specialized training target workflow: `research/train-loop/prepare.py`, `research/train-loop/train.py`, `research/train-loop/program.md`

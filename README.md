@@ -42,7 +42,7 @@ The CLI surface is fairly broad now. The commands I reach for most often are:
 - `v100 replay <run_id>` - inspect a run trace as a transcript
 - `v100 runs` - browse recent runs
 - `v100 memory ...` - inspect and manage durable memory
-- `v100 research --config research.toml` - run the autonomous research loop
+- `v100 research --config research/configs/research.toml` - run the autonomous research loop
 - `v100 bench run <bench.toml>` - run benchmark suites
 - `v100 analyze`, `v100 eval`, `v100 metrics`, `v100 diff`, `v100 verify` - inspect run behavior and outcomes
 - `v100 evolve ...` - mutate and benchmark agent policy
@@ -162,7 +162,7 @@ internal/eval/     scoring, benchmarks, experiments, analysis
 internal/memory/   durable memory and vector stores
 internal/ui/       terminal UI components
 docs/              architecture notes and issue packs
-research.toml      research loop configuration
+research/          research configs, training-loop target, and artifacts
 ```
 
 ## Notes on tone and scope

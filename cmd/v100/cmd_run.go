@@ -279,7 +279,6 @@ func runCmd(cfgPath *string) *cobra.Command {
 			if disableWatchdogs {
 				pol.DisableWatchdogs = true
 			}
-			pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
 			if cfg.Defaults.ContextLimit > 0 {
 				pol.ContextLimit = cfg.Defaults.ContextLimit
 			}
@@ -1086,4 +1085,3 @@ func matchesFile(writePath, targetPath, targetBase string) bool {
 
 	return false
 }
-

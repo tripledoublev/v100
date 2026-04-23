@@ -497,7 +497,6 @@ func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace
 
 	reg := tools.NewRegistry(nil)
 	pol := policy.Default()
-	pol.MemoryPath = filepath.Join(workspace, "MEMORY.md")
 
 	loop := &core.Loop{
 		Run: &core.Run{

@@ -28,4 +28,11 @@ exports/
 
 # Claude Code artifacts
 .claude/
+.claude.json
 *.settings.local.json
+.bashrc
+.nix-channels
+.nix-defexpr/
+.nix-profile
+.rustup/
+research/train-loop/results.tsv
