@@ -108,6 +108,9 @@ func TestBuildScrubDetailContentShowsFullPrettyPayload(t *testing.T) {
 	if !strings.Contains(out, "TAIL_MARKER") {
 		t.Fatalf("detail payload should include full content tail, got %q", out)
 	}
+	if !strings.Contains(out, "\n{\n  \"content\":") {
+		t.Fatalf("expected payload to stay pretty-printed, got %q", out)
+	}
 }
 
 func TestScrubModelStepJumpFindsNextSummary(t *testing.T) {

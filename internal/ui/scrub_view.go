@@ -69,7 +69,7 @@ func buildScrubDetailContent(ev *core.Event, width int) string {
 	}
 	lines = append(lines, "")
 	lines = append(lines, stylePrimary.Render("payload"))
-	lines = append(lines, wrapTraceEventText(formatEventPayloadPretty(ev), width, "")...)
+	lines = append(lines, strings.Split(renderStructuredForPane(formatEventPayloadPretty(ev), width), "\n")...)
 
 	meta := []string{
 		fmt.Sprintf("timestamp: %s", ev.TS.Local().Format("2006-01-02 15:04:05")),
