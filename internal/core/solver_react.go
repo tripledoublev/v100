@@ -24,6 +24,19 @@ const (
 	readHeavyWatchdogTokenThreshold  = 40000
 )
 
+var (
+	glmStreamSilenceTimeout = 15 * time.Second
+	glmStreamMaxRetries     = 1
+)
+
+type glmStreamStallError struct {
+	Silence time.Duration
+}
+
+func (e *glmStreamStallError) Error() string {
+	return fmt.Sprintf("glm stream stalled after partial output: no tokens for %s", e.Silence.Round(time.Second))
+}
+
 func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
 	stepID := newID()
 	stepStart := time.Now()
@@ -98,7 +111,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		var (
 			assistantText strings.Builder
 			toolCalls     []providers.ToolCall
-			tcMap         = make(map[string]*providers.ToolCall)
+			tcMap         map[string]*providers.ToolCall
 			usage         providers.Usage
 			durMS         int64
 			ttft          int64
@@ -107,59 +120,120 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 
 		streamer, isStreamer := l.Provider.(providers.Streamer)
 		if isStreamer && l.Policy != nil && l.Policy.Streaming {
-			ch, err := streamer.StreamComplete(ctx, providers.CompleteRequest{
-				RunID:     l.Run.ID,
-				StepID:    stepID,
-				Messages:  msgs,
-				Tools:     toolSpecs,
-				GenParams: l.GenParams,
-				Hints: providers.Hints{
-					MaxToolCalls: maxToolCalls - toolCallsUsed,
-				},
-			})
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: err.Error()})
-					l.emitErrorAssistance(ctx, stepID, err)
-				}
-				return SolveResult{}, fmt.Errorf("provider stream: %w", err)
-			}
+			var streamErr error
+			for attempt := 0; ; attempt++ {
+				assistantText.Reset()
+				toolCalls = nil
+				tcMap = make(map[string]*providers.ToolCall)
+				usage = providers.Usage{}
+				ttft = 0
+				t0 = time.Now()
 
-			for ev := range ch {
-				switch ev.Type {
-				case providers.StreamToken:
-					if ttft == 0 {
-						ttft = time.Since(t0).Milliseconds()
-					}
-					assistantText.WriteString(ev.Text)
-					_, _ = l.emit(EventModelToken, stepID, map[string]string{"text": ev.Text})
-				case providers.StreamToolCallStart:
-					if ttft == 0 {
-						ttft = time.Since(t0).Milliseconds()
-					}
-					tc := &providers.ToolCall{ID: ev.ToolCallID, Name: ev.ToolCallName}
-					toolCalls = append(toolCalls, *tc)
-					tcMap[ev.ToolCallID] = &toolCalls[len(toolCalls)-1]
-					_, _ = l.emit(EventToolCall, stepID, ToolCallPayload{
-						CallID: ev.ToolCallID,
-						Name:   ev.ToolCallName,
-					})
-				case providers.StreamToolCallDelta:
-					if tc, ok := tcMap[ev.ToolCallID]; ok {
-						args := string(tc.Args) + ev.ToolCallArgs
-						tc.Args = json.RawMessage(args)
-						_, _ = l.emit(EventToolCallDelta, stepID, ToolCallDeltaPayload{
-							CallID: ev.ToolCallID,
-							Delta:  ev.ToolCallArgs,
-						})
-					}
-				case providers.StreamDone:
-					usage = ev.Usage
-				case providers.StreamError:
-					return SolveResult{}, ev.Err
+				streamCtx := ctx
+				cancelStream := func() {}
+				if shouldWatchGLMStream(l.Provider) {
+					var cancel context.CancelFunc
+					streamCtx, cancel = context.WithCancel(ctx)
+					cancelStream = cancel
 				}
+
+				ch, err := streamer.StreamComplete(streamCtx, providers.CompleteRequest{
+					RunID:     l.Run.ID,
+					StepID:    stepID,
+					Messages:  msgs,
+					Tools:     toolSpecs,
+					GenParams: l.GenParams,
+					Hints: providers.Hints{
+						MaxToolCalls: maxToolCalls - toolCallsUsed,
+					},
+				})
+				if err != nil {
+					cancelStream()
+					streamErr = err
+					break
+				}
+
+				sawToken := false
+				streamErr = nil
+				for {
+					var watchdog <-chan time.Time
+					if shouldWatchGLMStream(l.Provider) && sawToken {
+						watchdog = time.After(glmStreamSilenceTimeout)
+					}
+
+					select {
+					case <-ctx.Done():
+						cancelStream()
+						return SolveResult{}, ctx.Err()
+					case <-watchdog:
+						cancelStream()
+						streamErr = &glmStreamStallError{Silence: glmStreamSilenceTimeout}
+					case ev, ok := <-ch:
+						if !ok {
+							cancelStream()
+							durMS = time.Since(t0).Milliseconds()
+							if streamErr != nil {
+								break
+							}
+							goto streamFinished
+						}
+						switch ev.Type {
+						case providers.StreamToken:
+							sawToken = true
+							if ttft == 0 {
+								ttft = time.Since(t0).Milliseconds()
+							}
+							assistantText.WriteString(ev.Text)
+							_, _ = l.emit(EventModelToken, stepID, map[string]string{"text": ev.Text})
+						case providers.StreamToolCallStart:
+							if ttft == 0 {
+								ttft = time.Since(t0).Milliseconds()
+							}
+							tc := &providers.ToolCall{ID: ev.ToolCallID, Name: ev.ToolCallName}
+							toolCalls = append(toolCalls, *tc)
+							tcMap[ev.ToolCallID] = &toolCalls[len(toolCalls)-1]
+							_, _ = l.emit(EventToolCall, stepID, ToolCallPayload{
+								CallID: ev.ToolCallID,
+								Name:   ev.ToolCallName,
+							})
+						case providers.StreamToolCallDelta:
+							if tc, ok := tcMap[ev.ToolCallID]; ok {
+								args := string(tc.Args) + ev.ToolCallArgs
+								tc.Args = json.RawMessage(args)
+								_, _ = l.emit(EventToolCallDelta, stepID, ToolCallDeltaPayload{
+									CallID: ev.ToolCallID,
+									Delta:  ev.ToolCallArgs,
+								})
+							}
+						case providers.StreamDone:
+							usage = ev.Usage
+						case providers.StreamError:
+							cancelStream()
+							streamErr = ev.Err
+						}
+					}
+
+					if streamErr != nil {
+						break
+					}
+				}
+
+				if _, ok := streamErr.(*glmStreamStallError); ok && attempt < glmStreamMaxRetries {
+					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
+						Error: fmt.Sprintf("%s; retrying once", streamErr.Error()),
+					})
+					continue
+				}
+				break
 			}
-			durMS = time.Since(t0).Milliseconds()
+		streamFinished:
+			if streamErr != nil {
+				if !errors.Is(streamErr, context.Canceled) {
+					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: streamErr.Error()})
+					l.emitErrorAssistance(ctx, stepID, streamErr)
+				}
+				return SolveResult{}, fmt.Errorf("provider stream: %w", streamErr)
+			}
 		} else {
 			resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
 				RunID:     l.Run.ID,
@@ -423,6 +497,10 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		return result, terminalErr
 	}
 	return result, nil
+}
+
+func shouldWatchGLMStream(p providers.Provider) bool {
+	return p != nil && strings.EqualFold(strings.TrimSpace(p.Name()), "glm")
 }
 
 func isInspectionTool(name string) bool {
