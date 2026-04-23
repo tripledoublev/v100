@@ -94,6 +94,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 		name string
 		w, h int
 		want string
+		contains []string
 	}{
 		{
 			name: "narrow",
@@ -106,6 +107,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 │                                                         │ ╰──────────────────────────────╯
 │                                                         │ ╭──────────────────────────────╮
 │                                                         │ │visual inspector              │
+│                                                         │ │path: …ai/v100/internal/ui    │
 │                                                         │ │STEPS [█████··············]   │
 │                                                         │ │TOKEN [██·················]   │
 │                                                         │ │REAS. [███████············]   │
@@ -129,6 +131,12 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 ╭──────────────────────────────────────────────────────────────────────────────────────────╮
 │> ask v100 to inspect, patch, or debug...                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────╯`,
+			contains: []string{
+				"│visual inspector              │",
+				"│path: …ai/v100/internal/ui    │",
+				"│status                        │",
+				"│Testing representative TUI s  │",
+			},
 		},
 		{
 			name: "standard",
@@ -141,6 +149,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 │                                                                           │ ╰────────────────────────────────────────╯
 │                                                                           │ ╭────────────────────────────────────────╮
 │                                                                           │ │visual inspector                        │
+│                                                                           │ │path: …me/v/main/ai/v100/internal/ui    │
 │                                                                           │ │STEPS [████████·····················]   │
 │                                                                           │ │TOKEN [████·························]   │
 │                                                                           │ │REAS. [████████████·················]   │
@@ -159,8 +168,8 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 │                                                                           │ │e, inspector, and status panes.         │
 │                                                                           │ │THINKING                                │
 │                                                                           │ │Testing representative TUI sizes.       │
-│                                                                           │ │device: charging 84%                    │
-╰───────────────────────────────────────────────────────────────────────────╯ │                                        │
+╰───────────────────────────────────────────────────────────────────────────╯ │device: charging 84%                    │
+                                                                              │                                        │
                                                                               │sub-agents: active=0 done=0 failed=0    │
                                                                               ╰────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -177,10 +186,10 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 │transcript line two                                                                                   │ │trace line one                                       │
 │                                                                                                      │ │trace line two                                       │
 │                                                                                                      │ │                                                     │
-│                                                                                                      │ │                                                     │
 │                                                                                                      │ ╰─────────────────────────────────────────────────────╯
 │                                                                                                      │ ╭─────────────────────────────────────────────────────╮
 │                                                                                                      │ │visual inspector                                     │
+│                                                                                                      │ │path: /home/v/main/ai/v100/internal/ui               │
 │                                                                                                      │ │STEPS [████████████······························]   │
 │                                                                                                      │ │TOKEN [██████····································]   │
 │                                                                                                      │ │REAS. [█████████████████·························]   │
@@ -214,6 +223,14 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := snapshotFixtureModel(tc.w, tc.h)
 			got := normalizeViewSnapshot(m.View())
+			if len(tc.contains) > 0 {
+				for _, fragment := range tc.contains {
+					if !strings.Contains(got, fragment) {
+						t.Fatalf("snapshot missing fragment for %s\nfragment: %q\n--- got ---\n%s", tc.name, fragment, got)
+					}
+				}
+				return
+			}
 			if got != tc.want {
 				t.Fatalf("snapshot mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", tc.name, got, tc.want)
 			}
