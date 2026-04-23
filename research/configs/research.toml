@@ -8,9 +8,9 @@ program = "research/train-loop/program.md"
 
 [experiment]
 workdir = "research/train-loop"
-log_file = "research/train-loop/run.log"
+log_file = "run.log"
 setup = "source /home/v/main/ai/v100/.env && rsync -az --delete ./ gpubox:~/v100-train-loop/"
-command = "ssh gpubox 'cd ~/v100-train-loop && uv run research/train-loop/train.py | tee research/train-loop/run.log'"
+command = "ssh gpubox 'cd ~/v100-train-loop/research/train-loop && uv run train.py | tee run.log'"
 collect = "scp gpubox:~/v100-train-loop/research/train-loop/run.log {{.LogFile}}"
 timeout = "10m"
 metric = "val_bpb"

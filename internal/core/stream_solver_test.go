@@ -256,19 +256,19 @@ func TestReactSolverStreaming_GLMSilenceRetry(t *testing.T) {
 	events, _ := ReadAll(trace.Path())
 	foundRetryNotice := false
 	for _, ev := range events {
-		if ev.Type != EventRunError {
+		if ev.Type != EventHookIntervention {
 			continue
 		}
-		var payload RunErrorPayload
+		var payload HookInterventionPayload
 		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			t.Fatalf("decode RunErrorPayload: %v", err)
+			t.Fatalf("decode HookInterventionPayload: %v", err)
 		}
-		if strings.Contains(payload.Error, "retrying once") {
+		if payload.Reason == "glm_stream_stall_retry" && strings.Contains(payload.Message, "retrying once") {
 			foundRetryNotice = true
 			break
 		}
 	}
 	if !foundRetryNotice {
-		t.Fatal("expected retry notice in run.error trace")
+		t.Fatal("expected retry notice in hook intervention trace")
 	}
 }
