@@ -1,7 +1,7 @@
 """
 v100 training-loop pretraining script. Single-GPU, single-file.
 Cherry-picked and simplified from nanochat.
-Usage: uv run train.py
+Usage: uv run research/train-loop/train.py
 """
 
 import os

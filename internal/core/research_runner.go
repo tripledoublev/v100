@@ -256,6 +256,9 @@ func (r *ResearchRunner) commit(ctx context.Context, msg string) error {
 // --- Results persistence ---
 
 func (r *ResearchRunner) resultsPath() string {
+	if wd := strings.TrimSpace(r.Config.Experiment.WorkDir); wd != "" && wd != "." {
+		return r.Dir + "/" + wd + "/results.tsv"
+	}
 	return r.Dir + "/results.tsv"
 }
 

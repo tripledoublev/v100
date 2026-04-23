@@ -147,8 +147,11 @@ func runResearchLoop(
 	}
 
 	// Initialize results file
-	resultsFile := "results.tsv"
+	resultsFile := filepath.Join(researchCfg.Experiment.WorkDir, "results.tsv")
 	var resultsInitialized bool
+	if err := os.MkdirAll(filepath.Dir(resultsFile), 0o755); err != nil {
+		return err
+	}
 	if _, err := os.Stat(resultsFile); err == nil {
 		resultsInitialized = true
 	}

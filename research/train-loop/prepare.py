@@ -3,8 +3,8 @@ One-time data preparation for the v100 training-loop research subsystem.
 Downloads data shards and trains a BPE tokenizer.
 
 Usage:
-    python prepare.py                  # full prep (download + tokenizer)
-    python prepare.py --num-shards 8   # download only 8 shards (for testing)
+    python research/train-loop/prepare.py                  # full prep (download + tokenizer)
+    python research/train-loop/prepare.py --num-shards 8   # download only 8 shards (for testing)
 
 Data and tokenizer are stored in ~/.cache/v100/train-loop/.
 If legacy data exists in ~/.cache/autoresearch/, it is reused automatically.
