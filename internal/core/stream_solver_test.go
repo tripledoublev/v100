@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
@@ -154,5 +155,120 @@ func TestReactSolverStreaming_StripsTextualToolCallXML(t *testing.T) {
 	}
 	if len(payload.ToolCalls) != 1 || payload.ToolCalls[0].Name != "fs_list" {
 		t.Fatalf("expected extracted fs_list tool call, got %+v", payload.ToolCalls)
+	}
+}
+
+type scriptedStreamer struct {
+	MockProvider
+	plans [][]providers.StreamEvent
+	idx   int
+}
+
+func (s *scriptedStreamer) Name() string { return "glm" }
+
+func (s *scriptedStreamer) StreamComplete(ctx context.Context, req providers.CompleteRequest) (<-chan providers.StreamEvent, error) {
+	ch := make(chan providers.StreamEvent)
+	plan := s.plans[s.idx]
+	s.idx++
+	go func() {
+		defer close(ch)
+		for _, ev := range plan {
+			if ev.Type == providers.StreamError {
+				ch <- ev
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- ev:
+			}
+		}
+		// Simulate a hung provider stream after partial output on plans that
+		// never send StreamDone or StreamError.
+		if len(plan) > 0 && plan[len(plan)-1].Type != providers.StreamDone && plan[len(plan)-1].Type != providers.StreamError {
+			<-ctx.Done()
+		}
+	}()
+	return ch, nil
+}
+
+func (s *scriptedStreamer) Capabilities() providers.Capabilities {
+	return providers.Capabilities{ToolCalls: true, Streaming: true}
+}
+
+func (s *scriptedStreamer) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: "GLM-5.1", ContextSize: 4096}, nil
+}
+
+func TestReactSolverStreaming_GLMSilenceRetry(t *testing.T) {
+	oldTimeout := glmStreamSilenceTimeout
+	oldRetries := glmStreamMaxRetries
+	glmStreamSilenceTimeout = 10 * time.Millisecond
+	glmStreamMaxRetries = 1
+	defer func() {
+		glmStreamSilenceTimeout = oldTimeout
+		glmStreamMaxRetries = oldRetries
+	}()
+
+	p := &scriptedStreamer{
+		plans: [][]providers.StreamEvent{
+			{
+				{Type: providers.StreamToken, Text: "partial"},
+			},
+			{
+				{Type: providers.StreamToken, Text: "recovered"},
+				{Type: providers.StreamDone, Usage: providers.Usage{InputTokens: 10, OutputTokens: 5}},
+			},
+		},
+	}
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+
+	l := &Loop{
+		Run:      &Run{ID: "test-glm-stall", Dir: runDir},
+		Provider: p,
+		Tools:    tools.NewRegistry(nil),
+		Trace:    trace,
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 2}),
+		Solver:   &ReactSolver{},
+		Policy:   &policy.Policy{Streaming: true},
+		Mapper:   NewPathMapper(runDir, runDir),
+	}
+
+	res, err := l.Solver.Solve(context.Background(), l, "hello")
+	if err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	if !strings.Contains(res.FinalText, "recovered") {
+		t.Fatalf("final text = %q, want retry output", res.FinalText)
+	}
+	if p.idx != 2 {
+		t.Fatalf("stream attempts = %d, want 2", p.idx)
+	}
+
+	events, _ := ReadAll(trace.Path())
+	foundRetryNotice := false
+	for _, ev := range events {
+		if ev.Type != EventRunError {
+			continue
+		}
+		var payload RunErrorPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("decode RunErrorPayload: %v", err)
+		}
+		if strings.Contains(payload.Error, "retrying once") {
+			foundRetryNotice = true
+			break
+		}
+	}
+	if !foundRetryNotice {
+		t.Fatal("expected retry notice in run.error trace")
 	}
 }
