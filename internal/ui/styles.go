@@ -42,6 +42,12 @@ var (
 	styleLatSlow   = lipgloss.NewStyle().Foreground(clrLatSlow)
 	styleLatMed    = lipgloss.NewStyle().Foreground(clrLatMed)
 	styleLatFast   = lipgloss.NewStyle().Foreground(clrLatFast)
+	styleJSONKey   = lipgloss.NewStyle().Foreground(clrInfo).Bold(true)
+	styleJSONString = lipgloss.NewStyle().Foreground(clrSuccess)
+	styleJSONNumber = lipgloss.NewStyle().Foreground(clrWarning)
+	styleJSONBool   = lipgloss.NewStyle().Foreground(clrPrimary).Bold(true)
+	styleJSONNull   = lipgloss.NewStyle().Foreground(clrMuted).Italic(true)
+	styleJSONPunct  = lipgloss.NewStyle().Foreground(clrMuted)
 )
 
 // ── Exported helpers used by main.go and cli.go ───────────────────────────────

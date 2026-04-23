@@ -129,3 +129,14 @@ func TestStatusPanel_NaturalHeightStaysCompact(t *testing.T) {
 		t.Fatalf("natural status height = %d, want less than fixed height %d", natural, fixed)
 	}
 }
+
+func TestFormatDetailField_HighlightsJSON(t *testing.T) {
+	m := newTestModel()
+	out := m.formatDetailField(`{"path":"README.md","offset":120,"ok":true,"value":null}`, 72)
+	if !strings.Contains(out, "\n  \"path\": \"README.md\",") {
+		t.Fatalf("expected indented JSON output, got %q", out)
+	}
+	if !strings.Contains(out, `"offset": 120`) || !strings.Contains(out, `"value": null`) {
+		t.Fatalf("expected JSON content to remain visible, got %q", out)
+	}
+}

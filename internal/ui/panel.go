@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	lipgloss "github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/wrap"
 )
 
 // Panel is the rendering contract for a TUI section.
@@ -192,25 +189,5 @@ func (m *TUIModel) formatDetailField(content string, width int) string {
 		return ""
 	}
 
-	// Try markdown rendering for nicer JSON display
-	rendered := m.renderMarkdownForPane(content)
-	if rendered != content && rendered != "" {
-		// Markdown worked, but we need to adjust for pane width
-		rendered = strings.TrimRight(rendered, "\n")
-		// Re-wrap to fit our content width
-		lines := strings.Split(rendered, "\n")
-		var wrapped []string
-		for _, line := range lines {
-			if lipgloss.Width(line) > width {
-				wrapped = append(wrapped, wrap.String(line, width))
-			} else {
-				wrapped = append(wrapped, line)
-			}
-		}
-		return strings.Join(wrapped, "\n")
-	}
-
-	// Fall back to plain text wrapping
-	wrapped := wrap.String(content, width)
-	return wrap.String(wrapped, width)
+	return renderStructuredForPane(content, width)
 }
