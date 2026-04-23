@@ -392,6 +392,12 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 			return nil, fmt.Errorf("build glm provider: %w", err)
 		}
 		return &core.MiniGLMSolver{MiniMax: minimax, GLM: glm}, nil
+	case "rlm":
+		subProv, err := buildProvider(cfg, cfg.Defaults.SubProvider)
+		if err != nil {
+			return nil, fmt.Errorf("build sub-provider for rlm: %w", err)
+		}
+		return &core.RLMSolver{SubProvider: subProv}, nil
 	case "react", "":
 		if solverName == "" && strings.TrimSpace(cfg.Defaults.Provider) == "smartrouter" {
 			return buildSolver(cfg, "smartrouter")
