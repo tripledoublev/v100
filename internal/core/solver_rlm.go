@@ -167,7 +167,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 	predictToolSchema := `{"type":"object","properties":{"signature":{"type":"string","description":"DSPy signature (e.g., 'img: dspy.Image, question: str -> answer: str')"}},"required":["signature"]}`
 	predictTool := providers.ToolSpec{
 		Name:        predictToolName,
-		Description: `Call a sub-model with a DSPy-style signature. Format: predict("input: Type, ... -> output: Type", input=value, ...). Returns structured output from the sub-model.`,
+		Description: `Call a sub-model with a DSPy-style signature. Format: predict("input: Type, ... -> output: Type", input=value, ...). Use for reasoning tasks only. For I/O (fetching images, files, web), use other tools first, then use predict with the fetched data as input.`,
 		InputSchema:  json.RawMessage(predictToolSchema),
 	}
 
