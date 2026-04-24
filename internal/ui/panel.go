@@ -148,7 +148,7 @@ func (m *TUIModel) detailPaneContent(contentWidth int) string {
 	// Header: tool name and status
 	statusIcon := styleOK.Render("✓")
 	statusText := styleOK.Render("OK")
-	if !exec.OK {
+	if !exec.Success {
 		statusIcon = styleFail.Render("✗")
 		statusText = styleFail.Render("FAILED")
 	}
@@ -156,7 +156,7 @@ func (m *TUIModel) detailPaneContent(contentWidth int) string {
 	lines = append(lines,
 		styleBold.Render("Tool: ")+styleTool.Render(exec.Name),
 		styleMuted.Render("Status: ")+statusIcon+" "+statusText,
-		styleMuted.Render(fmt.Sprintf("Duration: %dms", exec.Duration)),
+		styleMuted.Render(fmt.Sprintf("Duration: %dms", exec.Duration.Milliseconds())),
 		styleMuted.Render(fmt.Sprintf("Call ID: %s", exec.CallID)),
 		"",
 	)

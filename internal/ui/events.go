@@ -9,6 +9,7 @@ import (
 
 	lipgloss "github.com/charmbracelet/lipgloss"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 func compressEventLabel(trigger string) string {
@@ -23,7 +24,7 @@ func compressEventLabel(trigger string) string {
 }
 
 func (m *TUIModel) appendEvent(ev core.Event) {
-	m.updateStatusFromEvent(ev)
+	m.updateStatus(ev)
 	m.lastEventAt = ev.TS
 	sub := len(m.activeAgents) > 0
 
@@ -98,7 +99,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 					CallID:    tc.ID,
 					Name:      tc.Name,
 					Args:      tc.ArgsJSON,
-					Timestamp: ev.TS,
+					StartedAt: ev.TS,
 				})
 			}
 		}
@@ -125,7 +126,7 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 				CallID:    p.CallID,
 				Name:      p.Name,
 				Args:      p.Args,
-				Timestamp: ev.TS,
+				StartedAt: ev.TS,
 			})
 		}
 
@@ -140,8 +141,9 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		for i := len(group.ToolExecs) - 1; i >= 0; i-- {
 			if group.ToolExecs[i].CallID == p.CallID {
 				group.ToolExecs[i].Result = p.Output
-				group.ToolExecs[i].OK = p.OK
-				group.ToolExecs[i].Duration = p.DurationMS
+				group.ToolExecs[i].Success = p.OK
+				group.ToolExecs[i].Duration = time.Duration(p.DurationMS) * time.Millisecond
+				group.ToolExecs[i].DoneAt = ev.TS
 				break
 			}
 		}
@@ -184,27 +186,28 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 	case core.EventAgentStart:
 		var p core.AgentStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		label := p.AgentRunID
+		if strings.TrimSpace(p.Agent) != "" {
+			label = p.Agent
+		}
 		m.activeAgents = append(m.activeAgents, agentFrame{
-			RunID:    p.AgentRunID,
-			CallID:   p.ParentCallID,
-			Task:     p.Task,
-			Model:    p.Model,
-			MaxSteps: p.MaxSteps,
-			Tools:    len(p.Tools),
-			Started:  ev.TS,
+			RunID:   p.AgentRunID,
+			label:   label,
+			depth:   m.inSubAgent,
+			Started: ev.TS,
 		})
 		m.inSubAgent = len(m.activeAgents)
 		task := p.Task
 		if len(task) > 60 {
 			task = task[:60] + "…"
 		}
-		label := "Agent"
+		dispatchLabel := "Agent"
 		if strings.TrimSpace(p.Agent) != "" {
-			label = "Dispatch:" + p.Agent
+			dispatchLabel = "Dispatch:" + p.Agent
 		}
 		m.addItem(&TranscriptItem{
 			Type:      ItemAgentStart,
-			Text:      fmt.Sprintf("● %s(%s)", label, task),
+			Text:      fmt.Sprintf("● %s(%s)", dispatchLabel, task),
 			Timestamp: ev.TS,
 		})
 		_, _ = fmt.Fprintf(&m.plainBuf, "\n● %s(%s)\n", label, task)
@@ -372,11 +375,11 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 					_, _ = fmt.Fprintf(&m.transcriptBuf, "           %s %s%s\n", styleTool.Render("⚙"), styleTool.Render(exec.Name), styleMuted.Render("("+args+")"))
 					if exec.Result != "" {
 						icon, nameStr := styleOK.Render("✓"), styleOK.Render(exec.Name)
-						if !exec.OK {
+						if !exec.Success {
 							icon, nameStr = styleFail.Render("✗"), styleFail.Render(exec.Name)
 						}
 						out := SmartSummary(exec.Name, exec.Result, m.verbose)
-						head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", exec.Duration)))
+						head := fmt.Sprintf("           %s %s  %s", icon, nameStr, styleMuted.Render(fmt.Sprintf("[%dms]", exec.Duration.Milliseconds())))
 						headLine := strings.Count(m.transcriptBuf.String(), "\n")
 						body := m.wrapTranscriptBlock(out, "             ")
 						_, _ = fmt.Fprintf(&m.transcriptBuf, "%s\n%s\n", head, body)
@@ -511,105 +514,6 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 	}
 }
 
-func (m *TUIModel) updateStatusFromEvent(ev core.Event) {
-	m.statusTick++
-	switch ev.Type {
-	case core.EventRunStart:
-		var p core.RunStartPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		m.statusMode = "idle"
-		m.statusLine = "booted and listening"
-		runShort := ev.RunID
-		if len(runShort) > 8 {
-			runShort = runShort[:8]
-		}
-		m.runSummary = fmt.Sprintf("v100 run %s  %s · %s", runShort, p.Provider, p.Model)
-	case core.EventUserMsg:
-		m.statusMode = "thinking"
-		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"digesting your request",
-			"scanning context and constraints",
-			"planning a clean approach",
-		})
-	case core.EventModelResp:
-		var p core.ModelRespPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		if len(p.ToolCalls) > 0 {
-			m.statusMode = "tooling"
-			m.statusLine = pickStatusLine(m.statusTick, []string{
-				"looking at code",
-				"searching repo",
-				"making pancakes",
-				"running tools for signal",
-			})
-		} else {
-			m.statusMode = "idle"
-			m.statusLine = pickStatusLine(m.statusTick, []string{
-				"ready for your next move",
-				"response delivered",
-				"standing by",
-			})
-		}
-	case core.EventToolCall:
-		m.statusMode = "tooling"
-		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"executing tool call",
-			"collecting evidence",
-			"digging through files",
-		})
-	case core.EventToolOutputDelta:
-		m.statusMode = "tooling"
-		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"streaming tool output",
-			"watching command output",
-			"tool still running",
-		})
-	case core.EventToolResult:
-		m.statusMode = "thinking"
-		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"stitching tool outputs together",
-			"cross-checking findings",
-			"digesting information",
-		})
-	case core.EventRunError:
-		m.statusMode = "error"
-		m.statusLine = "hit an error; check transcript"
-	case core.EventRunEnd:
-		m.statusMode = "idle"
-		m.statusLine = "run ended"
-	case core.EventAgentStart:
-		var p core.AgentStartPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		m.statusMode = "tooling"
-		m.statusLine = fmt.Sprintf("sub-agent %s running (%s)", shortRunID(p.AgentRunID), p.Model)
-	case core.EventAgentEnd:
-		var p core.AgentEndPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		m.statusMode = "thinking"
-		if p.OK {
-			m.statusLine = fmt.Sprintf("sub-agent %s completed", shortRunID(p.AgentRunID))
-		} else {
-			m.statusLine = fmt.Sprintf("sub-agent %s failed", shortRunID(p.AgentRunID))
-		}
-	case core.EventStepSummary:
-		var p core.StepSummaryPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		m.statusMode = "idle"
-		m.statusLine = fmt.Sprintf("step %d done — %d tools, %dms, $%.4f",
-			p.StepNumber, p.ToolCalls, p.DurationMS, p.CostUSD)
-	case core.EventCompress:
-		var p core.CompressPayload
-		_ = json.Unmarshal(ev.Payload, &p)
-		m.noteCompressEvent(ev.TS)
-		m.statusMode = "thinking"
-		if p.Trigger == "budget_tokens" {
-			m.statusLine = "context compressed to preserve token budget"
-		} else {
-			m.statusLine = "context compressed"
-		}
-	}
-}
-
 func (m *TUIModel) noteModelEvent(ts time.Time) {
 	m.modelEvents = trimRecentEvents(append(m.modelEvents, ts), ts, 30*time.Second)
 }
@@ -690,5 +594,77 @@ func toolGlyph(name string) string {
 		return " b>"
 	default:
 		return "::"
+	}
+}
+
+func (m *TUIModel) updateStatus(ev core.Event) {
+	m.statusTick++
+	switch ev.Type {
+	case core.EventRunStart:
+		var p core.RunStartPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.StatusMode = i18n.StatusIdle
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = i18n.T("status_ready")
+		runShort := ev.RunID
+		if len(runShort) > 8 {
+			runShort = runShort[:8]
+		}
+		m.runSummary = fmt.Sprintf("v100 run %s  %s · %s", runShort, p.Provider, p.Model)
+	case core.EventUserMsg:
+		m.StatusMode = i18n.StatusThinking
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = pickStatusLine(m.statusTick, []string{
+			i18n.T("status_user_input"),
+			"scanning context and constraints",
+			"planning a clean approach",
+		})
+	case core.EventModelResp:
+		var p core.ModelRespPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if len(p.ToolCalls) > 0 {
+			m.StatusMode = i18n.StatusTooling
+			m.statusMode = m.StatusMode.String()
+			m.statusLine = pickStatusLine(m.statusTick, []string{
+				"looking at code", "searching repo", "running tools for signal",
+			})
+		} else {
+			m.StatusMode = i18n.StatusIdle
+			m.statusMode = m.StatusMode.String()
+			m.statusLine = pickStatusLine(m.statusTick, []string{
+				"ready for your next move", "response delivered", "standing by",
+			})
+		}
+	case core.EventToolCall, core.EventToolOutputDelta:
+		m.StatusMode = i18n.StatusTooling
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = pickStatusLine(m.statusTick, []string{
+			"executing tool call", "collecting evidence", "digging through files",
+		})
+	case core.EventToolResult:
+		m.StatusMode = i18n.StatusThinking
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = pickStatusLine(m.statusTick, []string{
+			"stitching tool outputs together", "cross-checking findings", "digesting information",
+		})
+	case core.EventRunError:
+		m.StatusMode = i18n.StatusError
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = "hit an error; check transcript"
+	case core.EventRunEnd:
+		m.StatusMode = i18n.StatusIdle
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = i18n.T("run_complete")
+	case core.EventAgentStart:
+		m.StatusMode = i18n.StatusTooling
+		m.statusMode = m.StatusMode.String()
+	case core.EventAgentEnd:
+		m.StatusMode = i18n.StatusThinking
+		m.statusMode = m.StatusMode.String()
+	case core.EventCompress:
+		m.noteCompressEvent(ev.TS)
+		m.StatusMode = i18n.StatusThinking
+		m.statusMode = m.StatusMode.String()
+		m.statusLine = i18n.T("status_compressing")
 	}
 }

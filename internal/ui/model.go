@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	lipgloss "github.com/charmbracelet/lipgloss"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 // NewTUIModel creates a fresh TUI model.
@@ -31,8 +32,9 @@ func NewTUIModel(codexAvailable, claudeAvailable bool) *TUIModel {
 		showStatus:      true,
 		showMetrics:     true,
 		showDetail:      false,
-		statusMode:      "idle",
-		statusLine:      "ready and waiting",
+		StatusMode:      i18n.StatusIdle,
+		statusMode:      i18n.StatusIdle.String(),
+		statusLine:      i18n.T("status_ready"),
 		runSummary:      "v100 run pending",
 		leftPanePct:     66,
 		tracePanePct:    50,

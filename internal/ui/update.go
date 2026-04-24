@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 func (m *TUIModel) Init() tea.Cmd {
@@ -17,15 +18,12 @@ func (m *TUIModel) Init() tea.Cmd {
 		m.onReady()
 		m.onReady = nil
 	}
-	// Initial clear screen and status
-	m.statusMode = "idle"
-	m.statusLine = "initializing..."
-
+	m.StatusMode = i18n.StatusIdle
+	m.statusMode = m.StatusMode.String()
+	m.statusLine = i18n.T("status_ready")
 	return tea.Batch(
 		textinput.Blink,
 		tea.WindowSize(),
-		func() tea.Msg { return tea.ClearScreen() },
-		// Read device status immediately on startup
 		func() tea.Msg { return deviceTickMsg{} },
 		radioTickCmd(),
 		deviceTickCmd(),
@@ -47,17 +45,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RequestConfirmMsg:
 		m.pendConfirm = &confirmState{
-			active:   true,
 			toolName: msg.ToolName,
 			args:     msg.Args,
-			approved: msg.Result,
+			result:   msg.Result,
 		}
-
-	case ConfirmMsg:
-		if msg.confirm != nil {
-			msg.confirm.approved <- msg.Approved
-		}
-		m.pendConfirm = nil
 
 	case radioTickMsg:
 		if cmd := m.onRadioTick(); cmd != nil {
@@ -80,11 +71,13 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case downloadDoneMsg:
 		if msg.err != "" {
 			m.radioErr = msg.err
-			m.statusMode = "error"
+			m.StatusMode = i18n.StatusError
+			m.statusMode = m.StatusMode.String()
 			m.statusLine = "download failed"
 		} else {
 			m.radioErr = ""
-			m.statusMode = "idle"
+			m.StatusMode = i18n.StatusIdle
+			m.statusMode = m.StatusMode.String()
 			m.statusLine = "downloaded: " + strings.TrimSpace(msg.artist+" - "+msg.title)
 		}
 
@@ -123,6 +116,13 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMode = "idle"
 			m.statusLine = reviewLabel(msg.action) + " replied"
+			if strings.TrimSpace(msg.output) != "" && m.AppendConversationMessageFn != nil {
+				label := reviewLabel(msg.action)
+				content := "[external review: " + label + "]\n" +
+					"This is feedback on the previous assistant response. Incorporate it when relevant.\n\n" +
+					msg.output
+				m.AppendConversationMessageFn("system", content)
+			}
 		}
 		m.rebuildTranscript(true)
 
@@ -154,8 +154,10 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showStatus && m.focus == focusStatus {
 				m.activateFocus(focusTrace)
 			}
+
 		case "ctrl+m":
 			m.showMetrics = !m.showMetrics
+
 		case "ctrl+a":
 			if err := clipboardCopyWriter(m.plainBuf.String()); err != nil {
 				m.statusLine = "copy failed: " + err.Error()
@@ -163,6 +165,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusLine = "full transcript copied to clipboard"
 			}
+
 		case "ctrl+v":
 			if m.focus == focusInput {
 				img, err := clipboardImageReader()
@@ -176,22 +179,30 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+
 		case "alt+r":
 			m.showRadioSelect = !m.showRadioSelect
+
 		case "ctrl+r":
 			m.toggleRadio()
+
 		case "]":
 			m.adjustRadioVolume(5)
 		case "[":
 			m.adjustRadioVolume(-5)
+
 		case "tab":
 			m.cycleFocus()
+
 		case "shift+tab":
 			m.cycleFocusBack()
+
 		case "ctrl+shift+tab", "ctrl+tab", "ctrl+pgup", "ctrl+pgdown":
 			m.switchFocusHalf()
+
 		case "ctrl+\\":
 			m.switchFocusHalf()
+
 		case "shift+left":
 			m.resizeFocused(-4, 0)
 		case "shift+right":
@@ -202,15 +213,15 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resizeFocused(0, -4)
 
 		case "ctrl+y":
-			if m.pendConfirm.isActive() {
-				confirm := m.pendConfirm
-				return m, func() tea.Msg { return ConfirmMsg{Approved: true, confirm: confirm} }
+			if m.pendConfirm != nil {
+				m.pendConfirm.result <- true
+				m.pendConfirm = nil
 			}
 
 		case "ctrl+n":
-			if m.pendConfirm.isActive() {
-				confirm := m.pendConfirm
-				return m, func() tea.Msg { return ConfirmMsg{Approved: false, confirm: confirm} }
+			if m.pendConfirm != nil {
+				m.pendConfirm.result <- false
+				m.pendConfirm = nil
 			}
 
 		case "up", "k":
@@ -302,19 +313,16 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-		case focusStatus:
-			// status pane is informational (no per-key updates needed)
 		}
 	}
 
-	// Always sync viewports on non-key messages
+	// Sync viewports on non-key messages
 	if _, ok := msg.(tea.KeyMsg); !ok {
 		var cmd tea.Cmd
 		m.transcript, cmd = m.transcript.Update(msg)
 		cmds = append(cmds, cmd)
 		m.traceView, cmd = m.traceView.Update(msg)
 		cmds = append(cmds, cmd)
-		// Sync detail view when visible
 		if m.showDetail {
 			m.detailView, cmd = m.detailView.Update(msg)
 			cmds = append(cmds, cmd)
@@ -322,190 +330,4 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
-}
-
-func (m *TUIModel) cycleFocus() {
-	if m.showDetail && m.selectedToolExec != nil {
-		order := m.visibleFocusOrder()
-		if len(order) == 0 {
-			return
-		}
-		current := m.focusOrderIndex(order)
-		if current < 0 {
-			current = 0
-		}
-		m.activateFocus(order[(current+1)%len(order)])
-		return
-	}
-
-	if m.isInRightHalf() {
-		if m.focus == focusTrace && m.showStatus {
-			m.activateFocus(focusStatus)
-			return
-		}
-		m.activateFocus(focusTrace)
-		return
-	}
-
-	order := m.visibleLeftFocusOrder()
-	if len(order) == 0 {
-		return
-	}
-	current := m.focusOrderIndex(order)
-	if current < 0 {
-		current = 0
-	}
-	m.activateFocus(order[(current+1)%len(order)])
-}
-
-func (m *TUIModel) cycleFocusBack() {
-	if m.showDetail && m.selectedToolExec != nil {
-		order := m.visibleFocusOrder()
-		if len(order) == 0 {
-			return
-		}
-		current := m.focusOrderIndex(order)
-		if current < 0 {
-			current = 0
-		}
-		prev := current - 1
-		if prev < 0 {
-			prev = len(order) - 1
-		}
-		m.activateFocus(order[prev])
-		return
-	}
-
-	if m.isInRightHalf() {
-		if m.focus == focusStatus {
-			m.activateFocus(focusTrace)
-			return
-		}
-		if m.showStatus {
-			m.activateFocus(focusStatus)
-			return
-		}
-		m.activateFocus(focusTrace)
-		return
-	}
-
-	order := m.visibleLeftFocusOrder()
-	if len(order) == 0 {
-		return
-	}
-	current := m.focusOrderIndex(order)
-	if current < 0 {
-		current = 0
-	}
-	prev := current - 1
-	if prev < 0 {
-		prev = len(order) - 1
-	}
-	m.activateFocus(order[prev])
-}
-
-func (m *TUIModel) switchFocusHalf() {
-	if m.focus == focusInput {
-		if m.showTrace {
-			m.activateFocus(focusTrace)
-		} else {
-			m.activateFocus(focusTranscript)
-		}
-		return
-	}
-	if m.focus == focusTranscript {
-		if m.showTrace {
-			m.activateFocus(focusTrace)
-		} else {
-			m.activateFocus(focusInput)
-		}
-		return
-	}
-
-	if m.showDetail && m.focus == focusDetail {
-		m.activateFocus(focusTranscript)
-		return
-	}
-
-	if m.isInRightHalf() {
-		if m.showDetail {
-			m.activateFocus(focusDetail)
-		} else {
-			m.activateFocus(focusTranscript)
-		}
-		return
-	}
-
-	m.activateFocus(focusTranscript)
-}
-
-func (m *TUIModel) isInRightHalf() bool {
-	return m.focus == focusTrace || m.focus == focusStatus
-}
-
-func (m *TUIModel) resizeFocused(dxPct, dyPct int) {
-	switch m.focus {
-	case focusTranscript:
-		m.leftPanePct = clampInt(m.leftPanePct+dxPct, 45, 80)
-		m.tracePanePct = clampInt(m.tracePanePct+dyPct, 35, 85)
-	case focusTrace:
-		m.leftPanePct = clampInt(m.leftPanePct-dxPct, 45, 80)
-		m.tracePanePct = clampInt(m.tracePanePct+dyPct, 35, 85)
-	case focusStatus:
-		m.leftPanePct = clampInt(m.leftPanePct-dxPct, 45, 80)
-		m.tracePanePct = clampInt(m.tracePanePct-dyPct, 35, 85)
-	}
-}
-
-func (m *TUIModel) activateFocus(next focus) {
-	m.focus = next
-	if next == focusInput {
-		m.input.Focus()
-		return
-	}
-	m.input.Blur()
-}
-
-func (m *TUIModel) visibleLeftFocusOrder() []focus {
-	order := []focus{focusTranscript}
-	if m.showDetail && m.selectedToolExec != nil {
-		order = append(order, focusDetail)
-	}
-	order = append(order, focusInput)
-	return order
-}
-
-func (m *TUIModel) visibleFocusOrder() []focus {
-	order := []focus{focusTranscript}
-	if m.showDetail && m.selectedToolExec != nil {
-		order = append(order, focusDetail)
-	}
-	if m.showTrace {
-		order = append(order, focusTrace)
-		if m.showStatus {
-			order = append(order, focusStatus)
-		}
-	}
-	order = append(order, focusInput)
-	return order
-}
-
-func (m *TUIModel) focusOrderIndex(order []focus) int {
-	for i, candidate := range order {
-		if candidate == m.focus {
-			return i
-		}
-	}
-	return -1
-}
-
-func (m *TUIModel) handleBuiltInCommand(input string) tea.Cmd {
-	if strings.EqualFold(strings.TrimSpace(input), "download this song") {
-		return m.startDownloadCmd()
-	}
-	if strings.EqualFold(strings.TrimSpace(input), "/radio") {
-		m.showRadioSelect = true
-		return nil
-	}
-	return nil
 }

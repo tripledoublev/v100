@@ -129,6 +129,50 @@ func itoa(n int) string {
 	return string(buf)
 }
 
+// ── TUI pane / chrome styles ──────────────────────────────────────────────────
+
+var (
+	tuiHeaderStyle = lipgloss.NewStyle().
+		Foreground(clrPrimary).
+		Bold(true)
+
+	tuiHeaderDimStyle = lipgloss.NewStyle().
+				Foreground(clrMuted)
+
+	tuiPaneStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#374151"))
+
+	tuiActivePaneStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(clrPrimary)
+
+	tuiInputStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#374151"))
+
+	tuiInputActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(clrPrimary)
+
+	tuiConfirmStyle = lipgloss.NewStyle().
+			Bold(true).
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(clrDanger).
+			Padding(1, 3)
+
+	tuiTraceLabelStyle = lipgloss.NewStyle().
+				Foreground(clrMuted).
+				Italic(true)
+
+	tuiStatusLabelStyle = lipgloss.NewStyle().
+				Foreground(clrMuted).
+				Italic(true)
+
+	tuiCopyIconStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#374151"))
+)
+
 // EnablePlainTTY forces monochrome rendering for terminal compatibility.
 func EnablePlainTTY() {
 	lipgloss.SetColorProfile(termenv.Ascii)

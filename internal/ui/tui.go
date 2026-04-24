@@ -59,6 +59,12 @@ func (t *TUI) SetInterruptFn(fn func()) {
 	}
 }
 
+func (t *TUI) SetAppendConversationMessageFn(fn func(role, content string)) {
+	if t.model != nil {
+		t.model.AppendConversationMessageFn = fn
+	}
+}
+
 func (t *TUI) SetVerbose(v bool) {
 	if t.model != nil {
 		t.model.SetVerbose(v)
