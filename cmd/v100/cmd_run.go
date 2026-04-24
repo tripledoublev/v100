@@ -173,121 +173,33 @@ func runCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			// Build run directory
-			runID := newRunID()
-			runBase := runDirFlag
-			if runBase == "" {
-				runBase = "runs"
-			}
-			runDir := filepath.Join(runBase, runID)
-			if err := os.MkdirAll(runDir, 0o755); err != nil {
-				return fmt.Errorf("create run dir: %w", err)
-			}
-			_ = os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o755)
-
-			// Set workspace grounding
-			sourceWorkspace := resolveWorkspace(workspaceFlag, runDir)
-
-			// Write meta.json
-			tags := parseTags(tagFlags)
-
-			// Build provider first to get name and capabilities
-			prov, err := buildProvider(cfg, cfg.Defaults.Provider)
-			if err != nil {
-				return err
-			}
-
-			// Build dedicated embedding provider.
-			// Flag takes precedence; fall back to cfg.Embedding.Provider if configured.
-			var embedProv providers.Provider
-			embedProvName := embeddingFlag
-			if embedProvName == "" {
-				embedProvName = cfg.Embedding.Provider
-			}
-			if embedProvName != "" {
-				embedProv, err = buildProvider(cfg, embedProvName)
-				if err != nil {
-					return fmt.Errorf("embedding provider %q: %w", embedProvName, err)
-				}
-			}
-
-			// Decide model
-			model := modelFlag
-			if model == "" {
-				if pc, ok := cfg.Providers[cfg.Defaults.Provider]; ok {
-					model = pc.DefaultModel
-				}
-			}
-
-			meta := core.RunMeta{
-				RunID:           runID,
-				Name:            nameFlag,
-				Tags:            tags,
-				Provider:        prov.Name(),
-				Model:           model,
-				SourceWorkspace: sourceWorkspace,
-				Sandbox:         cfg.Sandbox,
-				CreatedAt:       time.Now().UTC(),
-			}
-
-			if cfg.Sandbox.Enabled {
-				if fp, err := core.WorkspaceFingerprint(sourceWorkspace); err == nil {
-					meta.SourceFingerprint = fp
-				}
-			}
-
-			_ = core.WriteMeta(runDir, meta)
-
-			tracePath := filepath.Join(runDir, "trace.jsonl")
-			trace, err := core.OpenTrace(tracePath)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = trace.Close() }()
-
-			run := &core.Run{
-				ID:        runID,
-				Dir:       runDir,
-				TraceFile: tracePath,
-				Budget: core.Budget{
-					MaxSteps:   cfg.Defaults.BudgetSteps,
-					MaxTokens:  cfg.Defaults.BudgetTokens,
-					MaxCostUSD: cfg.Defaults.BudgetCostUSD,
-				},
-			}
-
-			// Build sandbox session
-			session, mapper, workspace, err := buildSandboxSession(cfg, runID, sourceWorkspace, runBase)
-			if err != nil {
-				return err
-			}
-			if cfg.Sandbox.Enabled {
-				defer func() { _ = session.Close() }()
-			}
-
-			// Build tool registry
-			reg := buildToolRegistry(cfg)
-			if err := validateToolRegistry(reg); err != nil {
-				return err
-			}
-
-			// Load policy
-			pol := loadPolicy(cfg, policyFlag)
-			if toolTimeoutFlag > 0 {
-				pol.ToolTimeoutMS = toolTimeoutFlag
-			}
-			if disableWatchdogs {
-				pol.DisableWatchdogs = true
-			}
-			if cfg.Defaults.ContextLimit > 0 {
-				pol.ContextLimit = cfg.Defaults.ContextLimit
-			}
+			var streaming *bool
 			if cmd.Flags().Changed("streaming") {
-				pol.Streaming = streamingFlag
+				streaming = &streamingFlag
 			}
 
-			// Budget tracker
-			budget := core.NewBudgetTracker(&run.Budget)
+			opts := RunOptions{
+				Model:             modelFlag,
+				EmbeddingProvider: embeddingFlag,
+				PolicyName:        policyFlag,
+				RunDir:            runDirFlag,
+				Workspace:         workspaceFlag,
+				SolverName:        solverFlag,
+				ToolTimeoutMS:     toolTimeoutFlag,
+				DisableWatchdogs:  disableWatchdogs,
+				Streaming:         streaming,
+				Name:              nameFlag,
+				Tags:              parseTags(tagFlags),
+			}
+
+			comp, err := BuildRunComponents(cfg, opts)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = comp.Trace.Close() }()
+			if cfg.Sandbox.Enabled {
+				defer func() { _ = comp.Session.Close() }()
+			}
 
 			// Decide confirm mode
 			if yoloFlag {
@@ -306,18 +218,12 @@ func runCmd(cfgPath *string) *cobra.Command {
 			}
 
 			// Build generation params from flags and config defaults
-			genParams := buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
-
-			// Build solver
-			solver, err := buildSolver(cfg, solverFlag)
-			if err != nil {
-				return err
-			}
+			comp.GenParams = buildGenParams(cfg, temperatureFlag, topPFlag, topKFlag, maxTokensFlag, seedFlag, cmd)
 
 			if tuiFlag {
-				return runWithTUI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, continuousFlag, genParams, solver, initialPrompt, session, mapper)
+				return runWithTUI(cfg, comp.Run, comp.Provider, comp.EmbedProvider, comp.Registry, comp.Policy, comp.Trace, comp.Budget, comp.Model, confirmMode, comp.Workspace, !tuiNoAltFlag, tuiPlainFlag, tuiDebugFlag, verboseFlag, continuousFlag, comp.GenParams, comp.Solver, initialPrompt, comp.Session, comp.Mapper)
 			}
-			return runWithCLI(cfg, run, prov, embedProv, reg, pol, trace, budget, model, confirmMode, workspace, verboseFlag, exitFlag, continuousFlag, planFlag, speakFlag, genParams, solver, initialPrompt, session, mapper)
+			return runWithCLI(cfg, comp.Run, comp.Provider, comp.EmbedProvider, comp.Registry, comp.Policy, comp.Trace, comp.Budget, comp.Model, confirmMode, comp.Workspace, verboseFlag, exitFlag, continuousFlag, planFlag, speakFlag, comp.GenParams, comp.Solver, initialPrompt, comp.Session, comp.Mapper)
 		},
 	}
 
