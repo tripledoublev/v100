@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.23 — 2026-04-24
+
+**Alternate ATProto Accounts and TUI Localization**
+
+### Features
+
+- **Alternate ATProto account support** — `atproto_feed`, `atproto_notifications`, and `atproto_post` now accept an `account` argument for selecting `main` or `alt`, with config support for `[alt-atproto]`.
+- **Safer ATProto posting** — Unknown ATProto account names are rejected instead of silently falling back to the main account.
+- **French TUI localization** — Added `LANG=fr` / `LANG=fr_CA.UTF-8` and `V100_LANG=fr` support for the main TUI chrome, status pane, dashboard, radio labels, confirmation dialog, detail pane, and rotating status messages.
+- **Tool output readability** — Improved JSON-aware tool summaries and structured detail-pane rendering for scan-friendly TUI output.
+
+### Maintenance
+
+- **Workspace artifact cleanup** — Ignored local module-cache and patch artifact files, and removed the tracked scratch `blackboard.md`.
+
 ## v0.2.22 — 2026-04-23
 
 **GLM Stream Recovery, Detail Pane Highlighting, and Repo Cleanup**
