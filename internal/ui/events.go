@@ -309,10 +309,10 @@ func (m *TUIModel) rebuildTranscript(gotoBottom bool) {
 		ts := styleMuted.Render(item.Timestamp.Local().Format(time.TimeOnly))
 		switch item.Type {
 		case ItemWelcome:
-			m.transcriptBuf.WriteString(stylePrimary.Render("control deck") + styleMuted.Render(" • session ready • "+item.Text) + "\n\n")
-			m.transcriptBuf.WriteString(styleBold.Render("Controls") + "\n")
-			m.transcriptBuf.WriteString(styleMuted.Render("Enter") + " send  " + styleMuted.Render("Tab") + " focus  " + styleMuted.Render("Ctrl+Shift+Tab") + " half  " + styleMuted.Render("Ctrl+T") + " trace  " + styleMuted.Render("Ctrl+S") + " status  " + styleMuted.Render("Ctrl+C") + " quit\n\n")
-			m.transcriptBuf.WriteString(styleMuted.Render("Type a task below and press Enter."))
+			m.transcriptBuf.WriteString(stylePrimary.Render(i18n.T("ui_control_deck")) + styleMuted.Render(" • "+i18n.T("ui_session_ready")+" • "+item.Text) + "\n\n")
+			m.transcriptBuf.WriteString(styleBold.Render(i18n.T("ui_controls")) + "\n")
+			m.transcriptBuf.WriteString(styleMuted.Render(i18n.T("ui_controls_line")) + "\n\n")
+			m.transcriptBuf.WriteString(styleMuted.Render(i18n.T("ui_type_task")))
 
 		case ItemImage:
 			if len(item.Images) > 0 {
@@ -616,8 +616,8 @@ func (m *TUIModel) updateStatus(ev core.Event) {
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = pickStatusLine(m.statusTick, []string{
 			i18n.T("status_user_input"),
-			"scanning context and constraints",
-			"planning a clean approach",
+			i18n.T("status_scanning_context"),
+			i18n.T("status_planning"),
 		})
 	case core.EventModelResp:
 		var p core.ModelRespPayload
@@ -626,31 +626,31 @@ func (m *TUIModel) updateStatus(ev core.Event) {
 			m.StatusMode = i18n.StatusTooling
 			m.statusMode = m.StatusMode.String()
 			m.statusLine = pickStatusLine(m.statusTick, []string{
-				"looking at code", "searching repo", "running tools for signal",
+				i18n.T("status_looking_code"), i18n.T("status_searching_repo"), i18n.T("status_running_tools"),
 			})
 		} else {
 			m.StatusMode = i18n.StatusIdle
 			m.statusMode = m.StatusMode.String()
 			m.statusLine = pickStatusLine(m.statusTick, []string{
-				"ready for your next move", "response delivered", "standing by",
+				i18n.T("status_ready_next"), i18n.T("status_response_done"), i18n.T("status_standing_by"),
 			})
 		}
 	case core.EventToolCall, core.EventToolOutputDelta:
 		m.StatusMode = i18n.StatusTooling
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"executing tool call", "collecting evidence", "digging through files",
+			i18n.T("status_executing_tool"), i18n.T("status_collecting"), i18n.T("status_digging_files"),
 		})
 	case core.EventToolResult:
 		m.StatusMode = i18n.StatusThinking
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = pickStatusLine(m.statusTick, []string{
-			"stitching tool outputs together", "cross-checking findings", "digesting information",
+			i18n.T("status_stitching"), i18n.T("status_cross_checking"), i18n.T("status_digesting"),
 		})
 	case core.EventRunError:
 		m.StatusMode = i18n.StatusError
 		m.statusMode = m.StatusMode.String()
-		m.statusLine = "hit an error; check transcript"
+		m.statusLine = i18n.T("status_run_error")
 	case core.EventRunEnd:
 		m.StatusMode = i18n.StatusIdle
 		m.statusMode = m.StatusMode.String()

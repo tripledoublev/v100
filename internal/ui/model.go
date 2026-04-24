@@ -35,7 +35,7 @@ func NewTUIModel(codexAvailable, claudeAvailable bool) *TUIModel {
 		StatusMode:      i18n.StatusIdle,
 		statusMode:      i18n.StatusIdle.String(),
 		statusLine:      i18n.T("status_ready"),
-		runSummary:      "v100 run pending",
+		runSummary:      i18n.T("run_pending"),
 		leftPanePct:     66,
 		tracePanePct:    50,
 		detailPanePct:   35,

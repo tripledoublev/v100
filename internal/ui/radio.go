@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	lipgloss "github.com/charmbracelet/lipgloss"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 const radioIPCSocket = "/tmp/v100-radio.sock"
@@ -85,7 +86,7 @@ func (m *TUIModel) getCurrentStationName() string {
 	if s != nil {
 		return s.Name
 	}
-	return "Custom"
+	return i18n.T("ui_custom")
 }
 
 func radioTickCmd() tea.Cmd {
@@ -156,12 +157,12 @@ func (m *TUIModel) adjustRadioVolume(delta int) {
 }
 
 func (m *TUIModel) radioStateLine() string {
-	state := "idle"
+	state := i18n.T("ui_radio_idle")
 	if m.radioPlaying {
-		state = "playing"
+		state = i18n.T("ui_radio_playing")
 	}
 	stationName := m.getCurrentStationName()
-	return fmt.Sprintf("%s  %s  vol=%d%%  Ctrl+R play/stop  [/] volume  N/P station", state, stationName, m.radioVolume)
+	return fmt.Sprintf(i18n.T("ui_radio_controls"), state, stationName, m.radioVolume)
 }
 
 func (m *TUIModel) startRadio() {

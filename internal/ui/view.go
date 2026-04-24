@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	lipgloss "github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wrap"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 func (m *TUIModel) View() string {
@@ -20,7 +21,7 @@ func (m *TUIModel) View() string {
 		}
 	}
 	if m.width <= 0 || m.height <= 0 {
-		return tuiHeaderDimStyle.Render("Initializing terminal size...")
+		return tuiHeaderDimStyle.Render(i18n.T("ui_initializing_terminal"))
 	}
 
 	if m.pendConfirm.isActive() {
@@ -206,21 +207,21 @@ func (m *TUIModel) statusView(width, contentHeight int) string {
 	}
 
 	lines := []string{
-		tuiStatusLabelStyle.Render("status"),
+		tuiStatusLabelStyle.Render(i18n.T("ui_status")),
 		stylePrimary.Render(wrap.String(m.runSummary, w)),
 		m.statusModeDisplay(),
 		styleMuted.Render(wrap.String(m.statusLine, w)),
 		styleMuted.Render(m.deviceStatusLine()),
 		"",
-		styleMuted.Render(fmt.Sprintf("sub-agents: active=%d done=%d failed=%d",
+		styleMuted.Render(fmt.Sprintf(i18n.T("ui_sub_agents"),
 			len(m.activeAgents), m.agentDoneCount, m.agentFailCount)),
 		styleMuted.Render(m.subAgentStatusLine()),
 		"",
-		styleMuted.Render("radio") + " " + m.radioStateLine(),
-		styleMuted.Render(wrap.String("feed: "+m.radioURL, w)),
+		styleMuted.Render(i18n.T("ui_radio")) + " " + m.radioStateLine(),
+		styleMuted.Render(wrap.String(i18n.T("ui_feed")+": "+m.radioURL, w)),
 	}
 	if m.radioArtist != "" || m.radioTitle != "" {
-		lines = append(lines, stylePrimary.Render(wrap.String("now: "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle), w)))
+		lines = append(lines, stylePrimary.Render(wrap.String(i18n.T("ui_now")+": "+strings.TrimSpace(m.radioArtist+" - "+m.radioTitle), w)))
 	}
 	if m.radioWave != "" {
 		wave := m.renderWaveForWidth(w)
@@ -255,7 +256,7 @@ func (m *TUIModel) statusModeDisplay() string {
 
 	// Consistency with visual inspector (dashboard.go:inspectorState)
 	if m.statusMode == "thinking" && idleFor > 10*time.Second {
-		return styleFail.Render("⚠ STALLED")
+		return styleFail.Render("⚠ " + i18n.T("status_stalled"))
 	}
 
 	switch m.statusMode {
@@ -269,12 +270,12 @@ func (m *TUIModel) statusModeDisplay() string {
 
 func (m TUIModel) confirmView() string {
 	p := m.pendConfirm
-	content := styleDanger.Render("⚠  DANGEROUS TOOL CALL") + "\n\n" +
-		styleMuted.Render("Tool: ") + styleTool.Render(p.toolName) + "\n" +
-		styleMuted.Render("Args: ") + p.args + "\n\n" +
-		styleWarn.Render("Approve?") + "  " +
-		styleOK.Render("Ctrl+Y") + " yes   " +
-		styleFail.Render("Ctrl+N") + " no"
+	content := styleDanger.Render("⚠  "+i18n.T("ui_dangerous_tool_call")) + "\n\n" +
+		styleMuted.Render(i18n.T("ui_tool")+": ") + styleTool.Render(p.toolName) + "\n" +
+		styleMuted.Render(i18n.T("ui_args")+": ") + p.args + "\n\n" +
+		styleWarn.Render(i18n.T("ui_approve")) + "  " +
+		styleOK.Render("Ctrl+Y") + " " + i18n.T("ui_yes") + "   " +
+		styleFail.Render("Ctrl+N") + " " + i18n.T("ui_no")
 	box := tuiConfirmStyle.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

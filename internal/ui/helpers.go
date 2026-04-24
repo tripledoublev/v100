@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 const (
@@ -53,10 +54,10 @@ func (m *TUIModel) removeActiveAgent(runID string) {
 func (m *TUIModel) subAgentStatusLine() string {
 	if len(m.activeAgents) > 0 {
 		a := m.activeAgents[len(m.activeAgents)-1]
-		return fmt.Sprintf("current: %s  %s", shortRunID(a.RunID), a.label)
+		return fmt.Sprintf(i18n.T("ui_current_agent"), shortRunID(a.RunID), a.label)
 	}
 	if m.lastAgentNote != "" {
-		return "last: " + m.lastAgentNote
+		return fmt.Sprintf(i18n.T("ui_last_agent"), m.lastAgentNote)
 	}
 	return "last: none"
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 // Panel is the rendering contract for a TUI section.
@@ -69,7 +71,7 @@ type TracePanel struct{ m *TUIModel }
 func (p TracePanel) Render(width, height int) string {
 	p.m.traceView.Width = max(1, width-4)
 	p.m.traceView.Height = max(1, height-1) // -1 for label line
-	return tuiTraceLabelStyle.Render("trace") + "\n" + p.m.traceView.View()
+	return tuiTraceLabelStyle.Render(i18n.T("ui_trace")) + "\n" + p.m.traceView.View()
 }
 
 func (TracePanel) Focusable() bool { return true }
@@ -122,7 +124,7 @@ type DetailPanel struct {
 func (p DetailPanel) Render(width, height int) string {
 	exec := p.m.selectedToolExec
 	if exec == nil {
-		return styleMuted.Render("select a tool to view details")
+		return styleMuted.Render(i18n.T("ui_select_tool_details"))
 	}
 
 	p.m.detailView.Width = max(1, width-4)
@@ -134,7 +136,7 @@ func (p DetailPanel) Render(width, height int) string {
 }
 
 func (DetailPanel) Focusable() bool { return true }
-func (DetailPanel) FocusID() focus   { return focusDetail }
+func (DetailPanel) FocusID() focus  { return focusDetail }
 
 // detailPaneContent builds the formatted content string for the detail viewport.
 func (m *TUIModel) detailPaneContent(contentWidth int) string {
@@ -147,37 +149,37 @@ func (m *TUIModel) detailPaneContent(contentWidth int) string {
 
 	// Header: tool name and status
 	statusIcon := styleOK.Render("✓")
-	statusText := styleOK.Render("OK")
+	statusText := styleOK.Render(i18n.T("ui_ok"))
 	if !exec.Success {
 		statusIcon = styleFail.Render("✗")
-		statusText = styleFail.Render("FAILED")
+		statusText = styleFail.Render(i18n.T("ui_failed"))
 	}
 
 	lines = append(lines,
-		styleBold.Render("Tool: ")+styleTool.Render(exec.Name),
-		styleMuted.Render("Status: ")+statusIcon+" "+statusText,
-		styleMuted.Render(fmt.Sprintf("Duration: %dms", exec.Duration.Milliseconds())),
-		styleMuted.Render(fmt.Sprintf("Call ID: %s", exec.CallID)),
+		styleBold.Render(i18n.T("ui_tool")+": ")+styleTool.Render(exec.Name),
+		styleMuted.Render(i18n.T("ui_status_label")+": ")+statusIcon+" "+statusText,
+		styleMuted.Render(fmt.Sprintf("%s: %dms", i18n.T("ui_duration"), exec.Duration.Milliseconds())),
+		styleMuted.Render(fmt.Sprintf("%s: %s", i18n.T("ui_call_id"), exec.CallID)),
 		"",
 	)
 
 	// Args section
-	lines = append(lines, styleBold.Render("Arguments:"))
+	lines = append(lines, styleBold.Render(i18n.T("ui_arguments")+":"))
 	argsContent := m.formatDetailField(exec.Args, contentWidth-2)
 	if argsContent != "" {
 		lines = append(lines, argsContent)
 	} else {
-		lines = append(lines, styleMuted.Render("  (none)"))
+		lines = append(lines, styleMuted.Render("  "+i18n.T("ui_none")))
 	}
 	lines = append(lines, "")
 
 	// Result section
-	lines = append(lines, styleBold.Render("Result:"))
+	lines = append(lines, styleBold.Render(i18n.T("ui_result")+":"))
 	resultContent := m.formatDetailField(exec.Result, contentWidth-2)
 	if resultContent != "" {
 		lines = append(lines, resultContent)
 	} else {
-		lines = append(lines, styleMuted.Render("  (empty)"))
+		lines = append(lines, styleMuted.Render("  "+i18n.T("ui_empty")))
 	}
 
 	return strings.Join(lines, "\n")

@@ -6,6 +6,7 @@ import (
 
 func TestT_English(t *testing.T) {
 	t.Setenv("V100_LANG", "")
+	t.Setenv("LANG", "")
 	if got := T("status_idle"); got != "idle" {
 		t.Fatalf("en status_idle = %q, want %q", got, "idle")
 	}
@@ -16,6 +17,7 @@ func TestT_English(t *testing.T) {
 
 func TestT_French(t *testing.T) {
 	t.Setenv("V100_LANG", "fr")
+	t.Setenv("LANG", "")
 	if got := T("status_idle"); got != "inactif" {
 		t.Fatalf("fr status_idle = %q, want %q", got, "inactif")
 	}
@@ -26,6 +28,7 @@ func TestT_French(t *testing.T) {
 
 func TestT_FallsBackToEnglish(t *testing.T) {
 	t.Setenv("V100_LANG", "fr")
+	t.Setenv("LANG", "")
 	if got := T("missing_key"); got != "missing_key" {
 		t.Fatalf("missing key should return key itself, got %q", got)
 	}
@@ -33,6 +36,7 @@ func TestT_FallsBackToEnglish(t *testing.T) {
 
 func TestT_LocaleNormalization(t *testing.T) {
 	t.Setenv("V100_LANG", "fr-CA")
+	t.Setenv("LANG", "")
 	if got := T("status_idle"); got != "inactif" {
 		t.Fatalf("fr-CA should normalize to fr, got %q", got)
 	}
@@ -40,8 +44,33 @@ func TestT_LocaleNormalization(t *testing.T) {
 
 func TestT_LocaleNormalizationUnderscore(t *testing.T) {
 	t.Setenv("V100_LANG", "fr_CA")
+	t.Setenv("LANG", "")
 	if got := T("status_idle"); got != "inactif" {
 		t.Fatalf("fr_CA should normalize to fr, got %q", got)
+	}
+}
+
+func TestT_LANGFallback(t *testing.T) {
+	t.Setenv("V100_LANG", "")
+	t.Setenv("LANG", "fr")
+	if got := T("status_idle"); got != "inactif" {
+		t.Fatalf("LANG=fr status_idle = %q, want %q", got, "inactif")
+	}
+}
+
+func TestT_LANGLocaleWithEncoding(t *testing.T) {
+	t.Setenv("V100_LANG", "")
+	t.Setenv("LANG", "fr_CA.UTF-8")
+	if got := T("status_idle"); got != "inactif" {
+		t.Fatalf("LANG=fr_CA.UTF-8 status_idle = %q, want %q", got, "inactif")
+	}
+}
+
+func TestT_V100LangOverridesLANG(t *testing.T) {
+	t.Setenv("V100_LANG", "en")
+	t.Setenv("LANG", "fr")
+	if got := T("status_idle"); got != "idle" {
+		t.Fatalf("V100_LANG should override LANG, got %q", got)
 	}
 }
 
@@ -65,6 +94,7 @@ func TestStatusMode_String(t *testing.T) {
 
 func TestStatusMode_Locale_French(t *testing.T) {
 	t.Setenv("V100_LANG", "fr")
+	t.Setenv("LANG", "")
 	if got := StatusIdle.Locale(); got != "inactif" {
 		t.Fatalf("fr StatusIdle.Locale() = %q, want %q", got, "inactif")
 	}

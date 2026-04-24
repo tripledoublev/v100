@@ -5,6 +5,7 @@ import (
 	"time"
 
 	lipgloss "github.com/charmbracelet/lipgloss"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 // Border overhead constants: how many columns/rows are consumed by lipgloss borders and padding.
@@ -105,17 +106,17 @@ func (p paneLayout) withRightColumnHeights(metricsRendered, statusRendered int) 
 
 func computeHeaderLayout(totalWidth int, now time.Time) headerLayout {
 	// Wide hint with all controls
-	headerHint := "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
+	headerHint := i18n.T("ui_header_hint_wide")
 	// Medium hint - drop resize hint
 	if totalWidth < 140 {
-		headerHint = "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
+		headerHint = i18n.T("ui_header_hint_medium")
 	}
 	// Narrow hint - drop status and trace toggles
 	if totalWidth < 110 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit"
+		headerHint = i18n.T("ui_header_hint_narrow")
 	}
 	if totalWidth < 95 {
-		headerHint = "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+D:detail  Ctrl+A:copy  Ctrl+C:quit"
+		headerHint = i18n.T("ui_header_hint_tiny")
 	}
 
 	leftText := "v100" + headerHint
