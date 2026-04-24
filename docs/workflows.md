@@ -11,7 +11,7 @@ Use this when you want an agent to work in a real repository or workspace.
 Typical starting point:
 
 ```bash
-v100 run --provider codex --workspace .
+v100 run --provider minimax --workspace .
 ```
 
 Useful flags:
@@ -133,12 +133,14 @@ Use this when you want less hands-on supervision.
 Typical commands:
 
 ```bash
-v100 run --provider codex --workspace . --continuous
+v100 run --provider minimax --workspace . --continuous
 v100 wake start
 ```
 
 Use this workflow for:
 
+- autonomous issue fixing (issue_worker mode)
+- next-step goal generation (goal_generator mode)
 - longer unattended runs
 - recurring wake cycles
 - background operation with checkpoints and traceability

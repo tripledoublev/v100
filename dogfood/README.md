@@ -131,10 +131,10 @@ Pass if you can explain why the run succeeded or failed using trace evidence ins
 
 ### DF-07 Provider Duel
 
-Purpose: compare `codex`, `gemini`, and `minimax` on the same repo-local reasoning task.
+Purpose: compare `gemini`, `minimax`, and `anthropic` on the same repo-local reasoning task.
 
 ```bash
-v100 run --provider codex --sandbox \
+v100 run --provider anthropic --sandbox \
   --budget-steps 4 --max-tool-calls-per-step 4 \
   --name "DF-07 duel codex" \
   --tag dogfood=phase3 --tag quest=df07 --tag duel=codex \

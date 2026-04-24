@@ -5,7 +5,7 @@
 v100 is a terminal-native AI agent harness written in Go. It orchestrates LLM providers (Gemini, MiniMax, Anthropic, Codex, OpenAI, Ollama) with a pluggable tool system, multi-solver architecture (ReAct, plan_execute, router), budget tracking, and trace-based observability.
 
 **Module:** `github.com/tripledoublev/v100`
-**Binary:** `./v100` (rebuild with `go build -o ./v100 ./cmd/v100/`)
+**Binary:** `./v100` (rebuild with `go build -o v100 ./cmd/v100`)
 **Config:** `~/.config/v100/config.toml` (bootstrap with `v100 config init`)
 **Auth tokens:** `~/.config/v100/auth.json` (PKCE/device OAuth per provider)
 
@@ -14,7 +14,7 @@ v100 is a terminal-native AI agent harness written in Go. It orchestrates LLM pr
 ## Build
 
 ```bash
-go build -o ./v100 ./cmd/v100/
+go build -o v100 ./cmd/v100
 ```
 
 Build the whole module (no binary):
@@ -129,10 +129,12 @@ Append-only JSONL at `runs/<id>/trace.jsonl`. Every event (model call, tool call
 `core.BudgetTracker` enforces `MaxSteps`, `MaxTokens`, and `MaxCostUSD`. Exceeding any limit returns `ErrBudgetExceeded` and halts the loop cleanly.
 
 ### Solvers
-Three solver strategies in `internal/core/`:
+Five solver strategies in `internal/core/`:
 - `solver_react.go` — classic ReAct loop (default)
 - `solver_plan.go` — plan then execute with optional replanning
 - `solver_router.go` — economic MoM router (cheap tier for discovery, frontier for implementation)
+- `solver_rlm.go` — DSPy-style Recursive Language Model pattern
+- `solver_miniglm.go` — Intelligent MiniMax/GLM switching
 
 ### Providers
 All providers implement `providers.Provider`. Retry logic lives in `providers.RetryProvider` (wraps any provider). Rate-limit responses print a countdown to stderr before each retry.
