@@ -4,8 +4,6 @@ This document describes v100 the way I actually use it: as an engine for agentic
 
 The important framing is simple:
 
-- v100 is not "the research command"
-- v100 is not "the old Python training loop"
 - v100 is a runtime for building, executing, inspecting, and evolving autonomous agents
 
 Research is one subsystem inside that runtime.
