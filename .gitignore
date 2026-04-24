@@ -36,3 +36,7 @@ exports/
 .nix-profile
 .rustup/
 research/train-loop/results.tsv
+go/
+blackboard.md
+*.orig
+*.rej
