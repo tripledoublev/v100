@@ -55,10 +55,16 @@ The runtime is responsible for:
 
 Important pieces:
 
-- `loop.go`: the main reasoning and tool-execution loop
-- `solver*.go`: solver implementations and routing
+- `loop.go`: the main reasoning and tool-execution loop. Also contains the **Hook system** (`PolicyHook`, `HookStage`, `HookResult`) which handles critical flow-control interventions (`PressureMonitor`, `RecoveryHook`).
+- `solver*.go`: The `Solver` interface returning `SolveResult`, and its implementations:
+  - `ReactSolver`: Classic reasoning loop (includes watchdogs and tool denial counting).
+  - `PlanExecuteSolver`: Two-phase plan-then-execute strategy.
+  - `RouterSolver`: Cheap-to-smart provider escalation (using a `trivialMutations` allowlist for cheap tool execution).
+  - `RLMSolver`: DSPy-style Recursive Language Model pattern with sub-model invocation.
+  - `MiniGLMSolver`: Intelligent provider switching between tool-focused (MiniMax) and reasoning-focused (GLM) models.
 - `trace.go`: structured event output for replay and analysis
-- `checkpoint*.go` and `snapshot*.go`: persistence and restore points
+- `budget.go`: Budget tracking system for token/cost accounting, limits, and `ErrBudgetExceeded` handling.
+- `checkpoint*.go` and `snapshot*.go`: Persistence API (`PersistCheckpoint`, `ReadCheckpoint`, etc.) and `SnapshotManager` for workspace snapshots and restore points.
 - `workspace_*.go`: applying, mapping, and filtering workspace state
 - `research*.go`: research orchestration
 
@@ -170,7 +176,10 @@ This is critical. If an agent does something surprising, I want to inspect the p
 
 ### Safety and operator control
 
-Tool risk is modeled directly. Confirmation, dangerous-tool handling, workspace controls, and sandbox support are not afterthoughts.
+Tool risk is modeled directly. Confirmation, dangerous-tool handling, workspace controls, and sandbox support are not afterthoughts. This includes:
+- **Sandbox network tiers:** Network access control mechanisms (`network_tier`) and sandbox gates.
+- **Dangerous Tool Reflection:** Optional reflection turns (`Policy.ReflectOnDangerous`) with confidence and uncertainty scoring before executing high-risk tools.
+- **Sandbox Snapshots:** Events for sandbox state capture and restoration (`EventSandboxSnapshot`, `EventSandboxRestore`).
 
 The project is aiming for autonomy with visibility, not autonomy by hiding the sharp edges.
 
@@ -202,10 +211,11 @@ If you want to understand the codebase quickly, read in this order:
 1. `cmd/v100/main.go`
 2. `cmd/v100/cmd_run.go`
 3. `internal/core/loop.go`
-4. `internal/tools/registry.go`
-5. `internal/providers/registry.go`
-6. `internal/eval/`
-7. `internal/core/research*.go` if you specifically care about the research subsystem
+4. `internal/core/solver.go` and implementations
+5. `internal/tools/registry.go`
+6. `internal/providers/registry.go`
+7. `internal/eval/`
+8. `internal/core/research*.go` if you specifically care about the research subsystem
 
 That path gives the shortest route from "how do I start the engine?" to "how does the runtime actually behave?"
 
