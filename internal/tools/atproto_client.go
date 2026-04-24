@@ -28,6 +28,18 @@ type atProtoSession struct {
 	Handle    string `json:"handle"`
 }
 
+// pickATProtoAccount returns the ATProtoConfig for "", "main", or "alt".
+func pickATProtoAccount(cfg *config.Config, account string) (config.ATProtoConfig, error) {
+	switch strings.TrimSpace(account) {
+	case "", "main":
+		return cfg.ATProto, nil
+	case "alt":
+		return cfg.ATProtoAlt, nil
+	default:
+		return config.ATProtoConfig{}, fmt.Errorf("atproto: unknown account %q (want \"main\" or \"alt\")", account)
+	}
+}
+
 func newATProtoClient(cfg config.ATProtoConfig) *atProtoClient {
 	pds := cfg.PDSURL
 	if pds == "" {

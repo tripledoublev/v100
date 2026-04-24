@@ -15,24 +15,25 @@ import (
 // atproto_feed — read the authenticated user's home timeline
 // ---------------------------------------------------------------------------
 
-type atprotoFeedTool struct{ cfg config.ATProtoConfig }
+type atprotoFeedTool struct{ cfg *config.Config }
 
 // ATProtoFeed returns the atproto_feed tool.
-func ATProtoFeed(cfg *config.Config) Tool { return &atprotoFeedTool{cfg: cfg.ATProto} }
+func ATProtoFeed(cfg *config.Config) Tool { return &atprotoFeedTool{cfg: cfg} }
 
 func (t *atprotoFeedTool) Name() string { return "atproto_feed" }
 func (t *atprotoFeedTool) Description() string {
 	return "Read the authenticated Bluesky user's home timeline. Returns a compact list of recent posts with author, text, engagement counts, and a cursor for pagination."
 }
 func (t *atprotoFeedTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoFeedTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoFeedTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoFeedTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"limit":  {"type": "integer", "description": "Number of posts to fetch (1–100, default 20)."},
-			"cursor": {"type": "string",  "description": "Pagination cursor from a previous call."}
+			"limit":   {"type": "integer", "description": "Number of posts to fetch (1–100, default 20)."},
+			"cursor":  {"type": "string",  "description": "Pagination cursor from a previous call."},
+			"account": {"type": "string",  "description": "Which account to use: \"main\" (default) or \"alt\"."}
 		}
 	}`)
 }
@@ -50,8 +51,9 @@ func (t *atprotoFeedTool) OutputSchema() json.RawMessage {
 
 func (t *atprotoFeedTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Limit  int    `json:"limit"`
-		Cursor string `json:"cursor"`
+		Limit   int    `json:"limit"`
+		Cursor  string `json:"cursor"`
+		Account string `json:"account"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
@@ -63,7 +65,11 @@ func (t *atprotoFeedTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		in.Limit = 100
 	}
 
-	cli := newATProtoClient(t.cfg)
+	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	cli := newATProtoClient(accountCfg)
 	if err := cli.login(); err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
@@ -121,11 +127,11 @@ func (t *atprotoFeedTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 // atproto_notifications — fetch mentions and activity notifications
 // ---------------------------------------------------------------------------
 
-type atprotoNotificationsTool struct{ cfg config.ATProtoConfig }
+type atprotoNotificationsTool struct{ cfg *config.Config }
 
 // ATProtoNotifications returns the atproto_notifications tool.
 func ATProtoNotifications(cfg *config.Config) Tool {
-	return &atprotoNotificationsTool{cfg: cfg.ATProto}
+	return &atprotoNotificationsTool{cfg: cfg}
 }
 
 func (t *atprotoNotificationsTool) Name() string { return "atproto_notifications" }
@@ -133,14 +139,15 @@ func (t *atprotoNotificationsTool) Description() string {
 	return "Fetch Bluesky notifications (mentions, replies, likes, reposts, follows). Supports filtering to unread-only."
 }
 func (t *atprotoNotificationsTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoNotificationsTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoNotificationsTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoNotificationsTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"limit":      {"type": "integer", "description": "Max notifications to fetch (1–100, default 20)."},
-			"unread_only": {"type": "boolean", "description": "Return only unread notifications (default false)."}
+			"limit":       {"type": "integer", "description": "Max notifications to fetch (1–100, default 20)."},
+			"unread_only": {"type": "boolean", "description": "Return only unread notifications (default false)."},
+			"account":     {"type": "string",  "description": "Which account to use: \"main\" (default) or \"alt\"."}
 		}
 	}`)
 }
@@ -157,8 +164,9 @@ func (t *atprotoNotificationsTool) OutputSchema() json.RawMessage {
 
 func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	var in struct {
-		Limit      int  `json:"limit"`
-		UnreadOnly bool `json:"unread_only"`
+		Limit      int    `json:"limit"`
+		UnreadOnly bool   `json:"unread_only"`
+		Account    string `json:"account"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
@@ -170,7 +178,11 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 		in.Limit = 100
 	}
 
-	cli := newATProtoClient(t.cfg)
+	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	cli := newATProtoClient(accountCfg)
 	if err := cli.login(); err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
@@ -232,10 +244,10 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 // atproto_post — publish a post, repost, or quote post
 // ---------------------------------------------------------------------------
 
-type atprotoPostTool struct{ cfg config.ATProtoConfig }
+type atprotoPostTool struct{ cfg *config.Config }
 
 // ATProtoPost returns the atproto_post tool.
-func ATProtoPost(cfg *config.Config) Tool { return &atprotoPostTool{cfg: cfg.ATProto} }
+func ATProtoPost(cfg *config.Config) Tool { return &atprotoPostTool{cfg: cfg} }
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
@@ -258,7 +270,8 @@ func (t *atprotoPostTool) InputSchema() json.RawMessage {
 			"quote_uri":    {"type": "string",  "description": "AT URI of the post to quote."},
 			"quote_cid":    {"type": "string",  "description": "CID of the post to quote (required with quote_uri)."},
 			"repost_uri":   {"type": "string",  "description": "AT URI of the post to repost (text not required)."},
-			"repost_cid":   {"type": "string",  "description": "CID of the post to repost (required with repost_uri)."}
+			"repost_cid":   {"type": "string",  "description": "CID of the post to repost (required with repost_uri)."},
+			"account":      {"type": "string",  "description": "Which account to post from: \"main\" (default, charlebois.info) or \"alt\" (xx-c.art)."}
 		}
 	}`)
 }
@@ -285,12 +298,17 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		QuoteCID   string `json:"quote_cid"`
 		RepostURI  string `json:"repost_uri"`
 		RepostCID  string `json:"repost_cid"`
+		Account    string `json:"account"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
 	}
 
-	cli := newATProtoClient(t.cfg)
+	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	cli := newATProtoClient(accountCfg)
 	if err := cli.login(); err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
@@ -390,7 +408,7 @@ func (t *atprotoResolveTool) Description() string {
 	return "Resolve a Bluesky handle to its DID. Useful before constructing repost or quote post payloads that require a DID."
 }
 func (t *atprotoResolveTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoResolveTool) Effects() ToolEffects      { return ToolEffects{NeedsNetwork: true} }
+func (t *atprotoResolveTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
 func (t *atprotoResolveTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{

@@ -42,16 +42,16 @@ func emptyCallCtx() ToolCallContext { return ToolCallContext{} }
 func TestATProtoToolMetadata(t *testing.T) {
 	cfg := &config.Config{}
 	cases := []struct {
-		tool        Tool
-		name        string
-		dangerous   bool
-		needsNet    bool
-		sideEffect  bool
+		tool       Tool
+		name       string
+		dangerous  bool
+		needsNet   bool
+		sideEffect bool
 	}{
-		{ATProtoFeed(cfg),          "atproto_feed",          false, true, false},
+		{ATProtoFeed(cfg), "atproto_feed", false, true, false},
 		{ATProtoNotifications(cfg), "atproto_notifications", false, true, false},
-		{ATProtoPost(cfg),          "atproto_post",          true,  true, true},
-		{ATProtoResolve(cfg),       "atproto_resolve",       false, true, false},
+		{ATProtoPost(cfg), "atproto_post", true, true, true},
+		{ATProtoResolve(cfg), "atproto_resolve", false, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -288,18 +288,18 @@ func TestATProtoNotifications_UnreadFilter(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notifications": []map[string]any{
 				{
-					"uri":    "at://did:plc:abc/app.bsky.feed.like/1",
-					"reason": "like",
-					"author": map[string]string{"handle": "bob.bsky.social", "displayName": "Bob"},
-					"record": map[string]string{"text": ""},
+					"uri":       "at://did:plc:abc/app.bsky.feed.like/1",
+					"reason":    "like",
+					"author":    map[string]string{"handle": "bob.bsky.social", "displayName": "Bob"},
+					"record":    map[string]string{"text": ""},
 					"indexedAt": "2025-01-02T00:00:00Z",
 					"isRead":    true,
 				},
 				{
-					"uri":    "at://did:plc:abc/app.bsky.feed.mention/2",
-					"reason": "mention",
-					"author": map[string]string{"handle": "carol.bsky.social", "displayName": "Carol"},
-					"record": map[string]string{"text": "hey @test"},
+					"uri":       "at://did:plc:abc/app.bsky.feed.mention/2",
+					"reason":    "mention",
+					"author":    map[string]string{"handle": "carol.bsky.social", "displayName": "Carol"},
+					"record":    map[string]string{"text": "hey @test"},
 					"indexedAt": "2025-01-02T01:00:00Z",
 					"isRead":    false,
 				},
@@ -760,5 +760,94 @@ func TestATProtoResolve_NoCredentialsRequired(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "did:plc:public123") {
 		t.Errorf("expected DID in output, got: %s", result.Output)
+	}
+}
+
+func TestPickATProtoAccount_Main(t *testing.T) {
+	cfg := &config.Config{
+		ATProto:    config.ATProtoConfig{Handle: "main.bsky.social"},
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.bsky.social"},
+	}
+	got, err := pickATProtoAccount(cfg, "main")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Handle != "main.bsky.social" {
+		t.Fatalf("expected main account, got handle=%s", got.Handle)
+	}
+}
+
+func TestPickATProtoAccount_Alt(t *testing.T) {
+	cfg := &config.Config{
+		ATProto:    config.ATProtoConfig{Handle: "main.bsky.social"},
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.bsky.social"},
+	}
+	got, err := pickATProtoAccount(cfg, "alt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Handle != "alt.bsky.social" {
+		t.Fatalf("expected alt account, got handle=%s", got.Handle)
+	}
+}
+
+func TestPickATProtoAccount_EmptyDefaultsToMain(t *testing.T) {
+	cfg := &config.Config{
+		ATProto:    config.ATProtoConfig{Handle: "main.bsky.social"},
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.bsky.social"},
+	}
+	got, err := pickATProtoAccount(cfg, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Handle != "main.bsky.social" {
+		t.Fatalf("expected empty account to default to main, got handle=%s", got.Handle)
+	}
+}
+
+func TestPickATProtoAccount_RejectsUnknown(t *testing.T) {
+	cfg := &config.Config{
+		ATProto:    config.ATProtoConfig{Handle: "main.bsky.social"},
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.bsky.social"},
+	}
+	for _, val := range []string{"unknown", "garbage", "altt"} {
+		if _, err := pickATProtoAccount(cfg, val); err == nil {
+			t.Fatalf("account=%q: expected error", val)
+		}
+	}
+}
+
+func TestATProtoPost_AltAccount(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Identifier string `json:"identifier"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"accessJwt": "tok", "did": "did:plc:alt", "handle": body.Identifier,
+		})
+	})
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"uri": "at://alt/post/1", "cid": "cid1"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{
+		ATProto:    config.ATProtoConfig{Handle: "main.bsky.social", AppPassword: "pw-main", PDSURL: srv.URL},
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.art", AppPassword: "pw-alt", PDSURL: srv.URL},
+	}
+	tool := ATProtoPost(cfg)
+	args, _ := json.Marshal(map[string]string{"text": "hello from alt", "account": "alt"})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK, got: %s", result.Output)
+	}
+	if !strings.Contains(result.Output, "at://alt/post/1") {
+		t.Errorf("expected alt URI in output, got: %s", result.Output)
 	}
 }

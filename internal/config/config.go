@@ -20,8 +20,9 @@ type Config struct {
 	Sandbox   SandboxConfig             `toml:"sandbox"`
 	Wake      WakeConfig                `toml:"wake"`
 	Update    UpdateConfig              `toml:"update"`
-	ATProto   ATProtoConfig             `toml:"atproto"`
-	Embedding EmbeddingConfig           `toml:"embedding"`
+	ATProto    ATProtoConfig             `toml:"atproto"`
+	ATProtoAlt ATProtoConfig             `toml:"alt-atproto"`
+	Embedding  EmbeddingConfig           `toml:"embedding"`
 }
 
 // EmbeddingConfig specifies the provider and model used for vector embeddings.
