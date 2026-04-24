@@ -51,7 +51,7 @@ The CLI surface is fairly broad now. The commands I reach for most often are:
 
 Recent work has been concentrated in three areas:
 
-- interactive reliability: fixing CLI confirmation freezes and raw-tty edge cases
+- advanced solvers: `plan_execute` for multi-phase reasoning and `smartrouter` for cost-performance balancing
 - unattended execution: `--continuous` on `run` and `resume` for longer hands-off sessions
 - retrieval and external context: ATProto indexing/recall and direct `user_posts` fetching from a user's PDS
 
@@ -88,15 +88,27 @@ That writes the default config to the XDG config path and checks the local setup
 ### 2. Start an interactive run
 
 ```bash
-v100 run --provider codex --workspace .
+v100 run --provider minimax --workspace .
 ```
 
 Add `--tui` if you want the Bubble Tea interface instead of plain CLI streaming.
 
-If you want unattended multi-step execution:
+For planning and multi-step reasoning:
 
 ```bash
-v100 run --provider codex --workspace . --continuous
+v100 run --solver plan_execute --plan --workspace .
+```
+
+For smart routing between cheap and frontier models:
+
+```bash
+v100 run --solver smartrouter --workspace .
+```
+
+If you want unattended execution:
+
+```bash
+v100 run --continuous --workspace .
 ```
 
 ### 3. Resume, inspect, and compare
