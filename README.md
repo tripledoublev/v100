@@ -18,8 +18,6 @@ v100 is the engine I use for agentic research work:
 - experimenting with tool use, safety boundaries, and provider routing
 - running autonomous research loops when I want the system to execute experiments on its own
 
-The `research` command is one feature inside that engine. It matters, but it is not the center of gravity of the repo.
-
 ## Current shape of the repo
 
 The high-level mental model is:
