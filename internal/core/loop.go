@@ -32,6 +32,7 @@ type OutputFn func(event Event)
 type Loop struct {
 	Run              *Run
 	Provider         providers.Provider
+	Model            string             // current model override; if empty, provider uses its default
 	CompressProvider providers.Provider // cheap model for summarization; nil = use l.Provider
 	EmbedProvider    providers.Provider // dedicated embedding provider; nil = use l.Provider
 	Tools            *tools.Registry
@@ -193,7 +194,7 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 	}
 	// Auto-discover metadata on first step if not set
 	if l.ModelMetadata.Model == "" {
-		m, err := l.Provider.Metadata(ctx, "")
+		m, err := l.Provider.Metadata(ctx, l.Model)
 		if err == nil {
 			l.ModelMetadata = m
 		}
@@ -266,7 +267,7 @@ func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause err
 		StepID:   stepID,
 		Messages: msgs,
 		Tools:    nil, // explanatory turn only; avoid cascading tool errors
-		Model:    "",
+		Model:    l.Model,
 	})
 	if err != nil {
 		fallback := "I hit an internal error and couldn't run a recovery explanation step.\n" +
@@ -600,6 +601,7 @@ func (l *Loop) reflectOnTool(ctx context.Context, stepID string, tc providers.To
 		StepID:   stepID,
 		Messages: msgs,
 		Hints:    providers.Hints{JSONOnly: true},
+		Model:    l.Model,
 	})
 	if err != nil {
 		return 0, "", err

@@ -229,6 +229,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	loop := &core.Loop{
 		Run:              run,
 		Provider:         prov,
+		Model:            model,
 		CompressProvider: buildCompressProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,
@@ -412,6 +413,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	loop = &core.Loop{
 		Run:              run,
 		Provider:         prov,
+		Model:            model,
 		CompressProvider: buildCompressProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,

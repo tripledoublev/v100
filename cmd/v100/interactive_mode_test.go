@@ -288,3 +288,116 @@ func TestSmartRouterProviderCapabilitiesUnion(t *testing.T) {
 		t.Fatalf("unexpected capabilities: %+v", caps)
 	}
 }
+
+func TestApplyInteractiveModeModelSelection(t *testing.T) {
+	cfg := testInteractiveConfig()
+	loop := newInteractiveTestLoop(t)
+
+	// 1. List models for a specific provider (by name)
+	_, handled, err := applyInteractiveMode(context.Background(), cfg, loop, "/model gemini", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true for model list")
+	}
+
+	// 2. Select a provider and model (by name)
+	_, handled, err = applyInteractiveMode(context.Background(), cfg, loop, "/model gemini gemini-frontier", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true for model selection")
+	}
+	if loop.Provider.Name() != "llamacpp" { // gemini is llamacpp in test config
+		t.Fatalf("provider name = %q, want llamacpp", loop.Provider.Name())
+	}
+	if loop.Model != "gemini-frontier" {
+		t.Fatalf("loop.Model = %q, want gemini-frontier", loop.Model)
+	}
+
+	// 3. Select a provider and model (by number)
+	// getSortedProviders: anthropic, claude, codex, gemini, glm, minimax, mistral, ollama, openai
+	// gemini is 4th
+	_, handled, err = applyInteractiveMode(context.Background(), cfg, loop, "/model 4", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true for provider selection by number")
+	}
+}
+
+func TestApplyInteractiveModeModelWithTask(t *testing.T) {
+	cfg := testInteractiveConfig()
+	loop := newInteractiveTestLoop(t)
+
+	// Select provider, model and provide a task
+	rewritten, handled, err := applyInteractiveMode(context.Background(), cfg, loop, "/model gemini gemini-frontier list files", false)
+	if err != nil {
+		t.Fatalf("applyInteractiveMode error = %v", err)
+	}
+	if handled {
+		t.Fatal("expected handled=false because there is a trailing task")
+	}
+	if rewritten != "list files" {
+		t.Fatalf("rewritten = %q, want 'list files'", rewritten)
+	}
+}
+
+func TestModelPassedToProvider(t *testing.T) {
+	loop := newInteractiveTestLoop(t)
+	mock := &testProviderStub{}
+	loop.Provider = mock
+	loop.Model = "custom-model"
+
+	// Trigger a model call through solver (Step)
+	// We'll use Step which calls solver.Solve
+	ctx := context.Background()
+	if err := loop.Step(ctx, "hello"); err != nil {
+		t.Fatalf("Step error = %v", err)
+	}
+
+	if len(mock.requests) == 0 {
+		t.Fatal("expected at least one request to provider")
+	}
+	// The solver should have passed loop.Model to the provider
+	found := false
+	for _, req := range mock.requests {
+		if req.Model == "custom-model" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("custom-model not found in provider requests: %+v", mock.requests)
+	}
+
+	// Now test switching via /model and then stepping
+	cfg := testInteractiveConfig()
+	mock2 := &testProviderStub{}
+	loop.Provider = mock2
+	// /model 4 -> gemini (which is llamacpp in test config)
+	_, handled, err := applyInteractiveMode(ctx, cfg, loop, "/model 4 gemini-frontier", false)
+	if err != nil || !handled {
+		t.Fatalf("applyInteractiveMode error = %v, handled = %v", err, handled)
+	}
+	if loop.Model != "gemini-frontier" {
+		t.Fatalf("loop.Model = %q, want gemini-frontier", loop.Model)
+	}
+
+	// We need to swap the provider in the loop because applyInteractiveMode
+	// builds a new provider instance. For testing we want our mock.
+	loop.Provider = mock2
+
+	if err := loop.Step(ctx, "hello again"); err != nil {
+		t.Fatalf("Step error = %v", err)
+	}
+	if len(mock2.requests) == 0 {
+		t.Fatal("expected requests to second provider")
+	}
+	if mock2.requests[0].Model != "gemini-frontier" {
+		t.Fatalf("request model = %q, want gemini-frontier", mock2.requests[0].Model)
+	}
+}

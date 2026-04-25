@@ -158,6 +158,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	loop = &core.Loop{
 		Run:              run,
 		Provider:         prov,
+		Model:            model,
 		EmbedProvider:    embedProv,
 		CompressProvider: buildCompressProvider(cfg),
 		Tools:            reg,

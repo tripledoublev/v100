@@ -142,6 +142,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 					StepID:    stepID,
 					Messages:  msgs,
 					Tools:     toolSpecs,
+					Model:     l.Model,
 					GenParams: l.GenParams,
 					Hints: providers.Hints{
 						MaxToolCalls: maxToolCalls - toolCallsUsed,
@@ -242,6 +243,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				StepID:    stepID,
 				Messages:  msgs,
 				Tools:     toolSpecs,
+				Model:     l.Model,
 				GenParams: l.GenParams,
 				Hints: providers.Hints{
 					MaxToolCalls: maxToolCalls - toolCallsUsed,

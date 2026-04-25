@@ -168,6 +168,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		loop := &core.Loop{
 			Run:              comp.Run,
 			Provider:         comp.Provider,
+			Model:            comp.Model,
 			EmbedProvider:    comp.EmbedProvider,
 			CompressProvider: buildCompressProvider(cfg),
 			Tools:            comp.Registry,
@@ -195,6 +196,19 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		s.mu.Unlock()
 
 		_ = s.conn.SendResponse(req.ID, acp.SessionNewResult{SessionID: sessionID})
+
+		// Advertise available slash commands to the client
+		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update: acp.Update{
+				Type: "available_commands_update",
+				AvailableCommands: []acp.Command{
+					{Name: "model", Description: "switch model or provider"},
+					{Name: "auto", Description: "switch to auto (smartrouter) mode"},
+					{Name: "local", Description: "switch to local provider"},
+				},
+			},
+		})
 
 	case "session/prompt":
 		var params acp.SessionPromptParams
@@ -261,7 +275,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			}
 		}
 
-		stopReason := s.runPrompt(session, promptText, images)
+		stopReason := s.runPrompt(session, params.SessionID, promptText, images)
 		_ = s.conn.SendResponse(req.ID, acp.SessionPromptResult{StopReason: stopReason})
 
 	case "session/close":
@@ -317,7 +331,7 @@ func (s *acpServer) handleNotification(req acp.Request) {
 	}
 }
 
-func (s *acpServer) runPrompt(session *acpSession, prompt string, images []providers.ImageAttachment) string {
+func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt string, images []providers.ImageAttachment) string {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	session.mu.Lock()
@@ -332,12 +346,44 @@ func (s *acpServer) runPrompt(session *acpSession, prompt string, images []provi
 		session.mu.Unlock()
 	}()
 
+	cfg, err := loadConfig(s.cfgPath)
+	if err != nil {
+		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update: acp.Update{
+				Type: "agent_message_chunk",
+				Content: &acp.ContentBlock{
+					Type: "text",
+					Text: "Error: failed to load config: " + err.Error(),
+				},
+			},
+		})
+		return "error"
+	}
+	rewritten, handled, err := applyInteractiveMode(ctx, cfg, session.loop, prompt, false)
+	if err != nil {
+		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update: acp.Update{
+				Type: "agent_message_chunk",
+				Content: &acp.ContentBlock{
+					Type: "text",
+					Text: "Error: " + err.Error(),
+				},
+			},
+		})
+		return "error"
+	}
+	if handled {
+		return "end_turn"
+	}
+	prompt = rewritten
+
 	ctxMeta, cancelMeta := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelMeta()
-	metadata, _ := session.loop.Provider.Metadata(ctxMeta, session.comp.Model)
+	metadata, _ := session.loop.Provider.Metadata(ctxMeta, session.loop.Model)
 	session.loop.ModelMetadata = metadata
 
-	var err error
 	if len(images) > 0 {
 		err = session.loop.StepWithImages(ctx, prompt, images)
 	} else {

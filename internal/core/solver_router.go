@@ -109,6 +109,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 			StepID:    stepID,
 			Messages:  msgs,
 			Tools:     toolSpecs,
+			Model:     l.Model,
 			GenParams: l.GenParams,
 			Hints: providers.Hints{
 				MaxToolCalls: maxToolCalls - toolCallsUsed,
@@ -146,6 +147,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 				StepID:    stepID,
 				Messages:  msgs,
 				Tools:     toolSpecs,
+				Model:     l.Model,
 				GenParams: l.GenParams,
 				Hints: providers.Hints{
 					MaxToolCalls: maxToolCalls - toolCallsUsed,

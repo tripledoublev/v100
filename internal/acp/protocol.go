@@ -131,13 +131,19 @@ type SessionUpdateParams struct {
 }
 
 type Update struct {
-	Type       string          `json:"sessionUpdate"` // discriminator: agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update
-	Content    *ContentBlock   `json:"content,omitempty"`
-	ToolCallID string          `json:"toolCallId,omitempty"`
-	Title      string          `json:"title,omitempty"`
-	Kind       string          `json:"kind,omitempty"`   // "read", "edit", "execute"
-	Status     string          `json:"status,omitempty"` // "pending", "in_progress", "completed", "failed"
-	Locations  []string        `json:"locations,omitempty"`
-	RawInput   json.RawMessage `json:"rawInput,omitempty"`
-	RawOutput  json.RawMessage `json:"rawOutput,omitempty"`
+	Type              string          `json:"sessionUpdate"` // discriminator: agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update, available_commands_update
+	Content           *ContentBlock   `json:"content,omitempty"`
+	ToolCallID        string          `json:"toolCallId,omitempty"`
+	Title             string          `json:"title,omitempty"`
+	Kind              string          `json:"kind,omitempty"`   // "read", "edit", "execute"
+	Status            string          `json:"status,omitempty"` // "pending", "in_progress", "completed", "failed"
+	Locations         []string        `json:"locations,omitempty"`
+	RawInput          json.RawMessage `json:"rawInput,omitempty"`
+	RawOutput         json.RawMessage `json:"rawOutput,omitempty"`
+	AvailableCommands []Command       `json:"availableCommands,omitempty"`
+}
+
+type Command struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }

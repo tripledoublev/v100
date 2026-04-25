@@ -84,6 +84,7 @@ func (s *MiniGLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (S
 			StepID:    stepID,
 			Messages:  msgs,
 			Tools:     toolSpecs,
+			Model:     l.Model,
 			GenParams: l.GenParams,
 			Hints: providers.Hints{
 				MaxToolCalls: maxToolCalls - toolCallsUsed,

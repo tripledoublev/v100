@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +34,7 @@ func parseInteractiveModeCommand(input string) (mode string, rest string, ok boo
 	}
 	mode = strings.ToLower(fields[0])
 	switch mode {
-	case "/auto", "/local", "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/claude", "/openai", "/ollama", "/llamacpp":
+	case "/auto", "/local", "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/claude", "/openai", "/ollama", "/llamacpp", "/model":
 	default:
 		return "", input, false
 	}
@@ -73,6 +75,8 @@ func buildSessionSelection(cfg *config.Config, mode string) (sessionSelection, e
 		return buildSingleProviderSelection(cfg, localName, "local")
 	case "/codex", "/gemini", "/minimax", "/glm", "/anthropic", "/claude", "/openai", "/ollama", "/llamacpp":
 		return buildSingleProviderSelection(cfg, strings.TrimPrefix(mode, "/"), strings.TrimPrefix(mode, "/"))
+	case "/model":
+		return sessionSelection{}, nil // handled separately in applyInteractiveMode
 	default:
 		return sessionSelection{}, fmt.Errorf("unsupported session mode %q", mode)
 	}
@@ -105,6 +109,11 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 	if !ok {
 		return input, false, nil
 	}
+
+	if mode == "/model" {
+		return handleModelCommand(ctx, cfg, loop, rest)
+	}
+
 	selection, err := buildSessionSelection(cfg, mode)
 	if err != nil {
 		return "", true, err
@@ -125,6 +134,7 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 	}
 
 	loop.Provider = selection.Provider
+	loop.Model = selection.Model
 	loop.Solver = selection.Solver
 	loop.CompressProvider = selection.CompressProvider
 	if meta, err := selection.Provider.Metadata(ctx, selection.Model); err == nil {
@@ -135,6 +145,95 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 		return "", true, nil
 	}
 	return rest, false, nil
+}
+
+func handleModelCommand(ctx context.Context, cfg *config.Config, loop *core.Loop, rest string) (string, bool, error) {
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		providers := getSortedProviders(cfg)
+		var sb strings.Builder
+		sb.WriteString("Available providers:\n")
+		for i, p := range providers {
+			fmt.Fprintf(&sb, " %d. %s\n", i+1, p)
+		}
+		sb.WriteString("\nType `/model <name_or_number>` to list models for a provider.")
+		emitSessionNotice(loop, sb.String())
+		return "", true, nil
+	}
+
+	providerQuery := fields[0]
+	providerName := resolveProviderQuery(cfg, providerQuery)
+	if providerName == "" {
+		emitSessionNotice(loop, fmt.Sprintf("Unknown provider: %s", providerQuery))
+		return "", true, nil
+	}
+
+	if len(fields) == 1 {
+		printModelList(loop, cfg, providerName)
+		emitSessionNotice(loop, fmt.Sprintf("\nType `/model %s <name_or_number>` to switch.", providerName))
+		return "", true, nil
+	}
+
+	modelQuery := fields[1]
+	task := strings.TrimSpace(strings.Join(fields[2:], " "))
+
+	prov, err := buildProvider(cfg, providerName)
+	if err != nil {
+		return "", true, err
+	}
+
+	modelName := modelQuery
+	if lister, ok := prov.(providers.ModelLister); ok {
+		models := lister.Models()
+		if idx, err := strconv.Atoi(modelQuery); err == nil {
+			if idx > 0 && idx <= len(models) {
+				modelName = models[idx-1].Name
+			}
+		} else if matched := fuzzyMatchModel(prov, modelQuery); matched != "" {
+			modelName = matched
+		}
+	}
+
+	loop.Provider = prov
+	loop.Model = modelName
+	loop.Solver = &core.ReactSolver{} // default for /model switch
+	if meta, err := prov.Metadata(ctx, modelName); err == nil {
+		loop.ModelMetadata = meta
+	}
+	emitSessionNotice(loop, fmt.Sprintf("session mode switched to %s (model: %s)", providerName, modelName))
+
+	if task == "" {
+		return "", true, nil
+	}
+	return task, false, nil
+}
+
+func getSortedProviders(cfg *config.Config) []string {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		if name == "smartrouter" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func resolveProviderQuery(cfg *config.Config, query string) string {
+	providers := getSortedProviders(cfg)
+	if idx, err := strconv.Atoi(query); err == nil {
+		if idx > 0 && idx <= len(providers) {
+			return providers[idx-1]
+		}
+	}
+	query = strings.ToLower(query)
+	for _, p := range providers {
+		if p == query {
+			return p
+		}
+	}
+	return ""
 }
 
 func emitSessionNotice(loop *core.Loop, message string) {
@@ -208,11 +307,7 @@ func printModelList(loop *core.Loop, cfg *config.Config, providerName string) {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s available models:\n", providerName)
 	for i, m := range models {
-		marker := " "
-		if i == 0 {
-			marker = "*"
-		}
-		fmt.Fprintf(&sb, " %s %s — %s\n", marker, m.Name, m.Description)
+		fmt.Fprintf(&sb, " %d. %s — %s\n", i+1, m.Name, m.Description)
 	}
 	emitSessionNotice(loop, sb.String())
 }

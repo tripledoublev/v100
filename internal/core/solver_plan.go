@@ -137,6 +137,7 @@ func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, p
 			StepID:   stepID,
 			Messages: msgs,
 			Tools:    planToolSpecs,
+			Model:    l.Model,
 		})
 		if err != nil {
 			return "", err
@@ -156,6 +157,7 @@ func (s *PlanExecuteSolver) generatePlan(ctx context.Context, l *Loop, stepID, p
 			StepID:   stepID,
 			Messages: msgs,
 			Tools:    planToolSpecs,
+			Model:    l.Model,
 		})
 		if err != nil {
 			return "", err

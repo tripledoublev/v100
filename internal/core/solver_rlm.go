@@ -204,6 +204,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 				StepID:    stepID,
 				Messages:  msgs,
 				Tools:     allToolSpecs,
+				Model:     l.Model,
 				GenParams: l.GenParams,
 				Hints:     providers.Hints{MaxToolCalls: maxToolCalls - toolCallsUsed},
 			})
@@ -240,6 +241,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 				StepID:    stepID,
 				Messages:  msgs,
 				Tools:     allToolSpecs,
+				Model:     l.Model,
 				GenParams: l.GenParams,
 				Hints:     providers.Hints{MaxToolCalls: maxToolCalls - toolCallsUsed},
 			})
@@ -411,6 +413,7 @@ func (s *RLMSolver) executePredictCall(ctx context.Context, l *Loop, stepID stri
 	subResp, err := subProv.Complete(ctx, providers.CompleteRequest{
 		RunID:  l.Run.ID,
 		StepID: stepID,
+		Model:  l.Model,
 		Messages: []providers.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userContent.String()},
