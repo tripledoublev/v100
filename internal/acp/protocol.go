@@ -118,7 +118,7 @@ type SessionPromptParams struct {
 }
 
 type SessionPromptResult struct {
-	StopReason string `json:"stopReason"` // e.g., "end_turn", "max_tokens", "cancelled", "error"
+	StopReason string `json:"stopReason"` // ACP spec: "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
 }
 
 type SessionCancelParams struct {

@@ -27,3 +27,11 @@ func TestLoadPolicyKeepsNamedPolicyMaxToolCallsWhenDefaultUnset(t *testing.T) {
 		t.Fatalf("MaxToolCallsPerStep = %d, want 13", p.MaxToolCallsPerStep)
 	}
 }
+
+func TestBuildToolRegistryRegistersATProtoUploadBlob(t *testing.T) {
+	cfg := config.DefaultConfig()
+	reg := buildToolRegistry(cfg)
+	if _, ok := reg.Lookup("atproto_upload_blob"); !ok {
+		t.Fatal("atproto_upload_blob should be registered")
+	}
+}

@@ -3,8 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +55,7 @@ func TestATProtoToolMetadata(t *testing.T) {
 		{ATProtoNotifications(cfg), "atproto_notifications", false, true, false},
 		{ATProtoPost(cfg), "atproto_post", true, true, true},
 		{ATProtoResolve(cfg), "atproto_resolve", false, true, false},
+		{ATProtoUploadBlob(cfg), "atproto_upload_blob", true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -613,6 +617,107 @@ func TestATProtoPost_QuotePost(t *testing.T) {
 	}
 }
 
+func TestATProtoPost_ImageOnlyPost(t *testing.T) {
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	var capturedRecord map[string]any
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if rec, ok := body["record"].(map[string]any); ok {
+			capturedRecord = rec
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"uri": "at://did:plc:test123/app.bsky.feed.post/img", "cid": "imgcid"})
+	})
+
+	fullCfg := &config.Config{ATProto: cfg}
+	tool := ATProtoPost(fullCfg)
+	args, _ := json.Marshal(map[string]any{
+		"images": []map[string]any{{
+			"cid":  "bafkimg",
+			"mime": "image/png",
+			"size": 42,
+			"alt":  "a diagram",
+		}},
+	})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK=true, got: %s", result.Output)
+	}
+	if capturedRecord["text"] != "" {
+		t.Errorf("expected empty text for image-only post, got: %v", capturedRecord["text"])
+	}
+	embed, ok := capturedRecord["embed"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected image embed, got: %v", capturedRecord)
+	}
+	if embed["$type"] != "app.bsky.embed.images" {
+		t.Fatalf("expected image embed type, got: %v", embed["$type"])
+	}
+	images, ok := embed["images"].([]any)
+	if !ok || len(images) != 1 {
+		t.Fatalf("expected one image, got: %#v", embed["images"])
+	}
+	item := images[0].(map[string]any)
+	if item["alt"] != "a diagram" {
+		t.Errorf("alt text mismatch: %v", item["alt"])
+	}
+}
+
+func TestATProtoPost_QuoteWithImagesUsesRecordWithMedia(t *testing.T) {
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	var capturedRecord map[string]any
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if rec, ok := body["record"].(map[string]any); ok {
+			capturedRecord = rec
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"uri": "at://did:plc:test123/app.bsky.feed.post/qimg", "cid": "qimgcid"})
+	})
+
+	fullCfg := &config.Config{ATProto: cfg}
+	tool := ATProtoPost(fullCfg)
+	args, _ := json.Marshal(map[string]any{
+		"text":      "quote with image",
+		"quote_uri": "at://did:plc:other/app.bsky.feed.post/orig",
+		"quote_cid": "origcid",
+		"images": []map[string]any{{
+			"cid":  "bafkimg",
+			"mime": "image/jpeg",
+			"size": 99,
+		}},
+	})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK=true, got: %s", result.Output)
+	}
+	embed, ok := capturedRecord["embed"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected embed block, got: %v", capturedRecord)
+	}
+	if embed["$type"] != "app.bsky.embed.recordWithMedia" {
+		t.Fatalf("expected recordWithMedia embed, got: %v", embed["$type"])
+	}
+	record, ok := embed["record"].(map[string]any)
+	if !ok || record["$type"] != "app.bsky.embed.record" {
+		t.Fatalf("expected quote record embed, got: %#v", embed["record"])
+	}
+	media, ok := embed["media"].(map[string]any)
+	if !ok || media["$type"] != "app.bsky.embed.images" {
+		t.Fatalf("expected images media embed, got: %#v", embed["media"])
+	}
+}
+
 func TestATProtoPost_RepostSubjectPayload(t *testing.T) {
 	mux := http.NewServeMux()
 	_, cfg := setupATProtoServer(t, mux)
@@ -686,6 +791,60 @@ func TestATProtoPost_MissingText(t *testing.T) {
 	}
 	if result.OK {
 		t.Errorf("expected OK=false for missing text")
+	}
+}
+
+func TestATProtoUploadBlob_RawBody(t *testing.T) {
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	var capturedContentType string
+	var capturedContentLength int64
+	var capturedBody []byte
+	mux.HandleFunc("/xrpc/com.atproto.repo.uploadBlob", func(w http.ResponseWriter, r *http.Request) {
+		capturedContentType = r.Header.Get("Content-Type")
+		capturedContentLength = r.ContentLength
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"blob": map[string]any{
+				"ref":      map[string]string{"$link": "bafkblob"},
+				"mimeType": "image/png",
+				"size":     len(capturedBody),
+			},
+		})
+	})
+
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "image.png")
+	data := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	if err := os.WriteFile(imagePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fullCfg := &config.Config{ATProto: cfg}
+	tool := ATProtoUploadBlob(fullCfg)
+	args, _ := json.Marshal(map[string]string{"image_path": imagePath, "alt_text": "alt"})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK=true, got: %s", result.Output)
+	}
+	if capturedContentType != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", capturedContentType)
+	}
+	if capturedContentLength != int64(len(data)) {
+		t.Fatalf("ContentLength = %d, want %d", capturedContentLength, len(data))
+	}
+	if string(capturedBody) != string(data) {
+		t.Fatalf("upload body mismatch: got %v want %v", capturedBody, data)
+	}
+	if strings.Contains(capturedContentType, "multipart/") {
+		t.Fatalf("upload should not use multipart content type: %s", capturedContentType)
+	}
+	if !strings.Contains(result.Output, `"cid":"bafkblob"`) || !strings.Contains(result.Output, `"alt":"alt"`) {
+		t.Fatalf("unexpected output: %s", result.Output)
 	}
 }
 

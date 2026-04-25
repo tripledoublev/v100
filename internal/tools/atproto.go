@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -251,7 +254,7 @@ func ATProtoPost(cfg *config.Config) Tool { return &atprotoPostTool{cfg: cfg} }
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
-	return "Publish to Bluesky. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), and reposts (repost_uri + repost_cid). For reposts, text is ignored."
+	return "Publish to Bluesky. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt - use atproto_upload_blob first to obtain these). Quote+images are combined as a recordWithMedia embed."
 }
 func (t *atprotoPostTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *atprotoPostTool) Effects() ToolEffects {
@@ -271,6 +274,7 @@ func (t *atprotoPostTool) InputSchema() json.RawMessage {
 			"quote_cid":    {"type": "string",  "description": "CID of the post to quote (required with quote_uri)."},
 			"repost_uri":   {"type": "string",  "description": "AT URI of the post to repost (text not required)."},
 			"repost_cid":   {"type": "string",  "description": "CID of the post to repost (required with repost_uri)."},
+			"images":       {"type": "array",   "description": "Optional image attachments. Each item: {cid, mime, size, alt?}. Obtain cid/mime/size by calling atproto_upload_blob first.", "items": {"type": "object", "properties": {"cid": {"type": "string"}, "mime": {"type": "string"}, "size": {"type": "integer"}, "alt": {"type": "string"}}, "required": ["cid", "mime", "size"]}},
 			"account":      {"type": "string",  "description": "Which account to post from: \"main\" (default, charlebois.info) or \"alt\" (xx-c.art)."}
 		}
 	}`)
@@ -298,7 +302,13 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		QuoteCID   string `json:"quote_cid"`
 		RepostURI  string `json:"repost_uri"`
 		RepostCID  string `json:"repost_cid"`
-		Account    string `json:"account"`
+		Images     []struct {
+			CID  string `json:"cid"`
+			Mime string `json:"mime"`
+			Size int64  `json:"size"`
+			Alt  string `json:"alt"`
+		} `json:"images"`
+		Account string `json:"account"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
@@ -338,7 +348,7 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		return ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}, nil
 	}
 
-	if in.Text == "" {
+	if in.Text == "" && len(in.Images) == 0 {
 		return ToolResult{OK: false, Output: "text is required"}, nil
 	}
 
@@ -366,12 +376,52 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		}
 	}
 
-	// Quote embed.
+	// Build embeds. Images and quotes can coexist via recordWithMedia.
+	var imagesEmbed map[string]any
+	if len(in.Images) > 0 {
+		if len(in.Images) > 4 {
+			return ToolResult{OK: false, Output: "atproto: at most 4 images per post"}, nil
+		}
+		items := make([]map[string]any, len(in.Images))
+		for i, img := range in.Images {
+			if img.CID == "" || img.Mime == "" || img.Size <= 0 {
+				return ToolResult{OK: false, Output: fmt.Sprintf("images[%d]: cid, mime, and size are required", i)}, nil
+			}
+			items[i] = map[string]any{
+				"alt": img.Alt,
+				"image": map[string]any{
+					"$type":    "blob",
+					"ref":      map[string]string{"$link": img.CID},
+					"mimeType": img.Mime,
+					"size":     img.Size,
+				},
+			}
+		}
+		imagesEmbed = map[string]any{
+			"$type":  "app.bsky.embed.images",
+			"images": items,
+		}
+	}
+
+	var quoteEmbed map[string]any
 	if in.QuoteURI != "" && in.QuoteCID != "" {
-		record["embed"] = map[string]any{
+		quoteEmbed = map[string]any{
 			"$type":  "app.bsky.embed.record",
 			"record": map[string]string{"uri": in.QuoteURI, "cid": in.QuoteCID},
 		}
+	}
+
+	switch {
+	case imagesEmbed != nil && quoteEmbed != nil:
+		record["embed"] = map[string]any{
+			"$type":  "app.bsky.embed.recordWithMedia",
+			"record": quoteEmbed,
+			"media":  imagesEmbed,
+		}
+	case imagesEmbed != nil:
+		record["embed"] = imagesEmbed
+	case quoteEmbed != nil:
+		record["embed"] = quoteEmbed
 	}
 
 	payload := map[string]any{
@@ -458,4 +508,133 @@ func (t *atprotoResolveTool) Exec(_ context.Context, _ ToolCallContext, args jso
 		return ToolResult{OK: false, Output: "parse error: " + err.Error()}, nil
 	}
 	return ToolResult{OK: true, Output: fmt.Sprintf("did=%s handle=%s", out.DID, in.Handle)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// atproto_upload_blob — upload an image blob to Bluesky
+// ---------------------------------------------------------------------------
+
+type atprotoUploadBlobTool struct{ cfg *config.Config }
+
+// ATProtoUploadBlob returns the atproto_upload_blob tool.
+func ATProtoUploadBlob(cfg *config.Config) Tool { return &atprotoUploadBlobTool{cfg: cfg} }
+
+func (t *atprotoUploadBlobTool) Name() string { return "atproto_upload_blob" }
+func (t *atprotoUploadBlobTool) Description() string {
+	return "Upload an image blob to Bluesky and return its CID for use in posts. " +
+		"Call this first, then pass the returned cid, mime, size, and optional alt to atproto_post via the images array."
+}
+func (t *atprotoUploadBlobTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *atprotoUploadBlobTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
+
+func (t *atprotoUploadBlobTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["image_path"],
+		"properties": {
+			"image_path": {"type": "string", "description": "Path to the image file to upload (PNG, JPEG, GIF, WebP)."},
+			"alt_text":   {"type": "string", "description": "Optional alt text. Echoed back in the result so it can be passed straight into atproto_post images[]."},
+			"account":    {"type": "string", "description": "Which account to use: \"main\" (default) or \"alt\"."}
+		}
+	}`)
+}
+
+func (t *atprotoUploadBlobTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":   {"type": "boolean"},
+			"cid":  {"type": "string"},
+			"mime": {"type": "string"},
+			"size": {"type": "integer"},
+			"alt":  {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoUploadBlobTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		ImagePath string `json:"image_path"`
+		AltText   string `json:"alt_text"`
+		Account   string `json:"account"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	if in.ImagePath == "" {
+		return ToolResult{OK: false, Output: "image_path is required"}, nil
+	}
+
+	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	cli := newATProtoClient(accountCfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	data, err := os.ReadFile(in.ImagePath)
+	if err != nil {
+		return ToolResult{OK: false, Output: "failed to read image file: " + err.Error()}, nil
+	}
+
+	// Detect MIME from file contents (magic bytes); fall back / cross-check
+	// against extension. http.DetectContentType reads up to the first 512 bytes.
+	detected := http.DetectContentType(data)
+	// Strip charset suffix if any, e.g. "image/svg+xml; charset=utf-8".
+	if i := strings.IndexByte(detected, ';'); i >= 0 {
+		detected = strings.TrimSpace(detected[:i])
+	}
+	mime := detected
+	if !isSupportedBskyImage(mime) {
+		// DetectContentType returns "application/octet-stream" for unknowns.
+		// Try the extension as a last-ditch hint, but only accept if supported.
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(in.ImagePath), "."))
+		if alt := mimeByExt(ext); isSupportedBskyImage(alt) {
+			mime = alt
+		} else {
+			return ToolResult{OK: false, Output: fmt.Sprintf("unsupported image type: detected=%q ext=%q (want png/jpeg/gif/webp)", detected, ext)}, nil
+		}
+	}
+
+	blob, err := cli.xrpcUploadBlob(filepath.Base(in.ImagePath), mime, data)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	out, _ := json.Marshal(map[string]any{
+		"cid":  blob.CID,
+		"mime": blob.Mime,
+		"size": blob.Size,
+		"alt":  in.AltText,
+	})
+	return ToolResult{OK: true, Output: string(out)}, nil
+}
+
+func isSupportedBskyImage(mime string) bool {
+	switch mime {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	}
+	return false
+}
+
+// mimeByExt maps file extensions to MIME types (fallback when magic-byte
+// detection is inconclusive).
+func mimeByExt(ext string) string {
+	switch ext {
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	default:
+		return ""
+	}
 }

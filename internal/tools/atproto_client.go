@@ -148,3 +148,48 @@ func (c *atProtoClient) xrpcPost(nsid string, payload any) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// BlobInfo is the subset of the uploadBlob response needed to embed a blob in
+// a record (e.g. app.bsky.embed.images).
+type BlobInfo struct {
+	CID  string
+	Mime string
+	Size int64
+}
+
+// xrpcUploadBlob uploads a file to the PDS via com.atproto.repo.uploadBlob and
+// returns the resulting blob's CID, MIME type, and size.
+func (c *atProtoClient) xrpcUploadBlob(filename, mimeType string, data []byte) (BlobInfo, error) {
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/xrpc/com.atproto.repo.uploadBlob", bytes.NewReader(data))
+	if err != nil {
+		return BlobInfo{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.session.AccessJwt)
+	req.Header.Set("Content-Type", mimeType)
+	req.ContentLength = int64(len(data))
+
+	resp, err := c.httpCli.Do(req)
+	if err != nil {
+		return BlobInfo{}, fmt.Errorf("atproto: upload blob: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respData, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return BlobInfo{}, fmt.Errorf("atproto: uploadBlob status %d: %s", resp.StatusCode, string(respData))
+	}
+
+	var out struct {
+		Blob struct {
+			Ref struct {
+				Link string `json:"$link"`
+			} `json:"ref"`
+			MimeType string `json:"mimeType"`
+			Size     int64  `json:"size"`
+		} `json:"blob"`
+	}
+	if err := json.Unmarshal(respData, &out); err != nil {
+		return BlobInfo{}, fmt.Errorf("atproto: decode uploadBlob response: %w", err)
+	}
+	return BlobInfo{CID: out.Blob.Ref.Link, Mime: out.Blob.MimeType, Size: out.Blob.Size}, nil
+}

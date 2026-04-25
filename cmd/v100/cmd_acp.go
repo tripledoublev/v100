@@ -358,7 +358,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 				},
 			},
 		})
-		return "error"
+		return "refusal"
 	}
 	rewritten, handled, err := applyInteractiveMode(ctx, cfg, session.loop, prompt, false)
 	if err != nil {
@@ -372,7 +372,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 				},
 			},
 		})
-		return "error"
+		return "refusal"
 	}
 	if handled {
 		return "end_turn"
@@ -394,7 +394,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 		if ctx.Err() == context.Canceled {
 			return "cancelled"
 		}
-		return "error"
+		return "refusal"
 	}
 
 	return "end_turn"

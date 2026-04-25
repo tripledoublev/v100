@@ -461,6 +461,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
+	reg.Register(tools.ATProtoUploadBlob(cfg))
 	reg.Register(tools.ATProtoGetFollows(cfg))
 	reg.Register(tools.ATProtoGetFollowers(cfg))
 	reg.Register(tools.ATProtoGetProfile(cfg))

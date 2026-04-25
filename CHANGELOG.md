@@ -6,11 +6,14 @@
 
 ### Fixes
 
+- **ACP prompt stop reasons** — `v100 acp` now returns spec-valid `refusal` stop reasons instead of `error`, preventing Zed and other typed ACP clients from failing to deserialize prompt responses.
+- **ATProto image posts** — Added and registered `atproto_upload_blob`, fixed blob uploads to send raw image bytes with the image MIME type, and taught `atproto_post` to accept `images[]`, image-only posts, and quote+image `recordWithMedia` embeds.
 - **Wrapped CLI prompt cleanup** — Fixed interactive CLI prompt redraws so wrapped multiline input clears all visual rows before repainting, including submit, EOF, and interrupt cleanup paths.
 - **Cross-platform terminal sizing** — Replaced Unix-specific prompt-width probing with Go's terminal size helper so release cross-compiles continue to work across Linux, macOS, and Windows targets.
 
 ### Maintenance
 
+- **ATProto image workflow tests** — Added coverage for raw blob upload request shape, image-only posts, quote+image embeds, upload-tool registration, and upload-tool metadata.
 - **CI-equivalent test script** — Added `scripts/test.sh` as the local release-test entrypoint, matching CI package scope, cache isolation, and `GOWORK=off` behavior.
 - **Release workflow test parity** — Updated the GitHub Release workflow to call `scripts/test.sh` in both test gates.
 - **Stable UI snapshots** — Made layout snapshot fixtures independent of the GitHub Actions checkout path.
