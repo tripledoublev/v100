@@ -545,8 +545,41 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 		images    [][]byte
 		statusMsg string
 	)
+	// lastLines tracks how many visual lines the previous render occupied
+	// so we can clean them all up on the next render.
+	var lastLines int
+
 	render := func() {
-		_, _ = fmt.Fprint(out, "\r\033[K")
+		// Calculate how many visual lines the current content occupies.
+		// We use a conservative 80-column width since we don't have the
+		// actual terminal width in raw mode.
+		promptLen := 2 // "▸ "
+		extraLen := 0
+		if len(images) > 0 {
+			extraLen += len(imageCount(len(images))) + 1
+		}
+		if statusMsg != "" {
+			extraLen += len(statusMsg) + 1
+		}
+		contentLen := promptLen + len(string(text)) + extraLen
+		linesOccupied := (contentLen + 79) / 80
+		if linesOccupied < 1 {
+			linesOccupied = 1
+		}
+
+		// Clear all lines that were occupied by the previous render.
+		for i := 0; i < lastLines; i++ {
+			_, _ = fmt.Fprint(out, "\r\033[K")
+			if i < lastLines-1 {
+				_, _ = fmt.Fprint(out, "\033[B") // move down one line
+			}
+		}
+		// Move cursor back to the beginning of the first line.
+		if lastLines > 1 {
+			_, _ = fmt.Fprintf(out, "\033[%dA", lastLines-1)
+		}
+
+		// Redraw the prompt and current content.
 		_, _ = fmt.Fprint(out, stylePrimary.Render("▸")+" ")
 		_, _ = fmt.Fprint(out, string(text))
 		if len(images) > 0 {
@@ -555,6 +588,8 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 		if statusMsg != "" {
 			_, _ = fmt.Fprint(out, " "+styleMuted.Render(statusMsg))
 		}
+
+		lastLines = linesOccupied
 	}
 	render()
 
