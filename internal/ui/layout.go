@@ -54,22 +54,26 @@ func computePaneLayout(totalWidth, totalHeight, leftPanePct, tracePanePct int) p
 		return layout
 	}
 
-	// Each pane has 2 border columns and the split adds a 1-column gap.
+	// Each pane has 2 border columns and the split adds a 1-column gap:
+	// 2 (left border) + 2 (right border) + 1 (gap) = 5
 	availableWidth := totalWidth - splitBorderCols
+	if availableWidth < 40 {
+		// Terminal too narrow for split view; fall back to single-pane minimums.
+		layout.leftWidth = availableWidth
+		layout.rightWidth = 0
+		layout.transcriptWidth = max(1, availableWidth-2)
+		layout.transcriptHeight = max(1, layout.remainingHeight-2)
+		return layout
+	}
+
 	leftWidth := availableWidth * leftPanePct / 100
-	if leftWidth < 38 {
-		leftWidth = 38
+	if leftWidth < 30 {
+		leftWidth = 30
 	}
 	rightWidth := availableWidth - leftWidth
-	if rightWidth < 24 {
-		rightWidth = 24
+	if rightWidth < 20 {
+		rightWidth = 20
 		leftWidth = availableWidth - rightWidth
-	}
-	if leftWidth < 24 {
-		leftWidth = 24
-	}
-	if rightWidth < 24 {
-		rightWidth = 24
 	}
 
 	layout.leftWidth = leftWidth

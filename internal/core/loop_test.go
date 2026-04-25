@@ -106,6 +106,57 @@ func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (
 	return loop, trace
 }
 
+func TestAppendConversationMessagePersistsForNextModelCall(t *testing.T) {
+	prov := &watchdogCapturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "done"}},
+	}
+	loop, trace := newTestLoop(t, prov, nil)
+	defer func() { _ = trace.Close() }()
+
+	review := "[external review: claude]\nsecond opinion"
+	if err := loop.AppendConversationMessage("system", review); err != nil {
+		t.Fatal(err)
+	}
+	if err := loop.Step(context.Background(), "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(prov.requests))
+	}
+	var inModelCall bool
+	for _, msg := range prov.requests[0].Messages {
+		if msg.Role == "system" && msg.Content == review {
+			inModelCall = true
+			break
+		}
+	}
+	if !inModelCall {
+		t.Fatal("external review was not included in the next model call")
+	}
+
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Type != core.EventUserMsg {
+			continue
+		}
+		var payload core.UserMsgPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Content == review && payload.Source == "reviewer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("external review was not written as a reviewer-sourced trace message")
+	}
+}
+
 func TestLoopSingleStep(t *testing.T) {
 	prov := &mockProvider{
 		responses: []providers.CompleteResponse{

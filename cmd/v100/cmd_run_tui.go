@@ -174,6 +174,11 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
+	tui.SetAppendConversationMessageFn(func(role, content string) {
+		if err := loop.AppendConversationMessage(role, content); err != nil && logger != nil {
+			logger.Printf("append external review: %v", err)
+		}
+	})
 
 	// metadata auto-discovery
 	metadata, _ := prov.Metadata(ctx, model)

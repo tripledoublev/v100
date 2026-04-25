@@ -139,6 +139,29 @@ func TestReconstructHistoryDropsIncompleteToolCallsOnResume(t *testing.T) {
 	}
 }
 
+func TestReconstructHistoryKeepsReviewerMessageAsSystemContext(t *testing.T) {
+	runDir := t.TempDir()
+	events := []core.Event{
+		mustEvent(t, core.EventRunStart, core.RunStartPayload{
+			Provider:  "minimax",
+			Model:     "MiniMax-M2.7",
+			Workspace: "/workspace",
+		}),
+		mustEvent(t, core.EventUserMsg, core.UserMsgPayload{
+			Content: "[external review: claude]\nsecond opinion",
+			Source:  "reviewer",
+		}),
+	}
+
+	msgs, _, _, _, _ := reconstructHistory(runDir, events)
+	if len(msgs) != 1 {
+		t.Fatalf("message count = %d, want 1 (%+v)", len(msgs), msgs)
+	}
+	if msgs[0].Role != "system" || !strings.Contains(msgs[0].Content, "second opinion") {
+		t.Fatalf("reviewer message = %+v, want system context", msgs[0])
+	}
+}
+
 func TestReconstructHistorySanitizesBinaryToolOutputOnResume(t *testing.T) {
 	runDir := t.TempDir()
 	events := []core.Event{

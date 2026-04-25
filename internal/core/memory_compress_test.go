@@ -695,7 +695,7 @@ func TestMemoryInjectedIntoProviderCall(t *testing.T) {
 	msgs := prov.requests[0].Messages
 	found := false
 	for _, m := range msgs {
-		if m.Role == "assistant" && strings.Contains(m.Content, relevant) {
+		if m.Role == "system" && strings.Contains(m.Content, relevant) {
 			if !strings.Contains(m.Content, "Retrieved durable memory relevant to this turn") {
 				t.Fatalf("memory reference message missing retrieval header: %q", m.Content)
 			}
@@ -800,7 +800,7 @@ func TestMemoryReferenceMessageIsTruncated(t *testing.T) {
 
 	msgs := prov.requests[0].Messages
 	for _, m := range msgs {
-		if m.Role == "assistant" && strings.Contains(m.Content, "Retrieved durable memory relevant to this turn") {
+		if m.Role == "system" && strings.Contains(m.Content, "Retrieved durable memory relevant to this turn") {
 			if !strings.Contains(m.Content, "[truncated]") {
 				t.Fatalf("expected truncation marker in %q", m.Content)
 			}
@@ -859,7 +859,7 @@ func TestMemoryRetrievalIncludesWorkspaceVectorEntries(t *testing.T) {
 	}
 
 	for _, m := range prov.requests[0].Messages {
-		if m.Role == "assistant" && strings.Contains(m.Content, "Store replay summaries under artifacts/") {
+		if m.Role == "system" && strings.Contains(m.Content, "Store replay summaries under artifacts/") {
 			if !strings.Contains(m.Content, "source=workspace-memory") {
 				t.Fatalf("expected workspace-memory source metadata in %q", m.Content)
 			}
@@ -911,7 +911,7 @@ func TestMemorySkippedInAutoModeWhenTurnLooksUnrelated(t *testing.T) {
 
 	msgs := prov.requests[0].Messages
 	for _, m := range msgs {
-		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+		if m.Role == "system" && strings.Contains(m.Content, memContent) {
 			t.Fatalf("unexpected memory injection for unrelated turn: %q", m.Content)
 		}
 	}
@@ -973,7 +973,7 @@ func TestMemoryAutoModeOnlyInjectsOnFirstModelCallOfStep(t *testing.T) {
 
 	firstCount := 0
 	for _, m := range prov.requests[0].Messages {
-		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+		if m.Role == "system" && strings.Contains(m.Content, memContent) {
 			firstCount++
 		}
 	}
@@ -982,7 +982,7 @@ func TestMemoryAutoModeOnlyInjectsOnFirstModelCallOfStep(t *testing.T) {
 	}
 
 	for _, m := range prov.requests[1].Messages {
-		if m.Role == "assistant" && strings.Contains(m.Content, memContent) {
+		if m.Role == "system" && strings.Contains(m.Content, memContent) {
 			t.Fatalf("expected second provider call in same step to omit memory, got %q", m.Content)
 		}
 	}

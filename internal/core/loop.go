@@ -95,15 +95,15 @@ func (l *Loop) runHooks(stepID string, stage HookStage) HookResult {
 	}
 
 	state := LoopState{
-		RunID:             l.Run.ID,
-		Stage:             stage,
-		StepCount:         l.stepCount,
-		MessageCount:      len(l.Messages),
-		LastToolOK:        l.lastToolOK,
-		LastToolOutput:    l.lastToolOutput,
-		LastToolName:      l.lastToolName,
-		LastToolArgs:      l.lastToolArgs,
-		BudgetRemaining:   l.Budget.Budget(),
+		RunID:           l.Run.ID,
+		Stage:           stage,
+		StepCount:       l.stepCount,
+		MessageCount:    len(l.Messages),
+		LastToolOK:      l.lastToolOK,
+		LastToolOutput:  l.lastToolOutput,
+		LastToolName:    l.lastToolName,
+		LastToolArgs:    l.lastToolArgs,
+		BudgetRemaining: l.Budget.Budget(),
 		// CompressionCount could be tracked if needed, using stats for now
 	}
 
@@ -241,6 +241,34 @@ func (l *Loop) appendUserMessage(stepID, userInput string) error {
 	l.pendingUserImages = nil
 	l.Messages = append(l.Messages, msg)
 	return nil
+}
+
+// AppendConversationMessage records a harness-injected message so it is used by
+// future model calls and appears in the trace.
+func (l *Loop) AppendConversationMessage(role, content string) error {
+	content = strings.TrimSpace(content)
+	if l == nil || content == "" {
+		return nil
+	}
+	if role == "" {
+		role = "system"
+	}
+	source := role
+	if strings.Contains(content, "[external review:") {
+		source = "reviewer"
+	}
+	l.mu.Lock()
+	l.Messages = append(l.Messages, providers.Message{
+		Role:    role,
+		Content: content,
+	})
+	l.mu.Unlock()
+
+	_, err := l.emit(EventUserMsg, "", UserMsgPayload{
+		Content: content,
+		Source:  source,
+	})
+	return err
 }
 
 // emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
@@ -645,7 +673,7 @@ func (l *Loop) buildMessagesWithStepMemory(stepID string, includeMemory bool, co
 	if includeMemory {
 		if memMsg, ok := l.memoryReferenceMessageForStep(stepID, consumeMemory); ok {
 			msgs = append(msgs, providers.Message{
-				Role:    "assistant",
+				Role:    "system",
 				Content: memMsg,
 			})
 		}

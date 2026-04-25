@@ -428,6 +428,11 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
+	tui.SetAppendConversationMessageFn(func(role, content string) {
+		if err := loop.AppendConversationMessage(role, content); err != nil && logger != nil {
+			logger.Printf("append external review: %v", err)
+		}
+	})
 	defer persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, loop.ModelMetadata, false)
 
 	// Start Bubble Tea first: Program.Send blocks until Run() starts the event loop.
