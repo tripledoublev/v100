@@ -139,6 +139,21 @@ func TruncateOutput(s string, verbose bool) string {
 	return strings.ReplaceAll(s, "\n", " ↵ ")
 }
 
+// estimateTokens estimates token count from string length using ~3.3 chars/token ratio.
+// This is a rough estimate; actual token counts vary by model and content.
+func estimateTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	// Approximate: ~3.3 characters per token (based on Claude's tokenizer).
+	// Round to nearest int, with minimum of 1 for non-empty strings.
+	tokens := (len(s) + 1) / 3
+	if tokens == 0 {
+		tokens = 1
+	}
+	return tokens
+}
+
 // SmartSummary provides a structured summary of a tool's output for clean TUI display.
 func SmartSummary(toolName, output string, verbose bool) string {
 	if verbose {

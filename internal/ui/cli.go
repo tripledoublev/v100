@@ -217,10 +217,12 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 		}
 		for _, tc := range p.ToolCalls {
 			args := TruncateOutput(tc.ArgsJSON, r.Verbose)
-			fmt.Printf("           %s %s%s\n",
+			argsTokens := estimateTokens(tc.ArgsJSON)
+			fmt.Printf("           %s %s%s  %s\n",
 				styleTool.Render("tool"),
 				styleTool.Render(tc.Name),
 				styleMuted.Render("("+args+")"),
+				styleMuted.Render(fmt.Sprintf("[~%d tokens]", argsTokens)),
 			)
 		}
 
@@ -285,11 +287,14 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			statusLabel = styleFail.Render("err")
 			statusStyle = styleFail.Render(p.Name)
 		}
-		out := TruncateOutput(p.Output, r.Verbose)
-		fmt.Printf("           %s %s  %s  %s\n",
+		// Use SmartSummary for intelligent output display, then estimate tokens.
+		out := SmartSummary(p.Name, p.Output, r.Verbose)
+		outTokens := estimateTokens(p.Output)
+		fmt.Printf("           %s %s  %s  %s  %s\n",
 			statusLabel,
 			statusStyle,
 			styleMuted.Render(fmt.Sprintf("[%dms]", p.DurationMS)),
+			styleMuted.Render(fmt.Sprintf("[~%d tokens]", outTokens)),
 			out,
 		)
 

@@ -77,8 +77,8 @@ func TestCLIRendererUsesPlainToolResultStatus(t *testing.T) {
 	})
 
 	plain := stripANSI(out)
-	if !strings.Contains(plain, "ok sh  [12ms]  done") {
-		t.Fatalf("expected plain tool result status, got %q", plain)
+	if !strings.Contains(plain, "ok sh  [12ms]  [~") || !strings.Contains(plain, "tokens]  done") {
+		t.Fatalf("expected plain tool result status with token count, got %q", plain)
 	}
 	if strings.Contains(plain, "✓") {
 		t.Fatalf("did not expect decorative success icon in %q", plain)
