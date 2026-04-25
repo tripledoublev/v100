@@ -28,7 +28,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: ./scripts/test.sh
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
@@ -81,9 +81,7 @@ jobs:
           fi
 
       - name: Run tests
-        env:
-          GOWORK: off
-        run: go test -race ./...
+        run: ./scripts/test.sh
 
       - name: Build binaries
         env:
