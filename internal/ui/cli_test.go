@@ -158,6 +158,14 @@ func TestClearPromptLineWritesEscapeSequence(t *testing.T) {
 	}
 }
 
+func TestClearPromptLinesWritesEscapeSequenceForVisualRows(t *testing.T) {
+	var buf bytes.Buffer
+	clearPromptLines(&buf, 3)
+	if got, want := buf.String(), "\r\033[K\033[B\r\033[K\033[B\r\033[K\033[2A"; got != want {
+		t.Fatalf("clearPromptLines() = %q, want %q", got, want)
+	}
+}
+
 func TestIsPNGData(t *testing.T) {
 	if !isPNGData([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}) {
 		t.Fatal("expected valid PNG signature to be accepted")

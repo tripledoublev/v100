@@ -550,9 +550,7 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 	var lastLines int
 
 	render := func() {
-		// Calculate how many visual lines the current content occupies.
-		// We use a conservative 80-column width since we don't have the
-		// actual terminal width in raw mode.
+		width := terminalWidth(in)
 		promptLen := 2 // "▸ "
 		extraLen := 0
 		if len(images) > 0 {
@@ -562,22 +560,16 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 			extraLen += len(statusMsg) + 1
 		}
 		contentLen := promptLen + len(string(text)) + extraLen
-		linesOccupied := (contentLen + 79) / 80
+		linesOccupied := (contentLen + width - 1) / width
 		if linesOccupied < 1 {
 			linesOccupied = 1
 		}
 
-		// Clear all lines that were occupied by the previous render.
-		for i := 0; i < lastLines; i++ {
-			_, _ = fmt.Fprint(out, "\r\033[K")
-			if i < lastLines-1 {
-				_, _ = fmt.Fprint(out, "\033[B") // move down one line
-			}
+		clearLines := lastLines
+		if linesOccupied > clearLines {
+			clearLines = linesOccupied
 		}
-		// Move cursor back to the beginning of the first line.
-		if lastLines > 1 {
-			_, _ = fmt.Fprintf(out, "\033[%dA", lastLines-1)
-		}
+		clearPromptLines(out, clearLines)
 
 		// Redraw the prompt and current content.
 		_, _ = fmt.Fprint(out, stylePrimary.Render("▸")+" ")
@@ -597,7 +589,7 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 	for {
 		if _, err := in.Read(buf[:]); err != nil {
 			if err == io.EOF {
-				clearPromptLine(out)
+				clearPromptLines(out, lastLines)
 				_, _ = fmt.Fprintln(out)
 				return PromptResult{}, fmt.Errorf("EOF")
 			}
@@ -606,13 +598,13 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 		statusMsg = ""
 		switch b := buf[0]; b {
 		case '\r', '\n':
-			clearPromptLine(out)
+			clearPromptLines(out, lastLines)
 			return PromptResult{
 				Text:   string(text),
 				Images: append([][]byte(nil), images...),
 			}, nil
 		case 0x03:
-			clearPromptLine(out)
+			clearPromptLines(out, lastLines)
 			_, _ = fmt.Fprintln(out)
 			return PromptResult{}, fmt.Errorf("interrupt")
 		case 0x7f, 0x08:
@@ -649,6 +641,28 @@ func promptTerminal(in *os.File, out io.Writer, readClipboard func() ([]byte, er
 
 func clearPromptLine(out io.Writer) {
 	_, _ = fmt.Fprint(out, "\r\033[K")
+}
+
+func clearPromptLines(out io.Writer, lines int) {
+	if lines < 1 {
+		lines = 1
+	}
+	for i := 0; i < lines; i++ {
+		clearPromptLine(out)
+		if i < lines-1 {
+			_, _ = fmt.Fprint(out, "\033[B")
+		}
+	}
+	if lines > 1 {
+		_, _ = fmt.Fprintf(out, "\033[%dA", lines-1)
+	}
+}
+
+func terminalWidth(in *os.File) int {
+	if width, _, err := term.GetSize(int(in.Fd())); err == nil && width > 0 {
+		return width
+	}
+	return 80
 }
 
 func promptLine(text string, images [][]byte, statusMsg string) string {
