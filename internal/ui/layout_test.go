@@ -262,6 +262,7 @@ func snapshotFixtureModel(width, height int) *TUIModel {
 	m.compressEvents = make([]time.Time, 1)
 	m.runSummary = "Snapshot coverage for transcript, trace, inspector, and status panes."
 	m.statusLine = "Testing representative TUI sizes."
+	m.WorkspacePath = "/home/v/main/ai/v100/internal/ui"
 	m.device = deviceStatus{BatteryPresent: true, Percent: 84, State: "charging"}
 	m.radioURL = availableStations[0].URL
 	m.radioVolume = 60
