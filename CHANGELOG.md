@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.27 — 2026-04-25
+
+**Release Pipeline Hardening and CLI Prompt Cleanup**
+
+### Fixes
+
+- **Wrapped CLI prompt cleanup** — Fixed interactive CLI prompt redraws so wrapped multiline input clears all visual rows before repainting, including submit, EOF, and interrupt cleanup paths.
+- **Cross-platform terminal sizing** — Replaced Unix-specific prompt-width probing with Go's terminal size helper so release cross-compiles continue to work across Linux, macOS, and Windows targets.
+
+### Maintenance
+
+- **CI-equivalent test script** — Added `scripts/test.sh` as the local release-test entrypoint, matching CI package scope, cache isolation, and `GOWORK=off` behavior.
+- **Release workflow test parity** — Updated the GitHub Release workflow to call `scripts/test.sh` in both test gates.
+- **Stable UI snapshots** — Made layout snapshot fixtures independent of the GitHub Actions checkout path.
+
 ## v0.2.24 — 2026-04-25
 
 **ACP Server Mode and Interactive Model Switching**
