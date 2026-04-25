@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.24 — 2026-04-25
+
+**ACP Server Mode and Interactive Model Switching**
+
+### Features
+
+- **ACP server mode** — Added `v100 acp`, a headless Agent Client Protocol server for editor integrations such as Zed, with newline-delimited JSON-RPC over stdio, stdout protocol isolation, session lifecycle handling, cancellation, streamed agent updates, tool-call updates, and workspace-aware execution.
+- **Reusable run builder** — Factored core run construction into shared runtime components so CLI, TUI, and ACP modes can initialize providers, policies, tools, budgets, traces, solvers, and sandbox sessions consistently.
+- **Interactive `/model` command** — Added `/model` support across CLI, TUI, resume, and ACP sessions for listing providers/models and switching the active provider/model during a session, including numbered provider/model selection and optional immediate task execution.
+- **ACP slash-command advertisement** — ACP sessions now advertise available commands including `model`, `auto`, and `local` via `available_commands_update` so compatible clients can expose slash commands.
+
+### Reliability
+
+- **Model propagation** — Added `Loop.Model` and wired it through solver, recovery, reflection, resume, TUI, CLI, and ACP paths so provider requests honor runtime model switches.
+- **ACP protocol hardening** — Added content-block prompt handling, resource link text bridging, provider-aware image support, base64 image decoding, command-safe tool update serialization, larger stdio scan buffers, and safe session cleanup.
+
 ## v0.2.23 — 2026-04-24
 
 **Alternate ATProto Accounts and TUI Localization**
