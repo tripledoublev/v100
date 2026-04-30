@@ -92,11 +92,12 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.reviewCancel != nil {
 			m.reviewCancel = nil
 		}
-		for _, item := range m.history {
-			if item.ID == msg.itemID {
-				item.Text = msg.output
-				if strings.TrimSpace(item.Text) == "" && msg.err != nil {
-					item.Text = truncateReviewStatus(msg.err.Error())
+		// FIX: use index-based access to modify slice elements in place
+		for idx := range m.history {
+			if m.history[idx].ID == msg.itemID {
+				m.history[idx].Text = msg.output
+				if strings.TrimSpace(m.history[idx].Text) == "" && msg.err != nil {
+					m.history[idx].Text = truncateReviewStatus(msg.err.Error())
 				}
 				break
 			}
