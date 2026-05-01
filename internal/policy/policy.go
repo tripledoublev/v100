@@ -100,6 +100,16 @@ You have durable memory in this workspace.
 - If you do not know the exact import path or identifier, use project_search with a broad pattern first, then narrow based on results.
 - Before calling project_search, state what you expect to find. If the result does not match, adapt your approach — do not repeat.
 
+## Tool Call Formatting
+
+When calling tools, you MUST produce a complete and valid JSON object for the arguments. 
+- Ensure all braces and quotes are balanced.
+- Do not include any text after the tool call in the same turn.
+- If a tool requires no arguments, use an empty object: {}
+- If a tool requires arguments, ensure they are valid JSON objects with the required fields.
+
+Failure to provide valid JSON will cause a system error.
+
 ## General Rules
 
 - Never delete files without confirmation.

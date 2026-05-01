@@ -55,13 +55,6 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		return SolveResult{}, err
 	}
 
-	// 1b. Sanitize unresolved tool calls from live history before next provider request.
-	// This prevents MiniMax error 2013 when long-running tool calls haven't completed.
-	_ = l.SanitizeLiveMessages() // idempotent; no error handling needed
-
-	// 2. Maybe compress history before calling the provider.
-	_ = l.maybeCompress(ctx, stepID) // best-effort; log but don't fail
-
 	// 3. Continue model/tool turns until the model produces a final (no-tool) response.
 	maxToolCalls := 50 // sensible high default
 	if l.Policy != nil && l.Policy.MaxToolCallsPerStep > 0 {
@@ -77,6 +70,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	watchdogInjected := false
 	toolsStopped := false
 	denialCounts := map[string]int{} // key: "toolName:args" → denial count
+	malformedRetryCount := 0
 
 	for {
 		select {
@@ -84,6 +78,11 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			return SolveResult{}, ctx.Err()
 		default:
 		}
+
+		// Ensure history is sanitized (no orphans, valid JSON) and compressed if needed
+		// before building messages for the provider.
+		_ = l.SanitizeLiveMessages()
+		_ = l.maybeCompress(ctx, stepID)
 
 		msgs := l.buildMessagesForStep(stepID)
 		var toolSpecs []providers.ToolSpec
@@ -222,6 +221,72 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		for i, tc := range toolCalls {
 			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
 		}
+
+		// Proactive Tool Call Validation: Check for malformed JSON before execution or history persistence.
+		var malformedTCs []providers.ToolCall
+		malformedMap := make(map[string]bool)
+		for _, tc := range toolCalls {
+			if len(tc.Args) > 0 && !json.Valid(tc.Args) {
+				malformedTCs = append(malformedTCs, tc)
+				malformedMap[tc.ID] = true
+			}
+		}
+
+		if len(malformedTCs) > 0 {
+			if malformedRetryCount < 2 {
+				malformedRetryCount++
+				_, _ = l.emit(EventModelResp, stepID, ModelRespPayload{
+					Text:      assistantText.String(),
+					ToolCalls: tcPayload,
+					Usage: Usage{
+						InputTokens:  usage.InputTokens,
+						OutputTokens: usage.OutputTokens,
+						CostUSD:      usage.CostUSD,
+					},
+					DurationMS: durMS,
+					TTFT:       ttft,
+				})
+
+				// Only include valid tool calls in the history to prevent provider crashes.
+				validCalls := make([]providers.ToolCall, 0, len(toolCalls)-len(malformedTCs))
+				for _, tc := range toolCalls {
+					if !malformedMap[tc.ID] {
+						validCalls = append(validCalls, tc)
+					}
+				}
+				if assistantText.Len() > 0 || len(validCalls) > 0 {
+					l.Messages = append(l.Messages, providers.Message{
+						Role:      "assistant",
+						Content:   assistantText.String(),
+						ToolCalls: validCalls,
+					})
+				}
+
+				for _, tc := range malformedTCs {
+					errText := fmt.Sprintf("⚠️ Tool call parsing failed. Your call to %q had malformed JSON arguments: %q\n\nPlease retry using valid JSON.", tc.Name, string(tc.Args))
+					l.Messages = append(l.Messages, providers.Message{
+						Role:    "user",
+						Content: errText,
+					})
+					_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: errText})
+				}
+				continue
+			} else {
+				// Exhausted retries: do not execute malformed tools.
+				// Inject a final error message and move to the next turn so the model can pivot or stop.
+				errText := fmt.Sprintf("Unable to fix tool call arguments for %q after %d retries. Skipping this action.", malformedTCs[0].Name, malformedRetryCount)
+				l.Messages = append(l.Messages, providers.Message{
+					Role:    "user",
+					Content: errText,
+				})
+				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{Error: errText})
+				continue
+			}
+		}
+
+		// Reset malformed retry counter if we got a clean response.
+		malformedRetryCount = 0
+
 		if _, err := l.emit(EventModelResp, stepID, ModelRespPayload{
 			Text:      assistantText.String(),
 			ToolCalls: tcPayload,
@@ -236,11 +301,20 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			return SolveResult{}, err
 		}
 
-		l.Messages = append(l.Messages, providers.Message{
-			Role:      "assistant",
-			Content:   assistantText.String(),
-			ToolCalls: toolCalls,
-		})
+		// Only include valid tool calls in the history.
+		validCalls := make([]providers.ToolCall, 0, len(toolCalls)-len(malformedTCs))
+		for _, tc := range toolCalls {
+			if !malformedMap[tc.ID] {
+				validCalls = append(validCalls, tc)
+			}
+		}
+		if assistantText.Len() > 0 || len(validCalls) > 0 {
+			l.Messages = append(l.Messages, providers.Message{
+				Role:      "assistant",
+				Content:   assistantText.String(),
+				ToolCalls: validCalls,
+			})
+		}
 
 		finalText = assistantText.String()
 		modelCalls++

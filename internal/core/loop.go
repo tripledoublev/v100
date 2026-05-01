@@ -707,6 +707,12 @@ func (l *Loop) SanitizeLiveMessages() bool {
 		filtered := make([]providers.ToolCall, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
 			if strings.TrimSpace(tc.ID) != "" && toolResults[tc.ID] {
+				// Drop malformed tool calls to prevent provider crashes (e.g. llama.cpp 500)
+				// when history is sent back in subsequent turns.
+				if len(tc.Args) > 0 && !json.Valid(tc.Args) {
+					modified = true
+					continue
+				}
 				filtered = append(filtered, tc)
 			} else {
 				modified = true

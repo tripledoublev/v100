@@ -592,6 +592,21 @@ func TestSanitizeLiveMessages(t *testing.T) {
 				{Role: "tool", ToolCallID: "tc1", Content: "result1"},
 			},
 		},
+		{
+			name: "drops malformed tool call arguments",
+			messages: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "working", ToolCalls: []providers.ToolCall{
+					{ID: "tc1", Name: "tool_a", Args: json.RawMessage(`{"`)},
+				}},
+				{Role: "tool", ToolCallID: "tc1", Content: "error"},
+			},
+			want: []providers.Message{
+				{Role: "user", Content: "start"},
+				{Role: "assistant", Content: "working"},
+				{Role: "tool", ToolCallID: "tc1", Content: "error"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
