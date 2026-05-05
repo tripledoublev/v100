@@ -1255,7 +1255,7 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 			Policy:        pol,
 			Trace:         trace,
 			Budget:        core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: cfg.Wake.BudgetTokens / len(task.Steps), MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps))}),
-			ConfirmFn:     func(_, _ string) bool { return false },
+			ConfirmFn:     func(_, _ string) bool { return true },
 			Mapper:        core.NewPathMapper(workspace, workspace),
 			NetworkTier:   "open",
 			ModelMetadata: providersModelMetadata(ctx, prov, model),
