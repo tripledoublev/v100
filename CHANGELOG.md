@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.29 — 2026-05-05
+
+**Synthesis Wake Tasks and Multi-Step Autonomous Workflows**
+
+### Features
+
+- **Multi-step synthesis wake tasks** — Complete implementation of declarative TOML task system for `v100 wake task <name>`, supporting sequential steps with context carryover, tool invocation, and synthesis output extraction.
+- **Feed corpus anonymization tool** — New `atproto_anon_synth` tool that gathers recent Bluesky feed posts and returns an anonymized text corpus (strips handles, @mentions, URLs) for downstream synthesis or analysis.
+- **Daily scheduled synthesis** — Added crontab integration with environment variable support (ATPROTO_PASSWORD, ALT_ATPROTO_PASSWORD) for autonomous daily synthesis runs at configured times.
+
+### Fixes
+
+- **Tool execution in synthesis tasks** — Enabled tool calls within multi-step synthesis workflows, allowing agents to invoke atproto tools for corpus gathering and posting.
+- **Multi-layered JSON resilience** — Improved malformed JSON error handling for local models (llama.cpp, Qwen) with nested recovery attempts and fallback tokenization.
+- **Tool naming clarity** — Renamed `atproto_synth_post` → `atproto_anon_synth` and clarified description to reflect gather-only behavior, preventing LLM confusion about tool capabilities.
+
 ## v0.2.28 — 2026-04-25
 
 **ACP Stop Reasons and ATProto Image Posts**

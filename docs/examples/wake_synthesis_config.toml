@@ -14,8 +14,8 @@ schedule = "24h"
 [[wake.tasks.steps]]
 name = "gather"
 tool = "atproto_anon_synth"
-prompt = "Fetch the anonymized corpus from the Bluesky feed. Do NOT post yet."
+prompt = "Gather the feed corpus. Strip all handles and URLs — we want content only."
 
 [[wake.tasks.steps]]
 name = "synthesize"
-prompt = """Read the corpus gathered in the previous step. Synthesize its essence into exactly 2 poetic, vibe-driven sentences. Output them after a SYNTHESIS: marker."""
+prompt = "Read the corpus. Write exactly 2 poetic sentences that capture what's happening. End with SYNTHESIS: followed by your sentences."
