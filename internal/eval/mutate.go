@@ -77,6 +77,11 @@ func (b MutationBudgets) normalized() MutationBudgets {
 	return b
 }
 
+// NormalizedForReport returns mutation budgets with default values applied.
+func (b MutationBudgets) NormalizedForReport() MutationBudgets {
+	return b.normalized()
+}
+
 func validateMutationBudgets(b MutationBudgets, sections []mutationSection) string {
 	b = b.normalized()
 	for _, section := range sections {

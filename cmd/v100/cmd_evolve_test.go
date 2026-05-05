@@ -2,9 +2,11 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/eval"
 )
 
 func TestAvgScore(t *testing.T) {
@@ -98,5 +100,35 @@ func TestNewEvolveBenchMetaSetsParentRunID(t *testing.T) {
 	}
 	if got := meta.Tags["prompt_id"]; got != "2" {
 		t.Fatalf("prompt_id = %q, want 2", got)
+	}
+}
+
+func TestNewMutationRejectionReport(t *testing.T) {
+	created := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	mutation := eval.PolicyMutationResult{
+		OriginalPolicy:  "short",
+		CandidatePolicy: "a much longer candidate",
+		Rationale:       "too broad",
+		RejectedReason:  "mutated policy exceeds max growth: +18 > +10",
+	}
+	report := newMutationRejectionReport("evolve-1", "source-1", mutation, eval.MutationBudgets{MaxPromptGrowthChars: 10}, "runs/evolve-1/candidate_policy.rejected.md", created)
+
+	if report.Decision != "rejected" {
+		t.Fatalf("Decision = %q, want rejected", report.Decision)
+	}
+	if report.RejectedReason != mutation.RejectedReason {
+		t.Fatalf("RejectedReason = %q, want %q", report.RejectedReason, mutation.RejectedReason)
+	}
+	if report.OriginalChars != len(mutation.OriginalPolicy) || report.CandidateChars != len(mutation.CandidatePolicy) {
+		t.Fatalf("chars = %d/%d, want %d/%d", report.OriginalChars, report.CandidateChars, len(mutation.OriginalPolicy), len(mutation.CandidatePolicy))
+	}
+	if report.MaxPromptChars != eval.DefaultMutationBudgets().MaxPromptChars {
+		t.Fatalf("MaxPromptChars = %d, want default", report.MaxPromptChars)
+	}
+	if report.MaxPromptGrowth != 10 {
+		t.Fatalf("MaxPromptGrowth = %d, want 10", report.MaxPromptGrowth)
+	}
+	if !report.CreatedAt.Equal(created) {
+		t.Fatalf("CreatedAt = %v, want %v", report.CreatedAt, created)
 	}
 }

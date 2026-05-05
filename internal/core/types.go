@@ -76,18 +76,18 @@ type HookResult struct {
 
 // LoopState provides a snapshot of the agent's current progress for hooks.
 type LoopState struct {
-	RunID            string
-	Stage            HookStage
-	StepCount        int
-	MessageCount     int
-	LastToolOK       bool
-	LastToolOutput   string
-	LastToolName     string
-	LastToolArgs     string
-	BudgetRemaining  Budget
-	ContextPressure  float64 // estimated tokens / context window size (0 if unknown)
-	ContextWindowSize int    // model's context window in tokens (0 if unknown)
-	CompressionCount int
+	RunID             string
+	Stage             HookStage
+	StepCount         int
+	MessageCount      int
+	LastToolOK        bool
+	LastToolOutput    string
+	LastToolName      string
+	LastToolArgs      string
+	BudgetRemaining   Budget
+	ContextPressure   float64 // estimated tokens / context window size (0 if unknown)
+	ContextWindowSize int     // model's context window in tokens (0 if unknown)
+	CompressionCount  int
 }
 
 // PolicyHook is a callback invoked at loop checkpoints to observe or intervene.
@@ -210,13 +210,13 @@ type CompressPayload struct {
 	TokensBefore       int     `json:"tokens_before"`
 	TokensAfter        int     `json:"tokens_after"`
 	CostUSD            float64 `json:"cost_usd"`
-	Trigger            string  `json:"trigger,omitempty"`              // "context_limit" or "budget_tokens"
-	Strategy           string  `json:"strategy,omitempty"`             // "targeted" or "bulk"
-	MessagesCompressed int     `json:"messages_compressed,omitempty"`   // for targeted
-	MessagesFailed     int     `json:"messages_failed,omitempty"`      // compression failures
-	TokensSaved        int     `json:"tokens_saved,omitempty"`         // derived: before - after
-	DurationMS         int64   `json:"duration_ms,omitempty"`          // wall time of compress calls
-	ProviderModel      string  `json:"provider_model,omitempty"`       // model used for compression
+	Trigger            string  `json:"trigger,omitempty"`             // "context_limit" or "budget_tokens"
+	Strategy           string  `json:"strategy,omitempty"`            // "targeted" or "bulk"
+	MessagesCompressed int     `json:"messages_compressed,omitempty"` // for targeted
+	MessagesFailed     int     `json:"messages_failed,omitempty"`     // compression failures
+	TokensSaved        int     `json:"tokens_saved,omitempty"`        // derived: before - after
+	DurationMS         int64   `json:"duration_ms,omitempty"`         // wall time of compress calls
+	ProviderModel      string  `json:"provider_model,omitempty"`      // model used for compression
 }
 
 // StepSummaryPayload is the Payload for EventStepSummary.
@@ -356,10 +356,11 @@ type PolicyEvolvePayload struct {
 	EvolveID       string  `json:"evolve_id"`
 	BaselineScore  float64 `json:"baseline_score"`
 	CandidateScore float64 `json:"candidate_score"`
-	Decision       string  `json:"decision"` // "recommend_adopt" or "recommend_reject"
+	Decision       string  `json:"decision"` // "recommend_adopt", "recommend_reject", or "rejected"
 	Rationale      string  `json:"rationale"`
 	CandidatePath  string  `json:"candidate_path"`
 	SourceTraceID  string  `json:"source_trace_id"`
+	RejectedReason string  `json:"rejected_reason,omitempty"`
 }
 
 // ErrBudgetExceeded is returned when any budget limit is hit.

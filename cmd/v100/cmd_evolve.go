@@ -43,6 +43,39 @@ type evolutionReport struct {
 	CreatedAt        time.Time         `json:"created_at"`
 }
 
+// mutationRejectionReport records why a generated mutation was rejected before
+// benchmark execution.
+type mutationRejectionReport struct {
+	EvolveID            string    `json:"evolve_id"`
+	SourceTraceID       string    `json:"source_trace_id"`
+	Decision            string    `json:"decision"`
+	RejectedReason      string    `json:"rejected_reason"`
+	Rationale           string    `json:"rationale"`
+	OriginalChars       int       `json:"original_chars"`
+	CandidateChars      int       `json:"candidate_chars"`
+	MaxPromptChars      int       `json:"max_prompt_chars"`
+	MaxPromptGrowth     int       `json:"max_prompt_growth_chars"`
+	CandidatePolicyPath string    `json:"candidate_policy_path"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+func newMutationRejectionReport(evolveID, traceID string, mutation eval.PolicyMutationResult, budgets eval.MutationBudgets, candidatePath string, createdAt time.Time) mutationRejectionReport {
+	budgets = budgets.NormalizedForReport()
+	return mutationRejectionReport{
+		EvolveID:            evolveID,
+		SourceTraceID:       traceID,
+		Decision:            "rejected",
+		RejectedReason:      mutation.RejectedReason,
+		Rationale:           mutation.Rationale,
+		OriginalChars:       len(mutation.OriginalPolicy),
+		CandidateChars:      len(mutation.CandidatePolicy),
+		MaxPromptChars:      budgets.MaxPromptChars,
+		MaxPromptGrowth:     budgets.MaxPromptGrowthChars,
+		CandidatePolicyPath: candidatePath,
+		CreatedAt:           createdAt,
+	}
+}
+
 func resolveBenchProviderModel(cfg *config.Config, variant core.BenchVariant, fallbackProvider string) (string, string) {
 	providerName := strings.TrimSpace(variant.Provider)
 	if providerName == "" {
@@ -157,8 +190,59 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 			}
 
 			if mutation.RejectedReason != "" {
+				evolveID := newRunID()
+				evolveDir := filepath.Join("runs", evolveID)
+				if err := os.MkdirAll(evolveDir, 0o755); err != nil {
+					return err
+				}
+				candidatePath := filepath.Join(evolveDir, "candidate_policy.rejected.md")
+				if err := os.WriteFile(candidatePath, []byte(mutation.CandidatePolicy), 0o644); err != nil {
+					return err
+				}
+				now := time.Now().UTC()
+				report := newMutationRejectionReport(evolveID, traceID, mutation, budgets, candidatePath, now)
+				reportBytes, _ := json.MarshalIndent(report, "", "  ")
+				if err := os.WriteFile(filepath.Join(evolveDir, "mutation_rejection.json"), reportBytes, 0o644); err != nil {
+					return err
+				}
+				meta := core.RunMeta{
+					RunID:           evolveID,
+					Name:            "evolve:rejected",
+					Tags:            map[string]string{"type": "evolve", "source_trace": traceID, "decision": "rejected"},
+					Provider:        prov.Name(),
+					Model:           model,
+					ModelMetadata:   resolveProviderMetadata(ctx, prov, model, providers.ModelMetadata{}),
+					SourceWorkspace: resolveWorkspace("", evolveDir),
+					CreatedAt:       now,
+				}
+				if err := core.WriteMeta(evolveDir, meta); err != nil {
+					return err
+				}
+				trace, err := core.OpenTrace(filepath.Join(evolveDir, "trace.jsonl"))
+				if err != nil {
+					return err
+				}
+				if err := appendTraceEvent(trace, evolveID, core.EventPolicyEvolve, core.PolicyEvolvePayload{
+					EvolveID:       evolveID,
+					Decision:       "rejected",
+					Rationale:      mutation.Rationale,
+					CandidatePath:  candidatePath,
+					SourceTraceID:  traceID,
+					RejectedReason: mutation.RejectedReason,
+				}); err != nil {
+					_ = trace.Close()
+					return err
+				}
+				if err := appendTraceEvent(trace, evolveID, core.EventRunEnd, core.RunEndPayload{Reason: "mutation_rejected"}); err != nil {
+					_ = trace.Close()
+					return err
+				}
+				if err := trace.Close(); err != nil {
+					return err
+				}
 				fmt.Printf("%s  Mutation rejected: %s\n", ui.Warn("reject"), mutation.RejectedReason)
 				fmt.Printf("%s  Candidate size: %d chars (current %d)\n", ui.Info("size"), len(mutation.CandidatePolicy), len(mutation.OriginalPolicy))
+				fmt.Printf("%s  Rejection report: %s\n", ui.Info("report"), filepath.Join(evolveDir, "mutation_rejection.json"))
 				return nil
 			}
 			if mutation.MutatedPolicy == mutation.OriginalPolicy {
