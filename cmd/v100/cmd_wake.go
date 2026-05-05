@@ -55,6 +55,7 @@ func wakeCmd(cfgPath *string) *cobra.Command {
 		wakeRunCmd(cfgPath),
 		wakeStatusCmd(cfgPath),
 		wakeStopCmd(cfgPath),
+		wakeTaskCmd(cfgPath),
 	)
 
 	return cmd
@@ -395,6 +396,60 @@ func wakeStopCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func wakeTaskCmd(cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "task <name>",
+		Short: "Run a named wake task manually (one-shot)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskName := args[0]
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			var task *config.WakeTask
+			for i := range cfg.Wake.Tasks {
+				if cfg.Wake.Tasks[i].Name == taskName {
+					task = &cfg.Wake.Tasks[i]
+					break
+				}
+			}
+			if task == nil {
+				return fmt.Errorf("task %q not found in config; available tasks: %s", taskName, wakeTaskNames(cfg))
+			}
+
+			workspace, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolve workspace: %w", err)
+			}
+			providerName := resolveWakeProvider(cfg, "")
+			prov, err := buildProvider(cfg, providerName)
+			if err != nil {
+				return fmt.Errorf("build provider: %w", err)
+			}
+
+			state := core.InitWakeState()
+			_, _, err = runWakeSynthesisTask(context.Background(), cfg, workspace, providerName, prov, task, state)
+			if err != nil {
+				return fmt.Errorf("task %q failed: %w", taskName, err)
+			}
+			fmt.Printf("✓ task %q completed\n", taskName)
+			return nil
+		},
+	}
+}
+
+func wakeTaskNames(cfg *config.Config) string {
+	names := make([]string, len(cfg.Wake.Tasks))
+	for i, t := range cfg.Wake.Tasks {
+		names[i] = t.Name
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
 }
 
 func ptrTime(t time.Time) *time.Time {
@@ -1121,4 +1176,191 @@ func dedupeWakeGoals(existing, incoming []core.GeneratedGoal) []core.GeneratedGo
 		out = append(out, goal)
 	}
 	return out
+}
+
+func runWakeSynthesisCycle(ctx context.Context, cfg *config.Config, cfgPath, workspace, providerName string, state *core.WakeState) (string, []core.GeneratedGoal, *wakeIssue, error) {
+	taskName := strings.TrimSpace(cfg.Wake.Task)
+	if taskName == "" && len(cfg.Wake.Tasks) > 0 {
+		taskName = cfg.Wake.Tasks[0].Name
+	}
+	if taskName == "" {
+		return "", nil, nil, fmt.Errorf("synthesis mode requires at least one wake task")
+	}
+	var task *config.WakeTask
+	for i := range cfg.Wake.Tasks {
+		if cfg.Wake.Tasks[i].Name == taskName {
+			task = &cfg.Wake.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		return "", nil, nil, fmt.Errorf("task %q not found in config", taskName)
+	}
+
+	prov, err := buildProvider(cfg, providerName)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("build provider %q: %w", providerName, err)
+	}
+
+	runID, goals, err := runWakeSynthesisTask(ctx, cfg, workspace, providerName, prov, task, state)
+	return runID, goals, nil, err
+}
+
+func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, providerName string, prov providers.Provider, task *config.WakeTask, state *core.WakeState) (string, []core.GeneratedGoal, error) {
+	model := resolveWakeModel(cfg, providerName)
+
+	runID := newRunID()
+	runDir := filepath.Join("runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return runID, nil, fmt.Errorf("create wake run dir: %w", err)
+	}
+
+	meta := core.RunMeta{
+		RunID:           runID,
+		Name:            "wake-synthesis-" + task.Name,
+		Provider:        prov.Name(),
+		Model:           model,
+		SourceWorkspace: workspace,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := core.WriteMeta(runDir, meta); err != nil {
+		return runID, nil, fmt.Errorf("write wake meta: %w", err)
+	}
+
+	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		return runID, nil, fmt.Errorf("open wake trace: %w", err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	var carryContext string
+
+	for i, step := range task.Steps {
+		reg := buildScopedToolRegistry(cfg, step.Tool)
+
+		pol := policy.Default()
+		loop := &core.Loop{
+			Run: &core.Run{
+				ID:        runID,
+				Dir:       workspace,
+				TraceFile: trace.Path(),
+				Budget: core.Budget{
+					MaxSteps:   10,
+					MaxTokens:  cfg.Wake.BudgetTokens / len(task.Steps),
+					MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps)),
+				},
+			},
+			Provider:      prov,
+			Tools:         reg,
+			Policy:        pol,
+			Trace:         trace,
+			Budget:        core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: cfg.Wake.BudgetTokens / len(task.Steps), MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps))}),
+			ConfirmFn:     func(_, _ string) bool { return false },
+			Mapper:        core.NewPathMapper(workspace, workspace),
+			NetworkTier:   "open",
+			ModelMetadata: providersModelMetadata(ctx, prov, model),
+		}
+
+		stepPrompt := buildStepPrompt(task, i, step, carryContext)
+
+		if err := loop.Step(ctx, stepPrompt); err != nil {
+			_ = loop.EmitRunError("wake-synthesis", err.Error())
+			return runID, nil, fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
+		}
+
+		carryContext = lastAssistantMessage(loop.Messages)
+	}
+
+	if carryContext != "" {
+		output := carryContext
+		if idx := strings.Index(strings.ToUpper(output), "SYNTHESIS:"); idx >= 0 {
+			output = strings.TrimSpace(output[idx+len("SYNTHESIS:"):])
+		}
+		outputPath := filepath.Join(runDir, "synthesis.txt")
+		if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "warn: failed to write synthesis output: %v\n", err)
+		}
+	}
+
+
+	_ = core.WriteMeta(runDir, meta)
+	return runID, nil, nil
+}
+
+func buildScopedToolRegistry(cfg *config.Config, toolName string) *tools.Registry {
+	if toolName == "" {
+		return tools.NewRegistry(nil)
+	}
+
+	reg := tools.NewRegistry([]string{toolName})
+	reg.Register(tools.FSRead())
+	reg.Register(tools.FSWrite())
+	reg.Register(tools.FSList())
+	reg.Register(tools.FSMkdir())
+	reg.Register(tools.FSRenderImage())
+	reg.Register(tools.Sh())
+	reg.Register(tools.CurlFetch())
+	reg.Register(tools.WebExtract())
+	reg.Register(tools.WebSearch())
+	reg.Register(tools.NewsFetch())
+	reg.Register(tools.Wiki())
+	reg.Register(tools.ProjectSearch())
+	reg.Register(tools.ATProtoFeed(cfg))
+	reg.Register(tools.ATProtoNotifications(cfg))
+	reg.Register(tools.ATProtoPost(cfg))
+	reg.Register(tools.ATProtoResolve(cfg))
+	reg.Register(tools.ATProtoGetFollows(cfg))
+	reg.Register(tools.ATProtoGetFollowers(cfg))
+	reg.Register(tools.ATProtoGetProfile(cfg))
+	reg.Register(tools.ATProtoGraphExplorer(cfg))
+	reg.Register(tools.ATProtoVibeCheck(cfg))
+	reg.Register(tools.ATProtoDailyDigest(cfg))
+	reg.Register(tools.ATProtoIndex(cfg))
+	reg.Register(tools.ATProtoRecall(cfg))
+	reg.Register(tools.ATProtoSynthPost(cfg))
+	return reg
+}
+
+func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskStep, carryContext string) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
+	fmt.Fprintf(&b, "%s\n\n", step.Prompt)
+
+	if step.Tool != "" {
+		fmt.Fprintf(&b, "Call the %s tool now.\n", step.Tool)
+	}
+
+	if carryContext != "" {
+		b.WriteString("\nContext from previous step:\n")
+		b.WriteString(carryContext)
+		b.WriteString("\n")
+	}
+
+	if stepIndex == len(task.Steps)-1 {
+		b.WriteString("\nEnd your response with:\nSYNTHESIS:\n<your final output>\n")
+	}
+
+	return b.String()
+}
+
+func resolveWakeModel(cfg *config.Config, providerName string) string {
+	if pc, ok := cfg.Providers[providerName]; ok {
+		return pc.DefaultModel
+	}
+	if defaults := config.DefaultConfig(); defaults != nil {
+		if pc, ok := defaults.Providers[providerName]; ok {
+			return pc.DefaultModel
+		}
+	}
+	return ""
+}
+
+func lastAssistantMessage(messages []providers.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			return strings.TrimSpace(messages[i].Content)
+		}
+	}
+	return ""
 }

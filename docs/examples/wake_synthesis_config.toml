@@ -1,0 +1,21 @@
+# Example wake synthesis task configuration
+# Place in ~/.config/v100/config.toml under [wake]
+
+[wake]
+mode = "synthesis"
+task = "daily_synth_post"
+interval_seconds = 86400  # 24h
+
+[[wake.tasks]]
+name = "daily_synth_post"
+description = "Gather feed corpus, synthesize into 2 poetic sentences, save for review"
+schedule = "24h"
+
+[[wake.tasks.steps]]
+name = "gather"
+tool = "atproto_synth_post"
+prompt = "Fetch the anonymized corpus from the Bluesky feed. Do NOT post yet."
+
+[[wake.tasks.steps]]
+name = "synthesize"
+prompt = """Read the corpus gathered in the previous step. Synthesize its essence into exactly 2 poetic, vibe-driven sentences. Output them after a SYNTHESIS: marker."""

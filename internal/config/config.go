@@ -57,7 +57,7 @@ type SandboxConfig struct {
 
 // WakeConfig holds configuration for the continuous wake daemon.
 type WakeConfig struct {
-	Mode            string  `toml:"mode"`             // goal_generator | issue_worker
+	Mode            string  `toml:"mode"`             // goal_generator | issue_worker | synthesis
 	Objective       string  `toml:"objective"`        // optional explicit daemon objective
 	Repo            string  `toml:"repo"`             // optional owner/repo for gh issue operations
 	IssueLimit      int     `toml:"issue_limit"`      // open issues to consider per cycle
@@ -68,6 +68,24 @@ type WakeConfig struct {
 	BudgetSteps     int     `toml:"budget_steps"`     // default 10
 	BudgetTokens    int     `toml:"budget_tokens"`    // default 50000
 	BudgetCostUSD   float64 `toml:"budget_cost_usd"`  // default 0
+	Task            string    `toml:"task"`              // task name for synthesis mode
+	Tasks           []WakeTask `toml:"tasks,omitempty"`
+}
+
+
+// WakeTask defines a named multi-step task for synthesis wake mode.
+type WakeTask struct {
+	Name        string         `toml:"name"`
+	Description string         `toml:"description"`
+	Schedule    string         `toml:"schedule"` // e.g. "24h"
+	Steps       []WakeTaskStep `toml:"steps"`
+}
+
+// WakeTaskStep is a single step within a wake task.
+type WakeTaskStep struct {
+	Name   string `toml:"name"`
+	Tool   string `toml:"tool,omitempty"`
+	Prompt string `toml:"prompt"`
 }
 
 // ProviderConfig holds per-provider settings.
@@ -203,9 +221,9 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_synth_post",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_synth_post"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -451,6 +469,8 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	ensureString(&cfg.Tools.Enabled, "atproto_index")
 	ensureString(&cfg.Tools.Enabled, "atproto_recall")
+	ensureString(&cfg.Tools.Enabled, "atproto_synth_post")
+	ensureString(&cfg.Tools.Dangerous, "atproto_synth_post")
 	ensureString(&cfg.Tools.Enabled, "web_search")
 	ensureString(&cfg.Tools.Enabled, "fs_render_image")
 	ensureString(&cfg.Tools.Enabled, "fingerprint")
