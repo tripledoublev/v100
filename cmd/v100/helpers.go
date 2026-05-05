@@ -470,7 +470,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoDailyDigest(cfg))
 	reg.Register(tools.ATProtoIndex(cfg))
 	reg.Register(tools.ATProtoRecall(cfg))
-	reg.Register(tools.ATProtoSynthPost(cfg))
+	reg.Register(tools.ATProtoAnonSynth(cfg))
 	return reg
 }
 

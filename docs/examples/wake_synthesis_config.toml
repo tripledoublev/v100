@@ -13,7 +13,7 @@ schedule = "24h"
 
 [[wake.tasks.steps]]
 name = "gather"
-tool = "atproto_synth_post"
+tool = "atproto_anon_synth"
 prompt = "Fetch the anonymized corpus from the Bluesky feed. Do NOT post yet."
 
 [[wake.tasks.steps]]

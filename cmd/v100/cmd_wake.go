@@ -1178,34 +1178,6 @@ func dedupeWakeGoals(existing, incoming []core.GeneratedGoal) []core.GeneratedGo
 	return out
 }
 
-func runWakeSynthesisCycle(ctx context.Context, cfg *config.Config, cfgPath, workspace, providerName string, state *core.WakeState) (string, []core.GeneratedGoal, *wakeIssue, error) {
-	taskName := strings.TrimSpace(cfg.Wake.Task)
-	if taskName == "" && len(cfg.Wake.Tasks) > 0 {
-		taskName = cfg.Wake.Tasks[0].Name
-	}
-	if taskName == "" {
-		return "", nil, nil, fmt.Errorf("synthesis mode requires at least one wake task")
-	}
-	var task *config.WakeTask
-	for i := range cfg.Wake.Tasks {
-		if cfg.Wake.Tasks[i].Name == taskName {
-			task = &cfg.Wake.Tasks[i]
-			break
-		}
-	}
-	if task == nil {
-		return "", nil, nil, fmt.Errorf("task %q not found in config", taskName)
-	}
-
-	prov, err := buildProvider(cfg, providerName)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("build provider %q: %w", providerName, err)
-	}
-
-	runID, goals, err := runWakeSynthesisTask(ctx, cfg, workspace, providerName, prov, task, state)
-	return runID, goals, nil, err
-}
-
 func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, providerName string, prov providers.Provider, task *config.WakeTask, state *core.WakeState) (string, []core.GeneratedGoal, error) {
 	model := resolveWakeModel(cfg, providerName)
 
@@ -1317,7 +1289,7 @@ func buildScopedToolRegistry(cfg *config.Config, toolName string) *tools.Registr
 	reg.Register(tools.ATProtoDailyDigest(cfg))
 	reg.Register(tools.ATProtoIndex(cfg))
 	reg.Register(tools.ATProtoRecall(cfg))
-	reg.Register(tools.ATProtoSynthPost(cfg))
+	reg.Register(tools.ATProtoAnonSynth(cfg))
 	return reg
 }
 

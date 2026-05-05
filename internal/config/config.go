@@ -221,9 +221,9 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_synth_post",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_synth_post"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -469,8 +469,7 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	ensureString(&cfg.Tools.Enabled, "atproto_index")
 	ensureString(&cfg.Tools.Enabled, "atproto_recall")
-	ensureString(&cfg.Tools.Enabled, "atproto_synth_post")
-	ensureString(&cfg.Tools.Dangerous, "atproto_synth_post")
+	ensureString(&cfg.Tools.Enabled, "atproto_anon_synth")
 	ensureString(&cfg.Tools.Enabled, "web_search")
 	ensureString(&cfg.Tools.Enabled, "fs_render_image")
 	ensureString(&cfg.Tools.Enabled, "fingerprint")

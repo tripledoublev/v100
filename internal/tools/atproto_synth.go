@@ -13,26 +13,24 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// atproto_synth_post — gather anonymized feed corpus for synthesis + alt posting
+// atproto_anon_synth — gather and anonymize recent feed corpus
 // ---------------------------------------------------------------------------
 
-type atprotoSynthPostTool struct{ cfg *config.Config }
+type atrotoAnonSynthTool struct{ cfg *config.Config }
 
-// ATProtoSynthPost returns the atproto_synth_post tool.
-func ATProtoSynthPost(cfg *config.Config) Tool { return &atprotoSynthPostTool{cfg: cfg} }
+// ATProtoAnonSynth returns the atproto_anon_synth tool.
+func ATProtoAnonSynth(cfg *config.Config) Tool { return &atrotoAnonSynthTool{cfg: cfg} }
 
-func (t *atprotoSynthPostTool) Name() string { return "atproto_synth_post" }
-func (t *atprotoSynthPostTool) Description() string {
-	return "Gather recent Bluesky feed activity into an anonymized text corpus. " +
-		"All handles, @mentions, and URLs are stripped — content only. " +
-		"Read the corpus, synthesize its essence into exactly 2 poetic, vibe-driven sentences, " +
-		"then post the synthesis to the alt account using atproto_post with account=\"alt\". " +
-		"Trigger this when asked to 'synalt', 'synth post', or 'post a synthesis to alt'."
+func (t *atrotoAnonSynthTool) Name() string { return "atproto_anon_synth" }
+func (t *atrotoAnonSynthTool) Description() string {
+	return "Fetch recent Bluesky feed posts and build an anonymized text corpus. " +
+		"Strips all handles, @mentions, and URLs — returns content only. " +
+		"Use this to gather feed data for analysis or synthesis by a subsequent step."
 }
-func (t *atprotoSynthPostTool) DangerLevel() DangerLevel { return Safe }
-func (t *atprotoSynthPostTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
+func (t *atrotoAnonSynthTool) DangerLevel() DangerLevel { return Safe }
+func (t *atrotoAnonSynthTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
 
-func (t *atprotoSynthPostTool) InputSchema() json.RawMessage {
+func (t *atrotoAnonSynthTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -42,7 +40,7 @@ func (t *atprotoSynthPostTool) InputSchema() json.RawMessage {
 	}`)
 }
 
-func (t *atprotoSynthPostTool) OutputSchema() json.RawMessage {
+func (t *atrotoAnonSynthTool) OutputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -67,7 +65,7 @@ func anonymize(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func (t *atprotoSynthPostTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+func (t *atrotoAnonSynthTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Limit int `json:"limit"`
 		Hours int `json:"hours"`
