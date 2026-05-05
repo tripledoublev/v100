@@ -51,7 +51,7 @@ If an agent does something surprising, you shouldn't have to guess why.
 Prebuilt releases are published on GitHub. Alternatively, build from source:
 
 ```bash
-./build
+./scripts/build.sh
 ```
 
 That rebuilds `./v100` and updates the shell `v100` link. The underlying Go command is:

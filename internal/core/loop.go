@@ -62,11 +62,12 @@ type Loop struct {
 	lastToolName   string
 	lastToolArgs   string
 
-	memoryStepID       string
-	memoryStepMessage  string
-	memoryStepEligible bool
-	memoryStepConsumed bool
-	pendingUserImages  []providers.ImageAttachment
+	memoryStepID           string
+	memoryStepMessage      string
+	memoryStepEligible     bool
+	memoryStepConsumed     bool
+	pendingUserImages      []providers.ImageAttachment
+	bulkOnlyCompressStepID string
 }
 
 const (
@@ -1030,6 +1031,9 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	failedCount := 0
 	cp := l.compressProvider()
 	targetedLimit := targetedCompressionLimit(cp)
+	if !force && targetedLimit == 0 && l.bulkOnlyCompressStepID == stepID {
+		return nil
+	}
 
 	if targetedLimit > 0 {
 		for i, c := range candidates {
@@ -1138,6 +1142,9 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 		Content: "[CONTEXT SUMMARY — earlier conversation compressed]\n\n" + resp.AssistantText,
 	}
 	l.Messages = append([]providers.Message{summary}, l.Messages[cutoff:]...)
+	if targetedLimit == 0 {
+		l.bulkOnlyCompressStepID = stepID
+	}
 
 	tokensAfter := estimateTokens(l.previewMessagesForStep(stepID))
 	_, _ = l.emit(EventCompress, stepID, CompressPayload{
