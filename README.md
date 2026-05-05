@@ -34,7 +34,7 @@ Tools are a first-class part of the runtime. The model interacts with the world 
 ### 4. Memory & External Context
 v100 treats memory as runtime infrastructure, not just prompt stuffing:
 - **Durable Blackboard**: A shared workspace for agents to read and write ongoing findings.
-- **ATProto Integration**: Deep Bluesky integration (`atproto_index`, `atproto_recall`, `atproto_vibe_check`). It indexes social feeds and profiles into vector embeddings for semantic RAG, providing the agent with real-time external context.
+- **ATProto Integration**: Deep Bluesky integration (`atproto_index`, `atproto_recall`, `atproto_vibe_check`, `atproto_daily_digest`, `atproto_graph_explorer`). It indexes social feeds and profiles into vector embeddings for semantic RAG, summarizes feed activity, and explores follow graphs for real-time external context.
 
 ### 5. Observability & Trace Replay
 If an agent does something surprising, you shouldn't have to guess why.
