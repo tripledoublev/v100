@@ -14,8 +14,8 @@ type fakeProvider struct {
 	reply string
 }
 
-func (f *fakeProvider) Name() string                            { return "fake" }
-func (f *fakeProvider) Capabilities() providers.Capabilities    { return providers.Capabilities{} }
+func (f *fakeProvider) Name() string                         { return "fake" }
+func (f *fakeProvider) Capabilities() providers.Capabilities { return providers.Capabilities{} }
 func (f *fakeProvider) Metadata(ctx context.Context, m string) (providers.ModelMetadata, error) {
 	return providers.ModelMetadata{}, nil
 }
@@ -100,6 +100,101 @@ func TestGenerateAdversarialPrompts_FillsScorerDefault(t *testing.T) {
 	}
 }
 
+func TestGenerateSchemaCandidatePromptsFromToolSchema(t *testing.T) {
+	cases, err := GenerateSchemaCandidatePrompts(ToolTarget{
+		Name:        "fs_read",
+		Description: "Read a file from the workspace",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"path": {"type": "string"},
+				"limit": {"type": "integer"}
+			},
+			"required": ["path"]
+		}`),
+	}, 5)
+	if err != nil {
+		t.Fatalf("GenerateSchemaCandidatePrompts() error = %v", err)
+	}
+	if len(cases) != 5 {
+		t.Fatalf("len(cases) = %d, want 5", len(cases))
+	}
+	for _, wantCategory := range []string{"happy_path", "edge", "adversarial", "safety"} {
+		if !hasBootstrapCategory(cases, wantCategory) {
+			t.Fatalf("missing category %q in %#v", wantCategory, cases)
+		}
+	}
+	if !strings.Contains(cases[0].Message, "path") {
+		t.Fatalf("first schema-derived case should mention required field path: %#v", cases[0])
+	}
+}
+
+func TestGenerateSchemaCandidatePromptsRequiresToolName(t *testing.T) {
+	_, err := GenerateSchemaCandidatePrompts(ToolTarget{}, 1)
+	if err == nil {
+		t.Fatal("expected missing tool name error")
+	}
+}
+
+func TestGenerateSchemaCandidatePromptsAddsFamilyPerturbations(t *testing.T) {
+	cases, err := GenerateSchemaCandidatePrompts(ToolTarget{
+		Name:        "fs_read",
+		Description: "Read a file",
+		InputSchema: json.RawMessage(`{"properties":{"path":{"type":"string"}},"required":["path"]}`),
+	}, 10)
+	if err != nil {
+		t.Fatalf("GenerateSchemaCandidatePrompts() error = %v", err)
+	}
+	if !hasBootstrapMessageFragment(cases, "path traversal") {
+		t.Fatalf("expected filesystem path traversal perturbation in %#v", cases)
+	}
+	if !hasBootstrapMessageFragment(cases, "Required schema fields: path") {
+		t.Fatalf("expected perturbation to include required schema fields in %#v", cases)
+	}
+
+	webCases, err := GenerateSchemaCandidatePrompts(ToolTarget{Name: "web_extract"}, 10)
+	if err != nil {
+		t.Fatalf("GenerateSchemaCandidatePrompts(web_extract) error = %v", err)
+	}
+	if !hasBootstrapMessageFragment(webCases, "untrusted data") {
+		t.Fatalf("expected web prompt-injection perturbation in %#v", webCases)
+	}
+}
+
+func TestGenerateSchemaCandidatePromptsLeavesUnknownFamilyGeneric(t *testing.T) {
+	cases, err := GenerateSchemaCandidatePrompts(ToolTarget{Name: "custom_tool"}, 10)
+	if err != nil {
+		t.Fatalf("GenerateSchemaCandidatePrompts() error = %v", err)
+	}
+	if hasBootstrapMessageFragment(cases, "path traversal") || hasBootstrapMessageFragment(cases, "untrusted data") {
+		t.Fatalf("unexpected family-specific perturbation for unknown tool: %#v", cases)
+	}
+}
+
+func TestVerifyBootstrapCasesRejectsMalformedCases(t *testing.T) {
+	report := VerifyBootstrapCases([]AdversarialCase{
+		{Message: "say hi", Expected: "hi", Scorer: "contains"},
+		{Message: "", Expected: "x", Scorer: "contains"},
+		{Message: "bad scorer", Expected: "x", Scorer: "unknown"},
+		{Message: "empty expected", Expected: "", Scorer: "contains"},
+	})
+	if report.Accepted != 1 || report.Rejected != 3 {
+		t.Fatalf("verification report = %+v, want 1 accepted and 3 rejected", report)
+	}
+	if len(report.Reasons) != 3 {
+		t.Fatalf("reasons = %#v, want 3 entries", report.Reasons)
+	}
+}
+
+func TestVerifyBootstrapCasesAcceptsScriptScorerWithCommand(t *testing.T) {
+	report := VerifyBootstrapCases([]AdversarialCase{
+		{Message: "write file", Expected: "ok", Scorer: "script:test -f output.txt"},
+	})
+	if report.Accepted != 1 || report.Rejected != 0 {
+		t.Fatalf("verification report = %+v, want accepted script scorer", report)
+	}
+}
+
 func TestRenderBenchTOML_Standalone(t *testing.T) {
 	cases := []AdversarialCase{
 		{Message: "hello", Expected: "hi", Scorer: "contains", Category: "happy_path"},
@@ -133,4 +228,22 @@ func TestRenderBenchTOML_AppendMode(t *testing.T) {
 	if !strings.Contains(out, "Adversarial cases appended") {
 		t.Error("missing append banner")
 	}
+}
+
+func hasBootstrapCategory(cases []AdversarialCase, category string) bool {
+	for _, c := range cases {
+		if c.Category == category {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBootstrapMessageFragment(cases []AdversarialCase, fragment string) bool {
+	for _, c := range cases {
+		if strings.Contains(c.Message, fragment) {
+			return true
+		}
+	}
+	return false
 }

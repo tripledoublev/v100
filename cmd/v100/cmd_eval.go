@@ -12,10 +12,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/eval"
 	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/tools"
 	"github.com/tripledoublev/v100/internal/ui"
 )
 
@@ -275,10 +277,12 @@ func benchBootstrapCmd(cfgPath *string) *cobra.Command {
 	var toolName string
 	var count int
 	var model string
+	var fromTools bool
+	var verify bool
 
 	cmd := &cobra.Command{
 		Use:   "bootstrap <name>",
-		Short: "Generate a bench.toml scaffold (use --tool for LLM-generated adversarial cases)",
+		Short: "Generate a bench.toml scaffold",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -314,9 +318,46 @@ expected = "TODO: describe expected output"
 scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, model_graded
 `, name, name, provider, solver)
 
+			// --from-tools mode: replace the placeholder [[prompts]] block with
+			// deterministic schema-derived cases for one or more registered tools.
+			if fromTools {
+				cfg, err := loadConfig(*cfgPath)
+				if err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+				reg := buildToolRegistry(cfg)
+				targets := reg.EnabledTools()
+				if toolName != "" {
+					tool, ok := reg.Lookup(toolName)
+					if !ok {
+						return fmt.Errorf("tool %q not found in registry", toolName)
+					}
+					targets = []tools.Tool{tool}
+				}
+				if len(targets) == 0 {
+					return fmt.Errorf("no enabled tools available for schema-derived bootstrap")
+				}
+				var cases []eval.AdversarialCase
+				for _, tool := range targets {
+					generated, err := eval.GenerateSchemaCandidatePrompts(eval.ToolTarget{
+						Name:        tool.Name(),
+						Description: tool.Description(),
+						InputSchema: tool.InputSchema(),
+					}, count)
+					if err != nil {
+						return fmt.Errorf("generate schema candidate prompts for %s: %w", tool.Name(), err)
+					}
+					cases = append(cases, generated...)
+				}
+				if idx := strings.Index(scaffold, "# Define tasks and evaluation criteria"); idx >= 0 {
+					scaffold = scaffold[:idx]
+				}
+				scaffold = eval.RenderBenchTOML(name, provider, solver, cases, scaffold)
+			}
+
 			// --tool mode: replace the placeholder [[prompts]] block with
 			// LLM-generated adversarial cases for that tool.
-			if toolName != "" {
+			if toolName != "" && !fromTools {
 				cfg, err := loadConfig(*cfgPath)
 				if err != nil {
 					return fmt.Errorf("load config: %w", err)
@@ -359,9 +400,22 @@ scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, mo
 			}
 
 			// Verify it parses
-			if _, err := core.LoadBenchConfig(filename); err != nil {
+			bc, err := core.LoadBenchConfig(filename)
+			if err != nil {
 				_ = os.Remove(filename)
 				return fmt.Errorf("generated TOML is invalid: %w", err)
+			}
+			if verify {
+				cfg, err := loadConfig(*cfgPath)
+				if err != nil {
+					_ = os.Remove(filename)
+					return fmt.Errorf("load config: %w", err)
+				}
+				if err := verifyBenchBootstrap(cmd.Context(), cfg, bc); err != nil {
+					_ = os.Remove(filename)
+					return err
+				}
+				fmt.Printf("%s Verified generated bench tasks in current execution environment\n", ui.OK("✓"))
 			}
 
 			fmt.Printf("%s Created %s\n", ui.OK("✓"), filename)
@@ -375,8 +429,54 @@ scorer   = "contains"  # Options: exact_match, contains, regex, script:<cmd>, mo
 	cmd.Flags().StringVar(&toolName, "tool", "", "if set, generate adversarial cases for this tool via the configured provider")
 	cmd.Flags().IntVar(&count, "count", 20, "number of adversarial cases to generate (only with --tool)")
 	cmd.Flags().StringVar(&model, "model", "", "model override for generation (only with --tool)")
+	cmd.Flags().BoolVar(&fromTools, "from-tools", false, "generate deterministic benchmark cases from registered tool schemas")
+	cmd.Flags().BoolVar(&verify, "verify", false, "verify generated tasks and current execution environment before writing the suite")
 
 	return cmd
+}
+
+func verifyBenchBootstrap(ctx context.Context, cfg *config.Config, bc *core.BenchConfig) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cases := make([]eval.AdversarialCase, 0, len(bc.Prompts))
+	for _, prompt := range bc.Prompts {
+		cases = append(cases, eval.AdversarialCase{
+			Message:  prompt.Message,
+			Expected: prompt.Expected,
+			Scorer:   prompt.Scorer,
+		})
+	}
+	report := eval.VerifyBootstrapCases(cases)
+	if report.Rejected > 0 {
+		return fmt.Errorf("generated bench task verification failed: %s", strings.Join(report.Reasons, "; "))
+	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	session, _, _, err := buildSandboxSession(cfg, "bench-bootstrap-verify", ".", "runs")
+	if err != nil {
+		return fmt.Errorf("bootstrap sandbox verification: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res, err := session.Run(ctx, executor.RunRequest{
+		Command: "sh",
+		Args:    []string{"-c", "printf v100-bootstrap-verify"},
+		Dir:     ".",
+	})
+	if err != nil {
+		return fmt.Errorf("bootstrap sandbox verification command: %w", err)
+	}
+	if res.Err != nil {
+		return fmt.Errorf("bootstrap sandbox verification command: %w", res.Err)
+	}
+	if res.ExitCode != 0 || strings.TrimSpace(res.Stdout) != "v100-bootstrap-verify" {
+		return fmt.Errorf("bootstrap sandbox verification command failed: exit=%d stdout=%q stderr=%q", res.ExitCode, res.Stdout, res.Stderr)
+	}
+	return nil
 }
 
 func defaultBenchBootstrapPath(name string) (string, error) {
@@ -471,7 +571,7 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) (st
 			reg := buildToolRegistry(cfg)
 			if err := validateToolRegistry(reg); err != nil {
 				_ = trace.Close()
-					return "", err
+				return "", err
 			}
 			pol := loadPolicy(cfg, "default")
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/providers"
 )
@@ -237,6 +239,103 @@ func TestBenchBootstrapForceOverwritesWithValidScaffold(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBenchBootstrapFromToolsGeneratesSchemaCases(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		cfgPath := ""
+		cmd := benchBootstrapCmd(&cfgPath)
+		if err := cmd.Flags().Set("from-tools", "true"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("tool", "fs_read"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("count", "2"); err != nil {
+			return err
+		}
+
+		if _, err := captureStdout(func() error {
+			return cmd.RunE(cmd, []string{"schema-demo"})
+		}); err != nil {
+			return err
+		}
+
+		if _, err := core.LoadBenchConfig("schema-demo.bench.toml"); err != nil {
+			t.Fatalf("expected generated schema bench to parse, got %v", err)
+		}
+		data, err := os.ReadFile("schema-demo.bench.toml")
+		if err != nil {
+			return err
+		}
+		text := string(data)
+		for _, want := range []string{"Use fs_read", "# category: happy_path", "# category: edge"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("schema-derived bench missing %q in:\n%s", want, text)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenchBootstrapVerifyRunsExecutionEnvironmentCheck(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		cfgPath := ""
+		cmd := benchBootstrapCmd(&cfgPath)
+		if err := cmd.Flags().Set("from-tools", "true"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("tool", "fs_read"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("count", "1"); err != nil {
+			return err
+		}
+		if err := cmd.Flags().Set("verify", "true"); err != nil {
+			return err
+		}
+
+		out, err := captureStdout(func() error {
+			return cmd.RunE(cmd, []string{"verified-demo"})
+		})
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(out, "Verified generated bench tasks") {
+			t.Fatalf("expected verification message in output, got %q", out)
+		}
+		if _, err := core.LoadBenchConfig("verified-demo.bench.toml"); err != nil {
+			t.Fatalf("expected verified bench to parse, got %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyBenchBootstrapRejectsMalformedGeneratedTask(t *testing.T) {
+	cfg := config.DefaultConfig()
+	err := verifyBenchBootstrap(context.Background(), cfg, &core.BenchConfig{
+		Name: "bad",
+		Variants: []core.BenchVariant{{
+			Name:     "default",
+			Provider: "fake",
+			Solver:   "react",
+		}},
+		Prompts: []core.BenchPrompt{{
+			Message:  "do a thing",
+			Expected: "",
+			Scorer:   "contains",
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected malformed generated task to be rejected")
+	}
+	if !strings.Contains(err.Error(), "empty expected") {
+		t.Fatalf("expected empty expected reason, got %v", err)
 	}
 }
 

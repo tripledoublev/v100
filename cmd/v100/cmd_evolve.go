@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -40,6 +41,7 @@ type evolutionReport struct {
 	Decision         string            `json:"decision"`
 	Rationale        string            `json:"rationale"`
 	CandidatePath    string            `json:"candidate_path"`
+	RejectedReason   string            `json:"rejected_reason,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
 }
 
@@ -57,6 +59,31 @@ type mutationRejectionReport struct {
 	MaxPromptGrowth     int       `json:"max_prompt_growth_chars"`
 	CandidatePolicyPath string    `json:"candidate_policy_path"`
 	CreatedAt           time.Time `json:"created_at"`
+}
+
+type mutationTestGateReport struct {
+	EvolveID            string    `json:"evolve_id"`
+	SourceTraceID       string    `json:"source_trace_id"`
+	Decision            string    `json:"decision"`
+	TestCommand         string    `json:"test_command"`
+	ExitCode            int       `json:"exit_code"`
+	Stdout              string    `json:"stdout,omitempty"`
+	Stderr              string    `json:"stderr,omitempty"`
+	RejectedReason      string    `json:"rejected_reason,omitempty"`
+	CandidatePolicyPath string    `json:"candidate_policy_path"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+type evolutionApplyReport struct {
+	TargetPath     string
+	BackupPath     string
+	CandidatePath  string
+	AppliedAt      time.Time
+	RolledBack     bool
+	RollbackReason string
+	TestCommand    string
+	TestExitCode   int
+	TestOutput     string
 }
 
 func newMutationRejectionReport(evolveID, traceID string, mutation eval.PolicyMutationResult, budgets eval.MutationBudgets, candidatePath string, createdAt time.Time) mutationRejectionReport {
@@ -122,6 +149,7 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 		traceID      string
 		evalType     string
 		rubric       string
+		testCommand  string
 		budgets      eval.MutationBudgets
 	)
 
@@ -307,6 +335,35 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 			}
 			fmt.Printf("%s  Candidate policy written to %s\n", ui.OK("saved"), candidatePath)
 
+			if strings.TrimSpace(testCommand) != "" {
+				testReport := runMutationTestGate(ctx, evolveID, traceID, testCommand, candidatePath, time.Now().UTC())
+				reportBytes, _ := json.MarshalIndent(testReport, "", "  ")
+				_ = os.WriteFile(filepath.Join(evolveDir, "mutation_test_gate.json"), reportBytes, 0o644)
+				if testReport.Decision == "rejected" {
+					reason = "mutation_test_gate_failed"
+					if evolveMeta.Tags == nil {
+						evolveMeta.Tags = map[string]string{}
+					}
+					evolveMeta.Tags["decision"] = "rejected"
+					evolveMeta.Tags["rejected_reason"] = testReport.RejectedReason
+					_ = core.WriteMeta(evolveDir, evolveMeta)
+					if err := appendTraceEvent(evolveTrace, evolveID, core.EventPolicyEvolve, core.PolicyEvolvePayload{
+						EvolveID:       evolveID,
+						Decision:       "rejected",
+						Rationale:      mutation.Rationale,
+						CandidatePath:  candidatePath,
+						SourceTraceID:  traceID,
+						RejectedReason: testReport.RejectedReason,
+					}); err != nil {
+						return err
+					}
+					fmt.Printf("%s  Mutation rejected by test gate: %s\n", ui.Warn("reject"), testReport.RejectedReason)
+					fmt.Printf("%s  Test report: %s\n", ui.Info("report"), filepath.Join(evolveDir, "mutation_test_gate.json"))
+					return nil
+				}
+				fmt.Printf("%s  Test gate passed: %s\n", ui.OK("test"), testCommand)
+			}
+
 			if evalType == "" {
 				evalType = "reflective"
 			}
@@ -330,19 +387,19 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 			// Compare
 			baselineAvg := avgScore(baselineResults)
 			candidateAvg := avgScore(candidateResults)
-			decision := "recommend_reject"
-			if candidateAvg > baselineAvg {
-				decision = "recommend_adopt"
-			}
+			decision, rejectedReason := benchmarkHoldDecision(baselineAvg, candidateAvg)
 
 			// Print comparison
 			fmt.Printf("\n%s\n", ui.Header("Evolution Results"))
 			fmt.Printf("  Baseline score:  %.2f (%d runs)\n", baselineAvg, len(baselineResults))
 			fmt.Printf("  Candidate score: %.2f (%d runs)\n", candidateAvg, len(candidateResults))
 			fmt.Printf("  Delta:           %+.2f\n", candidateAvg-baselineAvg)
-			if decision == "recommend_adopt" {
+			switch decision {
+			case "recommend_adopt":
 				fmt.Printf("  %s Recommend adoption\n", ui.OK("verdict"))
-			} else {
+			case "rejected":
+				fmt.Printf("  %s Rejected by benchmark hold: %s\n", ui.Fail("verdict"), rejectedReason)
+			default:
 				fmt.Printf("  %s Recommend rejection\n", ui.Fail("verdict"))
 			}
 			fmt.Printf("\n  Candidate: %s\n", candidatePath)
@@ -360,6 +417,7 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 				Decision:         decision,
 				Rationale:        mutation.Rationale,
 				CandidatePath:    candidatePath,
+				RejectedReason:   rejectedReason,
 				CreatedAt:        time.Now().UTC(),
 			}
 			reportBytes, _ := json.MarshalIndent(report, "", "  ")
@@ -369,6 +427,9 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 				evolveMeta.Tags = map[string]string{}
 			}
 			evolveMeta.Tags["decision"] = decision
+			if rejectedReason != "" {
+				evolveMeta.Tags["rejected_reason"] = rejectedReason
+			}
 			if err := core.WriteMeta(evolveDir, evolveMeta); err != nil {
 				return err
 			}
@@ -380,6 +441,7 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 				Rationale:      mutation.Rationale,
 				CandidatePath:  candidatePath,
 				SourceTraceID:  traceID,
+				RejectedReason: rejectedReason,
 			}); err != nil {
 				return err
 			}
@@ -394,8 +456,61 @@ func evolveOnceCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&traceID, "trace", "", "source run ID whose failures inform mutation (required)")
 	cmd.Flags().StringVar(&evalType, "eval", "reflective", "scorer type")
 	cmd.Flags().StringVar(&rubric, "rubric", "", "override rubric for all prompts")
+	cmd.Flags().StringVar(&testCommand, "test-command", "", "shell command that must pass before evaluating or accepting a mutated policy")
 	bindMutationBudgetFlags(cmd, &budgets)
 	return cmd
+}
+
+func benchmarkHoldDecision(baselineAvg, candidateAvg float64) (decision, rejectedReason string) {
+	if candidateAvg > baselineAvg {
+		return "recommend_adopt", ""
+	}
+	if candidateAvg < baselineAvg {
+		return "rejected", fmt.Sprintf("benchmark hold failed: candidate score %.2f below baseline %.2f", candidateAvg, baselineAvg)
+	}
+	return "recommend_reject", ""
+}
+
+func runMutationTestGate(ctx context.Context, evolveID, traceID, command, candidatePath string, createdAt time.Time) mutationTestGateReport {
+	report := mutationTestGateReport{
+		EvolveID:            evolveID,
+		SourceTraceID:       traceID,
+		Decision:            "passed",
+		TestCommand:         command,
+		CandidatePolicyPath: candidatePath,
+		CreatedAt:           createdAt,
+	}
+	if strings.TrimSpace(command) == "" {
+		return report
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Env = append(os.Environ(), "V100_CANDIDATE_POLICY="+candidatePath)
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	report.Stdout = stdout.String()
+	report.Stderr = stderr.String()
+	if err == nil {
+		return report
+	}
+	report.Decision = "rejected"
+	report.ExitCode = -1
+	report.RejectedReason = err.Error()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		report.ExitCode = exitErr.ExitCode()
+		report.RejectedReason = fmt.Sprintf("test command failed with exit code %d", report.ExitCode)
+	}
+	if ctx.Err() != nil {
+		report.RejectedReason = "test command timed out"
+	}
+	return report
 }
 
 // runBenchWithPolicy executes all prompts in a bench config under a given system policy,
@@ -625,11 +740,12 @@ func evolveAdoptCmd(cfgPath *string) *cobra.Command {
 			if err := json.Unmarshal(reportBytes, &report); err != nil {
 				return fmt.Errorf("parse evolution report: %w", err)
 			}
-
-			// Read candidate policy
-			candidateBytes, err := os.ReadFile(report.CandidatePath)
-			if err != nil {
-				return fmt.Errorf("read candidate policy: %w", err)
+			if report.Decision == "rejected" {
+				reason := strings.TrimSpace(report.RejectedReason)
+				if reason == "" {
+					reason = "evolution report decision is rejected"
+				}
+				return fmt.Errorf("refusing to adopt rejected candidate: %s", reason)
 			}
 
 			// Determine target path
@@ -637,7 +753,15 @@ func evolveAdoptCmd(cfgPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targetPath := resolveDefaultPolicyPath(cfg)
+
+			applyReport, err := applyEvolutionWithRollback(cfg, evolveID, report.CandidatePath, "")
+			if err != nil {
+				return err
+			}
+			candidateBytes, err := os.ReadFile(report.CandidatePath)
+			if err != nil {
+				return fmt.Errorf("read candidate policy: %w", err)
+			}
 
 			// Show diff summary
 			fmt.Printf("%s\n", ui.Header("Policy Adoption"))
@@ -645,22 +769,112 @@ func evolveAdoptCmd(cfgPath *string) *cobra.Command {
 			fmt.Printf("  Baseline score:  %.2f\n", report.BaselineScore)
 			fmt.Printf("  Candidate score: %.2f\n", report.CandidateScore)
 			fmt.Printf("  Decision:        %s\n", report.Decision)
-			fmt.Printf("  Target:          %s\n", targetPath)
+			fmt.Printf("  Target:          %s\n", applyReport.TargetPath)
 			fmt.Printf("  Candidate size:  %d chars\n\n", len(candidateBytes))
 
-			// Ensure target directory exists
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return err
-			}
-
-			if err := os.WriteFile(targetPath, candidateBytes, 0o644); err != nil {
-				return fmt.Errorf("write policy: %w", err)
-			}
-
-			fmt.Printf("%s  Policy adopted at %s\n", ui.OK("done"), targetPath)
+			fmt.Printf("%s  Policy adopted at %s\n", ui.OK("done"), applyReport.TargetPath)
 			return nil
 		},
 	}
+}
+
+func applyEvolutionWithRollback(cfg *config.Config, evolveID, candidatePath, testCommand string) (evolutionApplyReport, error) {
+	targetPath := resolveDefaultPolicyPath(cfg)
+	candidateBytes, err := os.ReadFile(candidatePath)
+	if err != nil {
+		return evolutionApplyReport{}, fmt.Errorf("read candidate policy: %w", err)
+	}
+	if strings.TrimSpace(string(candidateBytes)) == "" {
+		return evolutionApplyReport{}, fmt.Errorf("candidate policy is empty")
+	}
+
+	report := evolutionApplyReport{
+		TargetPath:    targetPath,
+		CandidatePath: candidatePath,
+		AppliedAt:     time.Now().UTC(),
+		TestCommand:   strings.TrimSpace(testCommand),
+	}
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return report, err
+	}
+
+	backupPath := targetPath + ".evolve-backup"
+	if current, err := os.ReadFile(targetPath); err == nil && len(current) > 0 {
+		if err := os.WriteFile(backupPath, current, 0o644); err != nil {
+			return report, fmt.Errorf("write policy backup: %w", err)
+		}
+		report.BackupPath = backupPath
+	}
+
+	if err := os.WriteFile(targetPath, candidateBytes, 0o644); err != nil {
+		if report.BackupPath != "" {
+			_ = restorePolicyBackup(targetPath, report.BackupPath)
+		}
+		return report, fmt.Errorf("write policy: %w", err)
+	}
+
+	if report.TestCommand != "" {
+		testReport := runEvolutionAdoptTest(context.Background(), testCommand, candidatePath)
+		report.TestExitCode = testReport.ExitCode
+		report.TestOutput = strings.TrimSpace(testReport.Stdout + "\n" + testReport.Stderr)
+		if testReport.ExitCode != 0 {
+			report.RolledBack = true
+			report.RollbackReason = testReport.RejectedReason
+			if rollbackErr := restorePolicyBackup(targetPath, report.BackupPath); rollbackErr != nil {
+				return report, fmt.Errorf("test gate failed: %s; rollback failed: %w", testReport.RejectedReason, rollbackErr)
+			}
+			return report, fmt.Errorf("test gate failed: %s", testReport.RejectedReason)
+		}
+	}
+
+	if report.BackupPath != "" {
+		_ = os.Remove(report.BackupPath)
+	}
+	return report, nil
+}
+
+func restorePolicyBackup(targetPath, backupPath string) error {
+	if backupPath == "" {
+		return os.Remove(targetPath)
+	}
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return err
+	}
+	return os.Remove(backupPath)
+}
+
+type evolutionAdoptTestReport struct {
+	ExitCode       int
+	Stdout         string
+	Stderr         string
+	RejectedReason string
+}
+
+func runEvolutionAdoptTest(ctx context.Context, testCommand, candidatePath string) evolutionAdoptTestReport {
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", testCommand)
+	cmd.Env = append(os.Environ(),
+		"V100_CANDIDATE_POLICY="+candidatePath,
+	)
+	out, err := cmd.CombinedOutput()
+	report := evolutionAdoptTestReport{Stdout: string(out)}
+	if err == nil {
+		return report
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		report.ExitCode = exitErr.ExitCode()
+		report.Stderr = string(out)
+		report.RejectedReason = fmt.Sprintf("test command failed with exit code %d", report.ExitCode)
+		return report
+	}
+	report.ExitCode = 1
+	report.Stderr = string(out)
+	report.RejectedReason = err.Error()
+	return report
 }
 
 // resolveDefaultPolicyPath returns the path where the default policy file lives.

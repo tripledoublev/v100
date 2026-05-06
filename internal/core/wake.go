@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -42,12 +43,25 @@ type WakeState struct {
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	BackoffUntil        *time.Time `json:"backoff_until,omitempty"`
 
-	QueuedGoals        []GeneratedGoal `json:"queued_goals,omitempty"`
-	CurrentIssueNumber int             `json:"current_issue_number,omitempty"`
-	CurrentIssueTitle  string          `json:"current_issue_title,omitempty"`
+	QueuedGoals        []GeneratedGoal    `json:"queued_goals,omitempty"`
+	GoalFeedback       []WakeGoalFeedback `json:"goal_feedback,omitempty"`
+	LastScanAt         *time.Time         `json:"last_scan_at,omitempty"`
+	LastScanCandidates int                `json:"last_scan_candidates,omitempty"`
+	CurrentIssueNumber int                `json:"current_issue_number,omitempty"`
+	CurrentIssueTitle  string             `json:"current_issue_title,omitempty"`
 
 	Provider string `json:"provider"`
 	Solver   string `json:"solver,omitempty"`
+}
+
+// WakeGoalFeedback records the outcome of attempting a generated wake goal.
+type WakeGoalFeedback struct {
+	GoalID     string    `json:"goal_id,omitempty"`
+	Goal       string    `json:"goal"`
+	RunID      string    `json:"run_id,omitempty"`
+	Outcome    string    `json:"outcome"` // "success" or "failure"
+	Reason     string    `json:"reason,omitempty"`
+	RecordedAt time.Time `json:"recorded_at"`
 }
 
 // DefaultWakeStatePath returns the default path for the wake state file.
@@ -78,6 +92,30 @@ func InitWakeState() *WakeState {
 		NextRunAt:           time.Now(),
 		ConsecutiveFailures: 0,
 		QueuedGoals:         []GeneratedGoal{},
+		GoalFeedback:        []WakeGoalFeedback{},
+	}
+}
+
+// RecordWakeGoalFeedback appends bounded curriculum feedback for a generated goal.
+func RecordWakeGoalFeedback(state *WakeState, goal GeneratedGoal, runID string, success bool, reason string, recordedAt time.Time) {
+	if state == nil || strings.TrimSpace(goal.Content) == "" {
+		return
+	}
+	outcome := "failure"
+	if success {
+		outcome = "success"
+	}
+	state.GoalFeedback = append(state.GoalFeedback, WakeGoalFeedback{
+		GoalID:     goal.ID,
+		Goal:       goal.Content,
+		RunID:      runID,
+		Outcome:    outcome,
+		Reason:     strings.TrimSpace(reason),
+		RecordedAt: recordedAt,
+	})
+	const maxWakeGoalFeedback = 50
+	if len(state.GoalFeedback) > maxWakeGoalFeedback {
+		state.GoalFeedback = state.GoalFeedback[len(state.GoalFeedback)-maxWakeGoalFeedback:]
 	}
 }
 

@@ -17,6 +17,8 @@ type GeneratedGoal struct {
 	Content   string    `json:"content"`
 	StepID    string    `json:"step_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	Score     int       `json:"score,omitempty"`
+	Reasons   []string  `json:"reasons,omitempty"`
 }
 
 // RunMeta holds metadata for a run, persisted as meta.json in the run directory.

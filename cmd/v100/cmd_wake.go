@@ -26,6 +26,7 @@ import (
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
+	"github.com/tripledoublev/v100/internal/ui"
 )
 
 var wakeExecCommand = defaultWakeExecCommand
@@ -38,6 +39,21 @@ type wakeIssue struct {
 	Labels []struct {
 		Name string `json:"name"`
 	} `json:"labels,omitempty"`
+}
+
+type wakeGoalRunPayload struct {
+	GoalID          string    `json:"goal_id,omitempty"`
+	Goal            string    `json:"goal"`
+	PromptPath      string    `json:"prompt_path"`
+	RunCommand      string    `json:"run_command"`
+	Provider        string    `json:"provider"`
+	Solver          string    `json:"solver"`
+	BudgetSteps     int       `json:"budget_steps,omitempty"`
+	BudgetTokens    int       `json:"budget_tokens,omitempty"`
+	MaxToolCalls    int       `json:"max_tool_calls_per_step,omitempty"`
+	EnabledTools    []string  `json:"enabled_tools,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	SourceWorkspace string    `json:"source_workspace,omitempty"`
 }
 
 func wakeCmd(cfgPath *string) *cobra.Command {
@@ -56,9 +72,288 @@ func wakeCmd(cfgPath *string) *cobra.Command {
 		wakeStatusCmd(cfgPath),
 		wakeStopCmd(cfgPath),
 		wakeTaskCmd(cfgPath),
+		wakeGoalsCmd(cfgPath),
+		wakeEvolveCmd(cfgPath),
 	)
 
 	return cmd
+}
+
+func wakeGoalsCmd(cfgPath *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "goals",
+		Short: "Review queued autonomous wake goals",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return wakeGoalsList()
+		},
+	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "list",
+			Short: "List queued wake goals",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return wakeGoalsList()
+			},
+		},
+		&cobra.Command{
+			Use:   "approve <id-or-index>",
+			Short: "Approve a queued goal by moving it to the front",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return updateWakeGoalQueue(args[0], func(state *core.WakeState, idx int) string {
+					goal := state.QueuedGoals[idx]
+					copy(state.QueuedGoals[1:idx+1], state.QueuedGoals[0:idx])
+					state.QueuedGoals[0] = goal
+					return fmt.Sprintf("approved wake goal %s", wakeGoalDisplayID(goal, 0))
+				})
+			},
+		},
+		&cobra.Command{
+			Use:   "reject <id-or-index>",
+			Short: "Reject and remove a queued goal",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return updateWakeGoalQueue(args[0], func(state *core.WakeState, idx int) string {
+					goal := state.QueuedGoals[idx]
+					state.QueuedGoals = append(state.QueuedGoals[:idx], state.QueuedGoals[idx+1:]...)
+					return fmt.Sprintf("rejected wake goal %s", wakeGoalDisplayID(goal, idx))
+				})
+			},
+		},
+		&cobra.Command{
+			Use:   "edit <id-or-index> <content>",
+			Short: "Edit a queued goal",
+			Args:  cobra.ExactArgs(2),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				content := strings.TrimSpace(args[1])
+				if content == "" {
+					return errors.New("edited goal content cannot be empty")
+				}
+				return updateWakeGoalQueue(args[0], func(state *core.WakeState, idx int) string {
+					state.QueuedGoals[idx].Content = content
+					state.QueuedGoals[idx] = core.ScoreGeneratedGoal(state.QueuedGoals[idx])
+					state.QueuedGoals = core.RankGeneratedGoals(state.QueuedGoals)
+					return "edited wake goal"
+				})
+			},
+		},
+		&cobra.Command{
+			Use:   "handoff <id-or-index>",
+			Short: "Create an executable run payload from a queued goal",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				cfg, err := loadConfig(*cfgPath)
+				if err != nil {
+					return err
+				}
+				runID, payload, err := createWakeGoalRunPayload(cfg, args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Printf("✓ created wake goal run payload %s\n", runID)
+				fmt.Printf("  prompt:  %s\n", payload.PromptPath)
+				fmt.Printf("  command: %s\n", payload.RunCommand)
+				return nil
+			},
+		},
+	)
+	return cmd
+}
+
+func wakeEvolveCmd(cfgPath *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "evolve",
+		Short: "Apply completed evolution runs under wake control",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "adopt <evolve_id>",
+		Short: "Adopt a completed evolution with rollback on failure",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			evolveID := args[0]
+			evolveDir, err := findRunDir(evolveID)
+			if err != nil {
+				return fmt.Errorf("find evolve run: %w", err)
+			}
+			reportPath := filepath.Join(evolveDir, "evolution.json")
+			reportBytes, err := os.ReadFile(reportPath)
+			if err != nil {
+				return fmt.Errorf("read evolution report: %w", err)
+			}
+			var report evolutionReport
+			if err := json.Unmarshal(reportBytes, &report); err != nil {
+				return fmt.Errorf("parse evolution report: %w", err)
+			}
+			if report.Decision == "rejected" {
+				reason := strings.TrimSpace(report.RejectedReason)
+				if reason == "" {
+					reason = "evolution report decision is rejected"
+				}
+				return fmt.Errorf("refusing to adopt rejected candidate: %s", reason)
+			}
+			cfg, err := loadConfig(*cfgPath)
+			if err != nil {
+				return err
+			}
+			applyReport, err := applyEvolutionWithRollback(cfg, evolveID, report.CandidatePath, "")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s  wake adopted %s -> %s\n", ui.OK("done"), evolveID, applyReport.TargetPath)
+			return nil
+		},
+	})
+	return cmd
+}
+
+func wakeGoalsList() error {
+	state, err := core.ReadWakeState(core.DefaultWakeStatePath())
+	if err != nil {
+		fmt.Println("wake goals  none")
+		return nil
+	}
+	if len(state.QueuedGoals) == 0 {
+		fmt.Println("wake goals  none")
+		return nil
+	}
+	for i, goal := range state.QueuedGoals {
+		fmt.Printf("%d. %s  score=%d  %s\n", i+1, wakeGoalDisplayID(goal, i), goal.Score, goal.Content)
+	}
+	return nil
+}
+
+func updateWakeGoalQueue(selector string, mutate func(*core.WakeState, int) string) error {
+	statePath := core.DefaultWakeStatePath()
+	state, err := core.ReadWakeState(statePath)
+	if err != nil {
+		return fmt.Errorf("read wake state: %w", err)
+	}
+	idx, err := findWakeGoalIndex(state.QueuedGoals, selector)
+	if err != nil {
+		return err
+	}
+	message := mutate(state, idx)
+	if err := core.WriteWakeState(statePath, state); err != nil {
+		return fmt.Errorf("write wake state: %w", err)
+	}
+	fmt.Printf("✓ %s\n", message)
+	return nil
+}
+
+func findWakeGoalIndex(goals []core.GeneratedGoal, selector string) (int, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return 0, errors.New("goal selector is required")
+	}
+	if n, err := strconv.Atoi(selector); err == nil {
+		idx := n - 1
+		if idx >= 0 && idx < len(goals) {
+			return idx, nil
+		}
+		return 0, fmt.Errorf("goal index %d out of range", n)
+	}
+	for i, goal := range goals {
+		if goal.ID == selector {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("wake goal %q not found", selector)
+}
+
+func wakeGoalDisplayID(goal core.GeneratedGoal, idx int) string {
+	if strings.TrimSpace(goal.ID) != "" {
+		return goal.ID
+	}
+	return fmt.Sprintf("#%d", idx+1)
+}
+
+func createWakeGoalRunPayload(cfg *config.Config, selector string) (string, wakeGoalRunPayload, error) {
+	state, err := core.ReadWakeState(core.DefaultWakeStatePath())
+	if err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("read wake state: %w", err)
+	}
+	idx, err := findWakeGoalIndex(state.QueuedGoals, selector)
+	if err != nil {
+		return "", wakeGoalRunPayload{}, err
+	}
+	goal := core.ScoreGeneratedGoal(state.QueuedGoals[idx])
+	workspace, err := os.Getwd()
+	if err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("resolve workspace: %w", err)
+	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	providerName := resolveWakeProvider(cfg, "")
+	solverName := strings.TrimSpace(cfg.Defaults.Solver)
+	if solverName == "" {
+		solverName = "react"
+	}
+	runID := newRunID()
+	runDir := filepath.Join("runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("create handoff run dir: %w", err)
+	}
+	prompt := buildWakeGoalRunPrompt(goal)
+	promptPath := filepath.Join(runDir, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte(prompt), 0o644); err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("write prompt: %w", err)
+	}
+	enabledTools := append([]string(nil), cfg.Tools.Enabled...)
+	sort.Strings(enabledTools)
+	command := fmt.Sprintf("v100 run --exit --solver %s --provider %s --prompt-file %s", shellQuoteArg(solverName), shellQuoteArg(providerName), shellQuoteArg(promptPath))
+	payload := wakeGoalRunPayload{
+		GoalID:          goal.ID,
+		Goal:            goal.Content,
+		PromptPath:      promptPath,
+		RunCommand:      command,
+		Provider:        providerName,
+		Solver:          solverName,
+		BudgetSteps:     cfg.Defaults.BudgetSteps,
+		BudgetTokens:    cfg.Defaults.BudgetTokens,
+		MaxToolCalls:    cfg.Defaults.MaxToolCallsPerStep,
+		EnabledTools:    enabledTools,
+		CreatedAt:       time.Now().UTC(),
+		SourceWorkspace: workspace,
+	}
+	payloadBytes, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("marshal wake payload: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "wake_payload.json"), payloadBytes, 0o644); err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("write wake payload: %w", err)
+	}
+	meta := core.RunMeta{
+		RunID:           runID,
+		Name:            "wake-goal-handoff",
+		Tags:            map[string]string{"type": "wake.goal_handoff", "goal_id": goal.ID},
+		Provider:        providerName,
+		Model:           resolveWakeModel(cfg, providerName),
+		SourceWorkspace: workspace,
+		CreatedAt:       payload.CreatedAt,
+		GeneratedGoals:  []core.GeneratedGoal{goal},
+	}
+	if err := core.WriteMeta(runDir, meta); err != nil {
+		return "", wakeGoalRunPayload{}, fmt.Errorf("write handoff meta: %w", err)
+	}
+	return runID, payload, nil
+}
+
+func buildWakeGoalRunPrompt(goal core.GeneratedGoal) string {
+	return fmt.Sprintf("Execute this approved autonomous wake goal:\n\n%s\n\nConstraints:\n- Treat this as the single primary objective for the run.\n- Inspect the workspace before editing.\n- Keep changes scoped to this goal.\n- Run relevant verification before finishing.\n", strings.TrimSpace(goal.Content))
+}
+
+func shellQuoteArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.ContainsAny(s, " \t\n'\"\\$`") {
+		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	}
+	return s
 }
 
 func wakeStartCmd(cfgPath *string) *cobra.Command {
@@ -221,6 +516,13 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 			defer signal.Stop(sigCh)
 
 			for {
+				if added, err := refreshWakeGoalQueueFromScan(state, "."); err == nil {
+					now = time.Now()
+					state.LastScanAt = &now
+					state.LastScanCandidates = added
+				} else {
+					fmt.Fprintf(os.Stderr, "warn: wake scan failed: %v\n", err)
+				}
 				var activeGoal *core.GeneratedGoal
 				if len(state.QueuedGoals) > 0 {
 					activeGoal = &state.QueuedGoals[0]
@@ -237,6 +539,9 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 					state.CurrentIssueTitle = ""
 				}
 				if cycleErr != nil {
+					if activeGoal != nil {
+						core.RecordWakeGoalFeedback(state, *activeGoal, runID, false, cycleErr.Error(), now)
+					}
 					state.ConsecutiveFailures++
 					delay := core.WakeCycleDelay(state.IntervalSeconds, cfg.Wake.MaxBackoffSecs, state.ConsecutiveFailures)
 					backoffUntil := now.Add(delay)
@@ -252,6 +557,9 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 						return fmt.Errorf("wake cycle failed %d times: %w", state.ConsecutiveFailures, cycleErr)
 					}
 				} else {
+					if activeGoal != nil {
+						core.RecordWakeGoalFeedback(state, *activeGoal, runID, true, "wake cycle completed", now)
+					}
 					state.ConsecutiveFailures = 0
 					state.BackoffUntil = nil
 					state.Status = core.WakeStatusRunning
@@ -259,7 +567,7 @@ func wakeRunCmd(cfgPath *string) *cobra.Command {
 						state.QueuedGoals = state.QueuedGoals[1:]
 					}
 					if len(goals) > 0 {
-						state.QueuedGoals = append(state.QueuedGoals, dedupeWakeGoals(state.QueuedGoals, goals)...)
+						state.QueuedGoals = core.RankGeneratedGoals(append(state.QueuedGoals, dedupeWakeGoals(state.QueuedGoals, goals)...))
 					}
 					state.NextRunAt = now.Add(interval)
 				}
@@ -345,6 +653,9 @@ func wakeStatusCmd(cfgPath *string) *cobra.Command {
 			if len(state.QueuedGoals) > 0 {
 				fmt.Printf("  queued:      %d\n", len(state.QueuedGoals))
 				fmt.Printf("  next goal:   %s\n", state.QueuedGoals[0].Content)
+			}
+			if state.LastScanAt != nil {
+				fmt.Printf("  last scan:   %s (%d new candidates)\n", state.LastScanAt.Format(time.DateTime), state.LastScanCandidates)
 			}
 			if state.CurrentIssueNumber > 0 {
 				fmt.Printf("  issue:       #%d %s\n", state.CurrentIssueNumber, state.CurrentIssueTitle)
@@ -731,6 +1042,30 @@ func defaultWakeExecCommand(ctx context.Context, stdin string, name string, args
 	return buf.String(), err
 }
 
+func refreshWakeGoalQueueFromScan(state *core.WakeState, workspace string) (int, error) {
+	if state == nil {
+		return 0, nil
+	}
+	candidates, err := core.ScanWorkspaceGoalCandidates(workspace)
+	if err != nil {
+		return 0, err
+	}
+	candidates = core.RankGoalCandidates(candidates)
+	now := time.Now().UTC()
+	incoming := make([]core.GeneratedGoal, 0, len(candidates))
+	for _, candidate := range candidates {
+		incoming = append(incoming, core.GeneratedGoal{
+			ID:        fmt.Sprintf("scan-goal-%x", randBytes(4)),
+			Content:   candidate.Content,
+			StepID:    "wake-scan",
+			CreatedAt: now,
+		})
+	}
+	before := len(state.QueuedGoals)
+	state.QueuedGoals = core.RankGeneratedGoals(append(state.QueuedGoals, dedupeWakeGoals(state.QueuedGoals, incoming)...))
+	return len(state.QueuedGoals) - before, nil
+}
+
 func selectWakeIssue(ctx context.Context, cfg *config.Config, state *core.WakeState) (*wakeIssue, error) {
 	if state != nil && state.CurrentIssueNumber > 0 {
 		issue, err := wakeIssueView(ctx, cfg, state.CurrentIssueNumber)
@@ -967,6 +1302,7 @@ func buildWakePrompt(workspace string, activeGoal *core.GeneratedGoal) (string, 
 	if err != nil {
 		return "", fmt.Errorf("scan workspace goal candidates: %w", err)
 	}
+	candidates = core.RankGoalCandidates(candidates)
 	candidateSection := formatWakeCandidateGoals(candidates)
 	if activeGoal != nil && strings.TrimSpace(activeGoal.Content) != "" {
 		return fmt.Sprintf(
@@ -1047,12 +1383,12 @@ func extractWakeGoals(messages []providers.Message) []core.GeneratedGoal {
 		if goal == "" || strings.EqualFold(goal, "No actionable wake goal.") {
 			return nil
 		}
-		return []core.GeneratedGoal{{
+		return core.RankGeneratedGoals([]core.GeneratedGoal{{
 			ID:        fmt.Sprintf("wake-goal-%x", randBytes(4)),
 			Content:   goal,
 			StepID:    "wake-cycle",
 			CreatedAt: time.Now().UTC(),
-		}}
+		}})
 	}
 	return nil
 }
@@ -1135,6 +1471,8 @@ func emitWakeGeneratedGoals(trace *core.TraceWriter, runID, stepID string, goals
 		payload := core.GeneratedGoalPayload{
 			Content: goal.Content,
 			StepID:  goal.StepID,
+			Score:   goal.Score,
+			Reasons: goal.Reasons,
 		}
 		b, err := json.Marshal(payload)
 		if err != nil {
@@ -1165,6 +1503,7 @@ func dedupeWakeGoals(existing, incoming []core.GeneratedGoal) []core.GeneratedGo
 	}
 	out := make([]core.GeneratedGoal, 0, len(incoming))
 	for _, goal := range incoming {
+		goal = core.ScoreGeneratedGoal(goal)
 		key := strings.ToLower(strings.TrimSpace(goal.Content))
 		if key == "" {
 			continue
@@ -1250,10 +1589,9 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 		}
 		outputPath := filepath.Join(runDir, "synthesis.txt")
 		if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
-				fmt.Fprintf(os.Stderr, "warn: failed to write synthesis output: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warn: failed to write synthesis output: %v\n", err)
 		}
 	}
-
 
 	_ = core.WriteMeta(runDir, meta)
 	return runID, nil, nil

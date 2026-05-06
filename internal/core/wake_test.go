@@ -29,8 +29,15 @@ func TestWakeStateRoundTrip(t *testing.T) {
 		NextRunAt:           now.Add(1 * time.Hour),
 		ConsecutiveFailures: 2,
 		QueuedGoals:         queuedGoals,
-		Provider:            "minimax",
-		Solver:              "react",
+		GoalFeedback: []core.WakeGoalFeedback{{
+			GoalID:     "goal-1",
+			Goal:       "Do task A",
+			RunID:      "run-1",
+			Outcome:    "success",
+			RecordedAt: now,
+		}},
+		Provider: "minimax",
+		Solver:   "react",
 	}
 
 	// Write
@@ -62,6 +69,33 @@ func TestWakeStateRoundTrip(t *testing.T) {
 	}
 	if len(read.QueuedGoals) != len(original.QueuedGoals) {
 		t.Errorf("queued goals len: got %d, want %d", len(read.QueuedGoals), len(original.QueuedGoals))
+	}
+	if len(read.GoalFeedback) != 1 || read.GoalFeedback[0].Outcome != "success" {
+		t.Errorf("goal feedback: got %+v, want one success entry", read.GoalFeedback)
+	}
+}
+
+func TestRecordWakeGoalFeedbackAppendsAndBoundsHistory(t *testing.T) {
+	state := core.InitWakeState()
+	now := time.Now().UTC()
+	goal := core.GeneratedGoal{ID: "goal-1", Content: "Fix wake queue ranking"}
+
+	core.RecordWakeGoalFeedback(state, goal, "run-1", true, "done", now)
+	if len(state.GoalFeedback) != 1 {
+		t.Fatalf("feedback len = %d, want 1", len(state.GoalFeedback))
+	}
+	if state.GoalFeedback[0].Outcome != "success" || state.GoalFeedback[0].Reason != "done" {
+		t.Fatalf("feedback = %+v", state.GoalFeedback[0])
+	}
+
+	for i := 0; i < 60; i++ {
+		core.RecordWakeGoalFeedback(state, goal, "run-overflow", false, "failed", now.Add(time.Duration(i)*time.Second))
+	}
+	if len(state.GoalFeedback) != 50 {
+		t.Fatalf("feedback len = %d, want bounded 50", len(state.GoalFeedback))
+	}
+	if state.GoalFeedback[0].RunID == "run-1" {
+		t.Fatal("oldest feedback entry should have been dropped")
 	}
 }
 

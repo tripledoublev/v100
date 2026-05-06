@@ -90,6 +90,8 @@ func (r *ImageRenderer) Render(data []byte, maxCells int, maxRows int) string {
 	switch r.backend {
 	case BackendKitty:
 		return r.renderKitty(data, pxW, pxH, maxCells, maxRows)
+	case BackendIcat:
+		return r.renderIcat(data, pxW, pxH, maxCells, maxRows)
 	case BackendIterm2:
 		return r.renderIterm2(data, pxW, pxH, maxCells, maxRows)
 	default:
@@ -136,11 +138,11 @@ func (r *ImageRenderer) detectBackend() TermBackend {
 	}
 
 	if isKitty {
-		// Try to verify kitty protocol support with a query
-		if r.probeKittyProtocol() {
-			return BackendKitty
+		if _, err := exec.LookPath("kitty"); err == nil {
+			r.logf("kitty detected → icat helper")
+			return BackendIcat
 		}
-		r.logf("kitty protocol probe failed → text-only")
+		r.logf("kitty detected but helper missing → text-only")
 		return BackendTextOnly
 	}
 
@@ -154,14 +156,6 @@ func (r *ImageRenderer) detectBackend() TermBackend {
 
 	r.logf("no image protocol detected → text-only")
 	return BackendTextOnly
-}
-
-// probeKittyProtocol sends a kitty graphics query to verify support.
-// We send a simple "is the protocol working?" query and check the response.
-func (r *ImageRenderer) probeKittyProtocol() bool {
-	// True protocol probing would require reading terminal responses.
-	// For now, if kitty env vars are set and we're not in tmux, trust it.
-	return true
 }
 
 // ── Kitty graphics protocol ──────────────────────────────────
@@ -197,6 +191,45 @@ func (r *ImageRenderer) renderKitty(data []byte, pxW, pxH, maxCells, maxRows int
 	}
 
 	return fmt.Sprintf("[🖼 image %dx%d rendered via kitty protocol]", pxW, pxH)
+}
+
+func (r *ImageRenderer) renderIcat(data []byte, pxW, pxH, maxCells, maxRows int) string {
+	tmp, err := os.CreateTemp("", "v100-image-*.png")
+	if err != nil {
+		r.logf("icat temp file failed: %v", err)
+		return r.renderText(pxW, pxH, len(data))
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		r.logf("icat temp write failed: %v", err)
+		return r.renderText(pxW, pxH, len(data))
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		r.logf("icat temp close failed: %v", err)
+		return r.renderText(pxW, pxH, len(data))
+	}
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	cells := maxCells
+	if cells <= 0 {
+		cells = 80
+	}
+	rows := maxRows
+	if rows <= 0 {
+		rows = 0
+	}
+	place := fmt.Sprintf("%dx%d@0x0", cells, rows)
+	cmd := exec.Command("kitty", "+kitten", "icat", "--transfer-mode=file", "--place="+place, tmpPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		r.logf("icat helper failed: %v", err)
+		return r.renderText(pxW, pxH, len(data))
+	}
+	return fmt.Sprintf("[🖼 image %dx%d rendered via kitty icat]", pxW, pxH)
 }
 
 // writeKittyChunked emits a kitty graphics command, splitting the base64 payload

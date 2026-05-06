@@ -104,6 +104,41 @@ func TestMutatePolicyRejectsOverBudgetGrowth(t *testing.T) {
 	}
 }
 
+func TestMutatePolicyRejectsDroppedSemanticAnchors(t *testing.T) {
+	policy := "Use tools carefully. Stay inside the workspace. Never reveal secrets."
+	candidate := "Be concise and helpful."
+	result, err := eval.MutatePolicy(context.Background(), stubProvider{text: "MUTATED POLICY: " + candidate + "\nRATIONALE: simplify"}, "", eval.MutationBudgets{MaxPromptChars: 1000, MaxPromptGrowthChars: 1000}, policy, failingEvents("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CandidatePolicy != candidate {
+		t.Fatalf("CandidatePolicy = %q, want %q", result.CandidatePolicy, candidate)
+	}
+	if result.MutatedPolicy != policy {
+		t.Fatalf("MutatedPolicy = %q, want original policy after rejection", result.MutatedPolicy)
+	}
+	for _, want := range []string{"semantic anchors", "tool", "workspace", "secret"} {
+		if !strings.Contains(result.RejectedReason, want) {
+			t.Fatalf("RejectedReason = %q, want %q", result.RejectedReason, want)
+		}
+	}
+}
+
+func TestMutatePolicyAcceptsPreservedSemanticAnchors(t *testing.T) {
+	policy := "Use tools carefully. Stay inside the workspace. Never reveal secrets."
+	candidate := "Use tools carefully and verify results. Stay inside the workspace. Never reveal secrets."
+	result, err := eval.MutatePolicy(context.Background(), stubProvider{text: "MUTATED POLICY: " + candidate + "\nRATIONALE: add verification"}, "", eval.MutationBudgets{MaxPromptChars: 1000, MaxPromptGrowthChars: 1000}, policy, failingEvents("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RejectedReason != "" {
+		t.Fatalf("unexpected rejection: %s", result.RejectedReason)
+	}
+	if result.MutatedPolicy != candidate {
+		t.Fatalf("MutatedPolicy = %q, want candidate", result.MutatedPolicy)
+	}
+}
+
 func TestPolicyMutationResultFields(t *testing.T) {
 	var r eval.PolicyMutationResult
 	r.OriginalPolicy = "original"

@@ -347,8 +347,10 @@ type AgentEndPayload struct {
 
 // GeneratedGoalPayload is the Payload for EventGeneratedGoal.
 type GeneratedGoalPayload struct {
-	Content string `json:"content"`
-	StepID  string `json:"step_id,omitempty"`
+	Content string   `json:"content"`
+	StepID  string   `json:"step_id,omitempty"`
+	Score   int      `json:"score,omitempty"`
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 // PolicyEvolvePayload is the Payload for EventPolicyEvolve.

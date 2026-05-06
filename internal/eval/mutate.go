@@ -98,6 +98,48 @@ func validateMutationBudgets(b MutationBudgets, sections []mutationSection) stri
 	return ""
 }
 
+func validateSemanticPreservation(section mutationSection) string {
+	originalTerms := semanticPreservationTerms(section.Original)
+	if len(originalTerms) == 0 {
+		return ""
+	}
+	candidate := strings.ToLower(section.Candidate)
+	var missing []string
+	for _, term := range originalTerms {
+		if !strings.Contains(candidate, term) {
+			missing = append(missing, term)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s drops required semantic anchors: %s", mutationSectionLabel(section), strings.Join(missing, ", "))
+}
+
+func semanticPreservationTerms(text string) []string {
+	lower := strings.ToLower(text)
+	terms := []string{
+		"tool",
+		"workspace",
+		"sandbox",
+		"confirm",
+		"verify",
+		"test",
+		"secret",
+		"credential",
+		"dangerous",
+		"safety",
+		"network",
+	}
+	out := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if strings.Contains(lower, term) {
+			out = append(out, term)
+		}
+	}
+	return out
+}
+
 func mutationBudgetLimits(b MutationBudgets, kind mutationSectionKind) (maxChars int, maxGrowth int) {
 	switch kind {
 	case mutationSectionToolDescription:
@@ -236,6 +278,17 @@ func MutatePrompt(ctx context.Context, prov providers.Provider, model string, bu
 		result.MutatedPrompt = originalPrompt
 		result.RejectedReason = reason
 	}
+	if result.RejectedReason == "" {
+		if reason := validateSemanticPreservation(mutationSection{
+			Kind:      mutationSectionPrompt,
+			Name:      "mutated prompt",
+			Original:  originalPrompt,
+			Candidate: mutated,
+		}); reason != "" {
+			result.MutatedPrompt = originalPrompt
+			result.RejectedReason = reason
+		}
+	}
 
 	return result, nil
 }
@@ -342,6 +395,17 @@ func MutatePolicy(ctx context.Context, prov providers.Provider, model string, bu
 	}}); reason != "" {
 		result.MutatedPolicy = currentPolicy
 		result.RejectedReason = reason
+	}
+	if result.RejectedReason == "" {
+		if reason := validateSemanticPreservation(mutationSection{
+			Kind:      mutationSectionPrompt,
+			Name:      "mutated policy",
+			Original:  currentPolicy,
+			Candidate: mutated,
+		}); reason != "" {
+			result.MutatedPolicy = currentPolicy
+			result.RejectedReason = reason
+		}
 	}
 
 	return result, nil

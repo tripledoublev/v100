@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,10 +26,155 @@ func TestAvgScore(t *testing.T) {
 	}
 }
 
+func TestRunMutationTestGatePassesAndExposesCandidatePath(t *testing.T) {
+	dir := t.TempDir()
+	candidatePath := filepath.Join(dir, "candidate_policy.md")
+	if err := os.WriteFile(candidatePath, []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := runMutationTestGate(t.Context(), "evolve-1", "source-1", `test -f "$V100_CANDIDATE_POLICY"`, candidatePath, time.Now().UTC())
+	if report.Decision != "passed" {
+		t.Fatalf("Decision = %q, want passed: %+v", report.Decision, report)
+	}
+	if report.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", report.ExitCode)
+	}
+}
+
+func TestRunMutationTestGateRejectsFailingCommand(t *testing.T) {
+	report := runMutationTestGate(t.Context(), "evolve-1", "source-1", `printf nope >&2; exit 7`, "candidate.md", time.Now().UTC())
+	if report.Decision != "rejected" {
+		t.Fatalf("Decision = %q, want rejected: %+v", report.Decision, report)
+	}
+	if report.ExitCode != 7 {
+		t.Fatalf("ExitCode = %d, want 7", report.ExitCode)
+	}
+	if !strings.Contains(report.RejectedReason, "exit code 7") {
+		t.Fatalf("RejectedReason = %q, want exit code", report.RejectedReason)
+	}
+	if !strings.Contains(report.Stderr, "nope") {
+		t.Fatalf("Stderr = %q, want command stderr", report.Stderr)
+	}
+}
+
 func TestAvgScoreEmpty(t *testing.T) {
 	avg := avgScore(nil)
 	if avg != 0 {
 		t.Errorf("expected 0, got %f", avg)
+	}
+}
+
+func TestBenchmarkHoldDecisionRejectsRegression(t *testing.T) {
+	decision, reason := benchmarkHoldDecision(0.75, 0.50)
+	if decision != "rejected" {
+		t.Fatalf("decision = %q, want rejected", decision)
+	}
+	if !strings.Contains(reason, "candidate score 0.50 below baseline 0.75") {
+		t.Fatalf("reason = %q, want benchmark regression detail", reason)
+	}
+}
+
+func TestBenchmarkHoldDecisionAllowsImprovementAndTie(t *testing.T) {
+	decision, reason := benchmarkHoldDecision(0.50, 0.75)
+	if decision != "recommend_adopt" || reason != "" {
+		t.Fatalf("improvement decision = %q/%q, want recommend_adopt with no reason", decision, reason)
+	}
+	decision, reason = benchmarkHoldDecision(0.50, 0.50)
+	if decision != "recommend_reject" || reason != "" {
+		t.Fatalf("tie decision = %q/%q, want recommend_reject with no reason", decision, reason)
+	}
+}
+
+func TestEvolveAdoptRejectsBenchmarkHoldRejectedReport(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		evolveID := "evolve-rejected"
+		evolveDir := filepath.Join("runs", evolveID)
+		if err := os.MkdirAll(evolveDir, 0o755); err != nil {
+			return err
+		}
+		candidatePath := filepath.Join(evolveDir, "candidate_policy.md")
+		if err := os.WriteFile(candidatePath, []byte("candidate"), 0o644); err != nil {
+			return err
+		}
+		report := evolutionReport{
+			EvolveID:       evolveID,
+			Decision:       "rejected",
+			CandidatePath:  candidatePath,
+			RejectedReason: "benchmark hold failed: candidate score 0.10 below baseline 1.00",
+		}
+		data, err := json.Marshal(report)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(evolveDir, "evolution.json"), data, 0o644); err != nil {
+			return err
+		}
+		cfgPath := ""
+		cmd := evolveAdoptCmd(&cfgPath)
+		err = cmd.RunE(cmd, []string{evolveID})
+		if err == nil {
+			t.Fatal("expected rejected evolution report to block adoption")
+		}
+		if !strings.Contains(err.Error(), "refusing to adopt rejected candidate") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyEvolutionWithRollbackRestoresPolicyOnTestFailure(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		cfg := config.DefaultConfig()
+		targetPath := resolveDefaultPolicyPath(cfg)
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return err
+		}
+		original := []byte("original policy")
+		if err := os.WriteFile(targetPath, original, 0o644); err != nil {
+			return err
+		}
+		evolveDir := filepath.Join("runs", "evolve-rollback")
+		if err := os.MkdirAll(evolveDir, 0o755); err != nil {
+			return err
+		}
+		candidatePath := filepath.Join(evolveDir, "candidate_policy.md")
+		if err := os.WriteFile(candidatePath, []byte("candidate policy"), 0o644); err != nil {
+			return err
+		}
+		report, err := applyEvolutionWithRollback(cfg, "evolve-rollback", candidatePath, `exit 9`)
+		if err == nil {
+			return os.ErrInvalid
+		}
+		if !strings.Contains(err.Error(), "test gate failed") {
+			return err
+		}
+		got, err := os.ReadFile(targetPath)
+		if err != nil {
+			return err
+		}
+		if string(got) != string(original) {
+			return os.ErrInvalid
+		}
+		if !report.RolledBack {
+			return os.ErrInvalid
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunEvolutionAdoptTestUsesCandidatePathEnv(t *testing.T) {
+	dir := t.TempDir()
+	candidatePath := filepath.Join(dir, "candidate_policy.md")
+	if err := os.WriteFile(candidatePath, []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := runEvolutionAdoptTest(context.Background(), `test "$V100_CANDIDATE_POLICY" = "`+candidatePath+`"`, candidatePath)
+	if report.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0: %+v", report.ExitCode, report)
 	}
 }
 

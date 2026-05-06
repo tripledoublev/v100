@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,6 +163,9 @@ func TestExtractWakeGoalsParsesAssistantGoal(t *testing.T) {
 	if goals[0].Content != "Stabilize wake cycle startup reporting" {
 		t.Fatalf("goal content = %q", goals[0].Content)
 	}
+	if goals[0].Score == 0 {
+		t.Fatalf("expected extracted wake goal to be scored: %#v", goals[0])
+	}
 }
 
 func TestCollectWakeWorkspaceSummaryIncludesNestedEntries(t *testing.T) {
@@ -219,6 +223,192 @@ func TestDedupeWakeGoalsSkipsDuplicateContent(t *testing.T) {
 	}
 	if got[0].Content != "Add queued-goal execution metrics" {
 		t.Fatalf("deduped goal = %q", got[0].Content)
+	}
+}
+
+func TestFindWakeGoalIndexByIndexAndID(t *testing.T) {
+	goals := []core.GeneratedGoal{{ID: "goal-a"}, {ID: "goal-b"}}
+	idx, err := findWakeGoalIndex(goals, "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != 1 {
+		t.Fatalf("idx = %d, want 1", idx)
+	}
+	idx, err = findWakeGoalIndex(goals, "goal-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != 0 {
+		t.Fatalf("idx = %d, want 0", idx)
+	}
+	if _, err := findWakeGoalIndex(goals, "missing"); err == nil {
+		t.Fatal("expected missing selector to fail")
+	}
+}
+
+func TestWakeGoalsEditApproveRejectPersistState(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	statePath := core.DefaultWakeStatePath()
+	state := core.InitWakeState()
+	state.QueuedGoals = core.RankGeneratedGoals([]core.GeneratedGoal{
+		{ID: "goal-a", Content: "Review local TODOs"},
+		{ID: "goal-b", Content: "Fix failing TestWakeGoalScanner in internal/core/goal_scan_test.go"},
+	})
+	if err := core.WriteWakeState(statePath, state); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := updateWakeGoalQueue("goal-a", func(state *core.WakeState, idx int) string {
+		state.QueuedGoals[idx].Content = "Fix failing wake queue review test"
+		state.QueuedGoals[idx] = core.ScoreGeneratedGoal(state.QueuedGoals[idx])
+		state.QueuedGoals = core.RankGeneratedGoals(state.QueuedGoals)
+		return "edited"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := core.ReadWakeState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wakeGoalsContainContent(read.QueuedGoals, "Fix failing wake queue review test") {
+		t.Fatalf("queued goals = %#v, want edited content persisted", read.QueuedGoals)
+	}
+
+	if err := updateWakeGoalQueue("goal-b", func(state *core.WakeState, idx int) string {
+		goal := state.QueuedGoals[idx]
+		copy(state.QueuedGoals[1:idx+1], state.QueuedGoals[0:idx])
+		state.QueuedGoals[0] = goal
+		return "approved"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err = core.ReadWakeState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.QueuedGoals[0].ID != "goal-b" {
+		t.Fatalf("approved goal ID = %q, want goal-b", read.QueuedGoals[0].ID)
+	}
+
+	if err := updateWakeGoalQueue("goal-b", func(state *core.WakeState, idx int) string {
+		state.QueuedGoals = append(state.QueuedGoals[:idx], state.QueuedGoals[idx+1:]...)
+		return "rejected"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err = core.ReadWakeState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.QueuedGoals) != 1 || read.QueuedGoals[0].ID == "goal-b" {
+		t.Fatalf("queued goals after reject = %#v, want goal-b removed", read.QueuedGoals)
+	}
+}
+
+func wakeGoalsContainContent(goals []core.GeneratedGoal, content string) bool {
+	for _, goal := range goals {
+		if goal.Content == content {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCreateWakeGoalRunPayloadWritesExecutableArtifact(t *testing.T) {
+	if err := withWorkingDir(t.TempDir(), func() error {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		state := core.InitWakeState()
+		state.QueuedGoals = []core.GeneratedGoal{{
+			ID:      "goal-handoff",
+			Content: "Fix failing wake handoff test",
+			Score:   90,
+		}}
+		if err := core.WriteWakeState(core.DefaultWakeStatePath(), state); err != nil {
+			return err
+		}
+		cfg := config.DefaultConfig()
+		cfg.Wake.Provider = "gemini"
+		cfg.Defaults.Solver = "plan_execute"
+		cfg.Defaults.BudgetSteps = 7
+		cfg.Defaults.BudgetTokens = 1234
+		cfg.Defaults.MaxToolCallsPerStep = 3
+		cfg.Tools.Enabled = []string{"fs_read", "sh"}
+
+		runID, payload, err := createWakeGoalRunPayload(cfg, "goal-handoff")
+		if err != nil {
+			return err
+		}
+		if runID == "" {
+			t.Fatal("expected runID")
+		}
+		if payload.Goal != "Fix failing wake handoff test" {
+			t.Fatalf("payload goal = %q", payload.Goal)
+		}
+		if payload.Provider != "gemini" || payload.Solver != "plan_execute" {
+			t.Fatalf("provider/solver = %q/%q", payload.Provider, payload.Solver)
+		}
+		if !strings.Contains(payload.RunCommand, "--prompt-file") {
+			t.Fatalf("run command missing prompt-file: %q", payload.RunCommand)
+		}
+		promptBytes, err := os.ReadFile(payload.PromptPath)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(promptBytes), "Fix failing wake handoff test") {
+			t.Fatalf("prompt missing goal: %s", string(promptBytes))
+		}
+		payloadPath := filepath.Join("runs", runID, "wake_payload.json")
+		payloadBytes, err := os.ReadFile(payloadPath)
+		if err != nil {
+			return err
+		}
+		var recovered wakeGoalRunPayload
+		if err := json.Unmarshal(payloadBytes, &recovered); err != nil {
+			return err
+		}
+		if recovered.BudgetSteps != 7 || recovered.BudgetTokens != 1234 || recovered.MaxToolCalls != 3 {
+			t.Fatalf("payload budgets = %+v", recovered)
+		}
+		meta, err := core.ReadMeta(filepath.Join("runs", runID))
+		if err != nil {
+			return err
+		}
+		if meta.Tags["type"] != "wake.goal_handoff" || len(meta.GeneratedGoals) != 1 {
+			t.Fatalf("meta = %+v", meta)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshWakeGoalQueueFromScanQueuesLocalSignalsOnce(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "internal", "core", "wake.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package core\n// TODO: add scan loop regression coverage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := core.InitWakeState()
+	added, err := refreshWakeGoalQueueFromScan(state, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("added = %d, want 1", added)
+	}
+	if len(state.QueuedGoals) != 1 || !strings.Contains(state.QueuedGoals[0].Content, "scan loop regression coverage") {
+		t.Fatalf("queued goals = %#v", state.QueuedGoals)
+	}
+	added, err = refreshWakeGoalQueueFromScan(state, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 || len(state.QueuedGoals) != 1 {
+		t.Fatalf("second scan added=%d queued=%#v, want no duplicate", added, state.QueuedGoals)
 	}
 }
 
@@ -636,4 +826,19 @@ func TestRunWakeIssueCycleRequiresDefaultBranch(t *testing.T) {
 	if len(calls) != 3 {
 		t.Fatalf("calls = %+v, want 3 setup calls", calls)
 	}
+}
+
+func TestWakeEvolveCommandRegistered(t *testing.T) {
+	root := rootCmd()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "wake" {
+			for _, sub := range cmd.Commands() {
+				if sub.Name() == "evolve" {
+					return
+				}
+			}
+			t.Fatalf("wake command missing evolve subcommand")
+		}
+	}
+	t.Fatal("wake command not registered")
 }
