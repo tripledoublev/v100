@@ -34,13 +34,18 @@ Tools are a first-class part of the runtime. The model interacts with the world 
 ### 4. Memory & External Context
 v100 treats memory as runtime infrastructure, not just prompt stuffing:
 - **Durable Blackboard**: A shared workspace for agents to read and write ongoing findings.
-- **ATProto Integration**: Deep Bluesky integration (`atproto_index`, `atproto_recall`, `atproto_vibe_check`, `atproto_daily_digest`, `atproto_graph_explorer`). It indexes social feeds and profiles into vector embeddings for semantic RAG, summarizes feed activity, and explores follow graphs for real-time external context.
+- **ATProto Integration**: Deep Bluesky integration for social context and provenance. Tools include `atproto_index`, `atproto_recall`, `atproto_vibe_check`, `atproto_daily_digest`, `atproto_graph_explorer`, `atproto_community_detect` (label-based community clustering), `atproto_follower_momentum` (new follower growth signals), `atproto_engagement_health` (posting cadence and engagement analytics), and `atproto_publish_provenance` (publishing signed provenance records to the AT Protocol network).
 
 ### 5. Observability & Trace Replay
 If an agent does something surprising, you shouldn't have to guess why.
 - Every run emits a structured `trace.jsonl`.
 - `v100 replay <run_id>` lets you step through an agent's reasoning turn-by-turn after the fact.
+- `v100 graph <run_id>` renders the trace as an interactive HTML DAG explorer.
+- `v100 steer <run_id> <message>` injects an asynchronous steering message into an active run without interrupting it.
+- `v100 trace export/import` converts traces to and from cross-harness formats (Inspect, METR).
 - Checkpoints allow you to resume interrupted runs seamlessly.
+- **Semantic taint isolation**: tool results from untrusted sources are wrapped with taint metadata to prevent prompt injection from propagating through reasoning steps.
+- **Trajectory mirroring**: loop state snapshots are emitted at each turn for external metric collection and divergence detection.
 
 ---
 
@@ -102,7 +107,10 @@ Browse recent runs, resume them, or replay their traces:
 ./v100 runs
 ./v100 resume <run_id>
 ./v100 replay <run_id>
-./v100 blame <run_id> <file_path>  # See exactly which reasoning turn modified a file
+./v100 graph <run_id>              # Interactive HTML DAG of the trace
+./v100 blame <run_id> <file_path>  # Which reasoning turn modified a file
+./v100 steer <run_id> "message"    # Inject a steering message into a live run
+./v100 trace export <run_id>       # Export trace as cross-harness JSON (Inspect/METR)
 ```
 
 ---
