@@ -452,6 +452,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.SemDiff())
 	reg.Register(tools.SemImpact())
 	reg.Register(tools.SemBlame())
+	reg.Register(tools.ProvenanceLookup())
 	reg.Register(tools.FSOutline())
 	reg.Register(tools.InspectTool())
 	reg.Register(tools.NewReflect())

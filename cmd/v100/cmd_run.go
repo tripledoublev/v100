@@ -22,6 +22,7 @@ import (
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
+	"github.com/tripledoublev/v100/internal/provenance"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
 	"github.com/tripledoublev/v100/internal/ui"
@@ -664,6 +665,9 @@ done:
 	}
 
 	_ = loop.EmitRunEnd(reason, finalSummary)
+	if err := writeRunProvenanceArtifact(run.TraceFile); err != nil {
+		fmt.Fprintln(os.Stderr, ui.Warn("provenance: "+err.Error()))
+	}
 
 	if result, err := finalizeSandboxRun(cfg, run, reason, mapper); err != nil {
 		fmt.Fprintln(os.Stderr, ui.Warn("sandbox finalize: "+err.Error()))
@@ -676,6 +680,22 @@ done:
 	fmt.Println(ui.Dim("run id: ") + run.ID)
 	fmt.Println(ui.Dim("  → v100 stats " + run.ID))
 	return nil
+}
+
+func writeRunProvenanceArtifact(tracePath string) error {
+	events, err := provenance.ReadAll(tracePath)
+	if err != nil {
+		return err
+	}
+	entries := provenance.Build(events)
+	if len(entries) == 0 {
+		return nil
+	}
+	out, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(filepath.Dir(tracePath), "provenance.json"), out, 0o644)
 }
 
 func wrapConfirmFnWithActivity(confirmFn core.ConfirmFn, active *atomic.Bool) core.ConfirmFn {
@@ -834,139 +854,61 @@ func blameCmd() *cobra.Command {
 				return err
 			}
 
-			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			events, err := provenance.ReadAll(filepath.Join(runDir, "trace.jsonl"))
 			if err != nil {
 				return err
 			}
 
-			return showFileBlame(events, filePath)
+			line, _ := cmd.Flags().GetInt("line")
+			return showFileBlame(events, filePath, line)
 		},
 	}
+	cmd.Flags().Int("line", 0, "optional 1-based line number to inspect")
 	return cmd
 }
 
-func showFileBlame(events []core.Event, filePath string) error {
-	// Normalize file path for comparison (handle both absolute and relative)
-	filePath = strings.TrimSpace(filePath)
-	fileBase := filepath.Base(filePath)
-
-	type blameEntry struct {
-		EventID      string
-		CallID       string
-		StepID       string
-		ToolName     string
-		WritePath    string
-		Content      string
-		BytesWritten int
-	}
-
-	// Build a map of CallID → fs_write call details by looking at tool.call events
-	callDetails := make(map[string]struct {
-		Path    string
-		Content string
-		Append  bool
-	})
-
-	for _, ev := range events {
-		if ev.Type != core.EventToolCall {
-			continue
+func showFileBlame(events []provenance.Event, filePath string, line int) error {
+	entries := provenance.Find(provenance.Build(events), filePath, line)
+	if len(entries) == 0 {
+		if line > 0 {
+			fmt.Printf("No provenance found for %s:%d\n", filePath, line)
+			return nil
 		}
-
-		var payload core.ToolCallPayload
-		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			continue
-		}
-
-		if payload.Name != "fs_write" {
-			continue
-		}
-
-		// Parse the args to extract path and content
-		var args struct {
-			Path    string `json:"path"`
-			Content string `json:"content"`
-			Append  bool   `json:"append"`
-		}
-		if err := json.Unmarshal([]byte(payload.Args), &args); err != nil {
-			continue
-		}
-
-		callDetails[payload.CallID] = struct {
-			Path    string
-			Content string
-			Append  bool
-		}{
-			Path:    args.Path,
-			Content: args.Content,
-			Append:  args.Append,
-		}
-	}
-
-	var blameEntries []blameEntry
-
-	// Now match results to calls and filter by file
-	for _, ev := range events {
-		if ev.Type != core.EventToolResult {
-			continue
-		}
-
-		var payload core.ToolResultPayload
-		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			continue
-		}
-
-		// Look for fs_write tool results
-		if payload.Name != "fs_write" || !payload.OK {
-			continue
-		}
-
-		// Get the call details
-		details, ok := callDetails[payload.CallID]
-		if !ok {
-			continue
-		}
-
-		// Check if this write targets our file
-		if !matchesFile(details.Path, filePath, fileBase) {
-			continue
-		}
-
-		// Parse the output to get bytes written
-		var writeOutput struct {
-			BytesWritten int `json:"bytes_written,omitempty"`
-		}
-		_ = json.Unmarshal([]byte(payload.Output), &writeOutput)
-
-		blameEntries = append(blameEntries, blameEntry{
-			EventID:      ev.EventID,
-			CallID:       payload.CallID,
-			StepID:       ev.StepID,
-			ToolName:     payload.Name,
-			WritePath:    details.Path,
-			Content:      details.Content,
-			BytesWritten: writeOutput.BytesWritten,
-		})
-	}
-
-	if len(blameEntries) == 0 {
-		fmt.Printf("No writes found to file: %s\n", filePath)
+		fmt.Printf("No provenance found for file: %s\n", filePath)
 		return nil
 	}
 
-	// Display results
 	fmt.Printf("\n%s\n", ui.Header(fmt.Sprintf("File Provenance: %s", filePath)))
-	fmt.Printf("Found %d write operation(s):\n\n", len(blameEntries))
+	if line > 0 {
+		fmt.Printf("Line: %d\n", line)
+	}
+	fmt.Printf("Found %d provenance record(s):\n\n", len(entries))
 
-	for i, entry := range blameEntries {
+	for i, entry := range entries {
 		fmt.Printf("[%d] Event: %s\n", i+1, ui.Bold(entry.EventID))
-		fmt.Printf("    File:  %s\n", entry.WritePath)
-		fmt.Printf("    Bytes: %d\n", entry.BytesWritten)
-		if entry.Content != "" {
-			preview := entry.Content
-			if len(preview) > 100 {
-				preview = preview[:100] + "…"
+		fmt.Printf("    File:  %s\n", entry.Path)
+		if entry.LineStart > 0 {
+			fmt.Printf("    Lines: %d-%d\n", entry.LineStart, entry.LineEnd)
+		} else {
+			fmt.Printf("    Lines: unknown\n")
+		}
+		fmt.Printf("    Tool:  %s\n", entry.ToolName)
+		fmt.Printf("    Call:  %s\n", entry.CallID)
+		if entry.BytesWritten > 0 {
+			fmt.Printf("    Bytes: %d\n", entry.BytesWritten)
+		}
+		if entry.ContentSHA256 != "" {
+			fmt.Printf("    SHA:   %s\n", entry.ContentSHA256)
+		}
+		if strings.TrimSpace(entry.Summary) != "" {
+			fmt.Printf("    Note:  %s\n", entry.Summary)
+		}
+		if strings.TrimSpace(entry.Reasoning) != "" {
+			reasoning := strings.TrimSpace(entry.Reasoning)
+			if len(reasoning) > 300 {
+				reasoning = reasoning[:300] + "…"
 			}
-			fmt.Printf("    Content: %s\n", strings.TrimSpace(preview))
+			fmt.Printf("    Reasoning: %s\n", reasoning)
 		}
 		fmt.Println()
 	}
@@ -974,22 +916,15 @@ func showFileBlame(events []core.Event, filePath string) error {
 	return nil
 }
 
-// matchesFile checks if a written file path matches the target file
+// matchesFile checks if a written file path matches the target file.
 func matchesFile(writePath, targetPath, targetBase string) bool {
 	writePath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(writePath)))
 	targetPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(targetPath)))
-
 	if writePath == targetPath {
 		return true
 	}
-
 	if !strings.Contains(targetPath, "/") {
 		return filepath.Base(writePath) == targetBase
 	}
-
-	if strings.HasSuffix(writePath, "/"+targetPath) {
-		return true
-	}
-
-	return false
+	return strings.HasSuffix(writePath, "/"+targetPath)
 }
