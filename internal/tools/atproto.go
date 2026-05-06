@@ -248,9 +248,11 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 // ---------------------------------------------------------------------------
 
 type atprotoPostTool struct{ cfg *config.Config }
+type atprotoCreateRecordTool struct{ cfg *config.Config }
 
 // ATProtoPost returns the atproto_post tool.
-func ATProtoPost(cfg *config.Config) Tool { return &atprotoPostTool{cfg: cfg} }
+func ATProtoPost(cfg *config.Config) Tool         { return &atprotoPostTool{cfg: cfg} }
+func ATProtoCreateRecord(cfg *config.Config) Tool { return &atprotoCreateRecordTool{cfg: cfg} }
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
@@ -259,6 +261,105 @@ func (t *atprotoPostTool) Description() string {
 func (t *atprotoPostTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *atprotoPostTool) Effects() ToolEffects {
 	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
+
+func (t *atprotoCreateRecordTool) Name() string { return "atproto_create_record" }
+func (t *atprotoCreateRecordTool) Description() string {
+	return "Publish a raw ATProto record to any collection, including custom lexicons such as art.xx-c.provenance."
+}
+func (t *atprotoCreateRecordTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *atprotoCreateRecordTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
+
+func (t *atprotoCreateRecordTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ["collection", "record"],
+		"properties": {
+			"collection": {"type": "string", "description": "ATProto collection NSID, e.g. app.bsky.feed.post or art.xx-c.provenance."},
+			"record":     {"type": "object", "description": "Record JSON object to publish. If $type is omitted, collection is used."},
+			"account":    {"type": "string", "description": "Which account to publish from: \"main\" (default) or \"alt\"."},
+			"rkey":       {"type": "string", "description": "Optional record key to request from the PDS."}
+		}
+	}`)
+}
+
+func (t *atprotoCreateRecordTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":         {"type": "boolean"},
+			"uri":        {"type": "string", "format": "at-uri"},
+			"cid":        {"type": "string"},
+			"collection": {"type": "string"},
+			"repo":       {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Collection string         `json:"collection"`
+		Record     map[string]any `json:"record"`
+		Account    string         `json:"account"`
+		RKey       string         `json:"rkey"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	in.Collection = strings.TrimSpace(in.Collection)
+	if in.Collection == "" {
+		return ToolResult{OK: false, Output: "collection is required"}, nil
+	}
+	if len(in.Record) == 0 {
+		return ToolResult{OK: false, Output: "record is required"}, nil
+	}
+
+	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	cli := newATProtoClient(accountCfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	record := make(map[string]any, len(in.Record)+1)
+	for k, v := range in.Record {
+		record[k] = v
+	}
+	if _, ok := record["$type"]; !ok {
+		record["$type"] = in.Collection
+	}
+
+	payload := map[string]any{
+		"repo":       cli.session.DID,
+		"collection": in.Collection,
+		"record":     record,
+	}
+	if strings.TrimSpace(in.RKey) != "" {
+		payload["rkey"] = strings.TrimSpace(in.RKey)
+	}
+	data, err := cli.xrpcPost("com.atproto.repo.createRecord", payload)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	var out struct {
+		URI string `json:"uri"`
+		CID string `json:"cid"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return ToolResult{OK: true, Output: string(data)}, nil
+	}
+	result, _ := json.Marshal(map[string]any{
+		"ok":         true,
+		"uri":        out.URI,
+		"cid":        out.CID,
+		"collection": in.Collection,
+		"repo":       cli.session.DID,
+	})
+	return ToolResult{OK: true, Output: string(result)}, nil
 }
 
 func (t *atprotoPostTool) InputSchema() json.RawMessage {

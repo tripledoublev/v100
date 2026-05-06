@@ -8,14 +8,24 @@ interval_seconds = 86400  # 24h
 
 [[wake.tasks]]
 name = "daily_synth_post"
-description = "Gather feed corpus, synthesize into 2 poetic sentences, save for review"
+description = "Gather feed corpus, synthesize into 2 poetic sentences, post from alt, and publish provenance sidecar"
 schedule = "24h"
 
 [[wake.tasks.steps]]
 name = "gather"
 tool = "atproto_anon_synth"
-prompt = "Gather the feed corpus. Strip all handles and URLs — we want content only."
+prompt = "Gather the feed corpus. Write the returned sources array to blackboard_write under synthesis_sources. Pass only corpus text to the next step."
 
 [[wake.tasks.steps]]
 name = "synthesize"
 prompt = "Read the corpus. Write exactly 2 poetic sentences that capture what's happening. End with SYNTHESIS: followed by your sentences."
+
+[[wake.tasks.steps]]
+name = "post"
+tool = "atproto_post"
+prompt = "Publish the SYNTHESIS text from the alt account (xx-c.art). Save the returned post URI."
+
+[[wake.tasks.steps]]
+name = "provenance"
+tool = "atproto_create_record"
+prompt = "Read synthesis_sources from blackboard_read. Create an art.xx-c.provenance record with post, sources, agent, and createdAt."

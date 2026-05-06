@@ -1619,6 +1619,7 @@ func buildScopedToolRegistry(cfg *config.Config, toolName string) *tools.Registr
 	reg.Register(tools.ATProtoFeed(cfg))
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
+	reg.Register(tools.ATProtoCreateRecord(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
 	reg.Register(tools.ATProtoGetFollows(cfg))
 	reg.Register(tools.ATProtoGetFollowers(cfg))
