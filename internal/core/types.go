@@ -274,6 +274,7 @@ type ToolResultPayload struct {
 	OK         bool   `json:"ok"`
 	Output     string `json:"output"`
 	Stdout     string `json:"stdout,omitempty"`
+	TaintLevel string `json:"taint_level,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 }
 

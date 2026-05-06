@@ -28,6 +28,17 @@ func TestLoadPolicyKeepsNamedPolicyMaxToolCallsWhenDefaultUnset(t *testing.T) {
 	}
 }
 
+func TestBuildSolverAcceptsDualChannel(t *testing.T) {
+	cfg := config.DefaultConfig()
+	solver, err := buildSolver(cfg, "dual_channel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if solver.Name() != "dual_channel" {
+		t.Fatalf("unexpected solver %T", solver)
+	}
+}
+
 func TestBuildToolRegistryRegistersATProtoUploadBlob(t *testing.T) {
 	cfg := config.DefaultConfig()
 	reg := buildToolRegistry(cfg)

@@ -97,6 +97,7 @@ func (t *curlFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		OK:         fetched.status >= 200 && fetched.status < 400,
 		Output:     output,
 		Stdout:     output,
+		TaintLevel: "external_data",
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

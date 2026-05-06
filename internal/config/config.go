@@ -134,7 +134,7 @@ type DefaultsConfig struct {
 	SmartProvider         string   `toml:"smart_provider"` // for router solver
 	SubProvider           string   `toml:"sub_provider"`   // for rlm solver
 	CheapProvider         string   `toml:"cheap_provider"` // for router solver
-	Solver                string   `toml:"solver"`         // react | plan_execute | router
+	Solver                string   `toml:"solver"`         // react | plan_execute | router | dual_channel
 	MaxReplans            int      `toml:"max_replans"`
 	ConfirmTools          string   `toml:"confirm_tools"` // always | dangerous | never
 	BudgetSteps           int      `toml:"budget_steps"`

@@ -36,8 +36,8 @@ type ToolCallContext struct {
 	Provider         providers.Provider
 	EmbedProvider    providers.Provider // dedicated embedding provider; falls back to Provider if nil
 	Registry         *Registry          // access to other enabled tools
-	Session          executor.Session // active sandbox session
-	Mapper           PathTranslator   // bidirectional path mapping
+	Session          executor.Session   // active sandbox session
+	Mapper           PathTranslator     // bidirectional path mapping
 	EmitOutputDelta  func(stream, text string) error
 }
 
@@ -55,6 +55,7 @@ type ToolResult struct {
 	Output     string `json:"output"`
 	Stdout     string `json:"stdout,omitempty"`
 	Stderr     string `json:"stderr,omitempty"`
+	TaintLevel string `json:"taint_level,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 }
 

@@ -93,6 +93,7 @@ func (t *fsReadTool) Exec(ctx context.Context, call ToolCallContext, args json.R
 	return ToolResult{
 		OK:         true,
 		Output:     content,
+		TaintLevel: "workspace_data",
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

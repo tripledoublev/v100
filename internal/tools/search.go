@@ -138,6 +138,7 @@ func (t *projectSearchTool) Exec(ctx context.Context, call ToolCallContext, args
 		OK:         true,
 		Output:     out,
 		Stdout:     out,
+		TaintLevel: "workspace_search_data",
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -158,8 +159,8 @@ func defaultSearchExcludes(workspaceDir string) []string {
 	add(".git/**")
 	add("runs/**")
 	add(".gocache/**")
-	add("v100")       // compiled binary
-	add("*.tar.gz")   // export tarballs
+	add("v100")     // compiled binary
+	add("*.tar.gz") // export tarballs
 	add("*.tar")
 	add("*.zip")
 
