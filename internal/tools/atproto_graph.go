@@ -11,6 +11,18 @@ import (
 	"github.com/tripledoublev/v100/internal/config"
 )
 
+type sampledFollow struct {
+	DID     string
+	Handle  string
+	Name    string
+	Follows map[string]string
+}
+
+type communityCluster struct {
+	Members []sampledFollow
+	Shared  map[string]int
+}
+
 // ---------------------------------------------------------------------------
 // atproto_get_follows — list accounts followed by a user
 // ---------------------------------------------------------------------------
@@ -417,4 +429,265 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 	}
 
 	return ToolResult{OK: true, Output: sb.String()}, nil
+}
+
+// ---------------------------------------------------------------------------
+// atproto_community_detect — cluster follows into sub-communities
+// ---------------------------------------------------------------------------
+
+type atprotoCommunityDetectTool struct{ cfg config.ATProtoConfig }
+
+// ATProtoCommunityDetect returns the atproto_community_detect tool.
+func ATProtoCommunityDetect(cfg *config.Config) Tool {
+	return &atprotoCommunityDetectTool{cfg: cfg.ATProto}
+}
+
+func (t *atprotoCommunityDetectTool) Name() string { return "atproto_community_detect" }
+func (t *atprotoCommunityDetectTool) Description() string {
+	return "Cluster a Bluesky user's follows into sub-communities by sampling who those follows also follow. Use this to identify social circles, topic neighborhoods, and bridge accounts."
+}
+func (t *atprotoCommunityDetectTool) DangerLevel() DangerLevel { return Safe }
+func (t *atprotoCommunityDetectTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
+
+func (t *atprotoCommunityDetectTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"actor": {"type": "string", "description": "Handle or DID of the user whose follows should be clustered. Defaults to the authenticated user."},
+			"sample_size": {"type": "integer", "description": "Number of follows to sample for clustering (default 20, max 50)."},
+			"follows_limit": {"type": "integer", "description": "Number of follows to fetch per sampled account (default 50, max 100)."},
+			"min_shared": {"type": "integer", "description": "Minimum shared followed accounts needed to join an existing cluster (default 2)."}
+		}
+	}`)
+}
+
+func (t *atprotoCommunityDetectTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":     {"type": "boolean"},
+			"output": {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Actor        string `json:"actor"`
+		SampleSize   int    `json:"sample_size"`
+		FollowsLimit int    `json:"follows_limit"`
+		MinShared    int    `json:"min_shared"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	if in.SampleSize <= 0 {
+		in.SampleSize = 20
+	}
+	if in.SampleSize > 50 {
+		in.SampleSize = 50
+	}
+	if in.FollowsLimit <= 0 {
+		in.FollowsLimit = 50
+	}
+	if in.FollowsLimit > 100 {
+		in.FollowsLimit = 100
+	}
+	if in.MinShared <= 0 {
+		in.MinShared = 2
+	}
+
+	cli := newATProtoClient(t.cfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	actor := strings.TrimSpace(in.Actor)
+	if actor == "" {
+		actor = cli.session.DID
+	}
+
+	seedData, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+		"actor": {actor},
+		"limit": {"100"},
+	})
+	if err != nil {
+		return ToolResult{OK: false, Output: "failed to get follows: " + err.Error()}, nil
+	}
+
+	var seedResp struct {
+		Follows []struct {
+			DID         string `json:"did"`
+			Handle      string `json:"handle"`
+			DisplayName string `json:"displayName"`
+		} `json:"follows"`
+	}
+	if err := json.Unmarshal(seedData, &seedResp); err != nil {
+		return ToolResult{OK: false, Output: "failed to parse follows: " + err.Error()}, nil
+	}
+	if len(seedResp.Follows) == 0 {
+		return ToolResult{OK: true, Output: "no follows found to cluster."}, nil
+	}
+
+	sampled := make([]sampledFollow, 0, minInt(len(seedResp.Follows), in.SampleSize))
+	for _, follow := range seedResp.Follows {
+		if len(sampled) >= in.SampleSize {
+			break
+		}
+		data, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+			"actor": {follow.DID},
+			"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
+		})
+		if err != nil {
+			continue
+		}
+		var resp struct {
+			Follows []struct {
+				DID         string `json:"did"`
+				Handle      string `json:"handle"`
+				DisplayName string `json:"displayName"`
+			} `json:"follows"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil {
+			continue
+		}
+		outbound := make(map[string]string, len(resp.Follows))
+		for _, f := range resp.Follows {
+			label := f.DisplayName
+			if label == "" {
+				label = f.Handle
+			}
+			outbound[f.DID] = fmt.Sprintf("%s (@%s)", label, f.Handle)
+		}
+		name := follow.DisplayName
+		if name == "" {
+			name = follow.Handle
+		}
+		sampled = append(sampled, sampledFollow{
+			DID:     follow.DID,
+			Handle:  follow.Handle,
+			Name:    name,
+			Follows: outbound,
+		})
+	}
+
+	if len(sampled) == 0 {
+		return ToolResult{OK: true, Output: "no sampled follows returned enough graph data to cluster."}, nil
+	}
+
+	var clusters []communityCluster
+	for _, candidate := range sampled {
+		bestIdx := -1
+		bestShared := 0
+		for idx := range clusters {
+			shared := countSharedFollows(candidate.Follows, clusters[idx].Shared)
+			if shared > bestShared {
+				bestShared = shared
+				bestIdx = idx
+			}
+		}
+		if bestIdx == -1 || bestShared < in.MinShared {
+			clusters = append(clusters, communityCluster{
+				Members: []sampledFollow{candidate},
+				Shared:  countFollowOccurrences(candidate.Follows),
+			})
+			continue
+		}
+		clusters[bestIdx].Members = append(clusters[bestIdx].Members, candidate)
+		for did := range candidate.Follows {
+			clusters[bestIdx].Shared[did]++
+		}
+	}
+
+	sort.Slice(clusters, func(i, j int) bool {
+		if len(clusters[i].Members) == len(clusters[j].Members) {
+			return len(clusters[i].Shared) > len(clusters[j].Shared)
+		}
+		return len(clusters[i].Members) > len(clusters[j].Members)
+	})
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Clustered %d follows for %s into %d communities.\n\n", len(sampled), actor, len(clusters))
+	for idx, cluster := range clusters {
+		fmt.Fprintf(&sb, "Community %d: %d accounts\n", idx+1, len(cluster.Members))
+		fmt.Fprintf(&sb, "  members: %s\n", formatClusterMembers(cluster.Members, 8))
+		topShared := topSharedFollowLabels(cluster, 5)
+		if len(topShared) > 0 {
+			fmt.Fprintf(&sb, "  shared follows: %s\n", strings.Join(topShared, ", "))
+		}
+	}
+
+	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+}
+
+func countFollowOccurrences(follows map[string]string) map[string]int {
+	out := make(map[string]int, len(follows))
+	for did := range follows {
+		out[did] = 1
+	}
+	return out
+}
+
+func countSharedFollows(follows map[string]string, cluster map[string]int) int {
+	shared := 0
+	for did := range follows {
+		if cluster[did] > 0 {
+			shared++
+		}
+	}
+	return shared
+}
+
+func formatClusterMembers(members []sampledFollow, limit int) string {
+	if len(members) == 0 {
+		return ""
+	}
+	out := make([]string, 0, minInt(len(members), limit))
+	for i, member := range members {
+		if i >= limit {
+			break
+		}
+		out = append(out, fmt.Sprintf("%s (@%s)", member.Name, member.Handle))
+	}
+	if len(members) > limit {
+		out = append(out, fmt.Sprintf("+%d more", len(members)-limit))
+	}
+	return strings.Join(out, ", ")
+}
+
+func topSharedFollowLabels(cluster communityCluster, limit int) []string {
+	type sharedFollow struct {
+		DID   string
+		Label string
+		Count int
+	}
+	labels := make(map[string]string)
+	for _, member := range cluster.Members {
+		for did, label := range member.Follows {
+			if labels[did] == "" {
+				labels[did] = label
+			}
+		}
+	}
+	var shared []sharedFollow
+	for did, count := range cluster.Shared {
+		if count < 2 {
+			continue
+		}
+		shared = append(shared, sharedFollow{DID: did, Label: labels[did], Count: count})
+	}
+	sort.Slice(shared, func(i, j int) bool {
+		if shared[i].Count == shared[j].Count {
+			return shared[i].Label < shared[j].Label
+		}
+		return shared[i].Count > shared[j].Count
+	})
+	out := make([]string, 0, minInt(len(shared), limit))
+	for i, item := range shared {
+		if i >= limit {
+			break
+		}
+		out = append(out, fmt.Sprintf("%s (%d)", item.Label, item.Count))
+	}
+	return out
 }

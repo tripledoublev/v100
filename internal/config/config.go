@@ -12,14 +12,14 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	Providers map[string]ProviderConfig `toml:"providers"`
-	Tools     ToolsConfig               `toml:"tools"`
-	Policies  map[string]PolicyConfig   `toml:"policies"`
-	Agents    map[string]AgentConfig    `toml:"agents"`
-	Defaults  DefaultsConfig            `toml:"defaults"`
-	Sandbox   SandboxConfig             `toml:"sandbox"`
-	Wake      WakeConfig                `toml:"wake"`
-	Update    UpdateConfig              `toml:"update"`
+	Providers  map[string]ProviderConfig `toml:"providers"`
+	Tools      ToolsConfig               `toml:"tools"`
+	Policies   map[string]PolicyConfig   `toml:"policies"`
+	Agents     map[string]AgentConfig    `toml:"agents"`
+	Defaults   DefaultsConfig            `toml:"defaults"`
+	Sandbox    SandboxConfig             `toml:"sandbox"`
+	Wake       WakeConfig                `toml:"wake"`
+	Update     UpdateConfig              `toml:"update"`
 	ATProto    ATProtoConfig             `toml:"atproto"`
 	ATProtoAlt ATProtoConfig             `toml:"alt-atproto"`
 	Embedding  EmbeddingConfig           `toml:"embedding"`
@@ -57,21 +57,20 @@ type SandboxConfig struct {
 
 // WakeConfig holds configuration for the continuous wake daemon.
 type WakeConfig struct {
-	Mode            string  `toml:"mode"`             // goal_generator | issue_worker | synthesis
-	Objective       string  `toml:"objective"`        // optional explicit daemon objective
-	Repo            string  `toml:"repo"`             // optional owner/repo for gh issue operations
-	IssueLimit      int     `toml:"issue_limit"`      // open issues to consider per cycle
-	Provider        string  `toml:"provider"`         // inherits defaults.provider if empty
-	IntervalSeconds int     `toml:"interval_seconds"` // default 3600
-	MaxBackoffSecs  int     `toml:"max_backoff_secs"` // default 86400
-	MaxFailures     int     `toml:"max_failures"`     // 0 = unlimited
-	BudgetSteps     int     `toml:"budget_steps"`     // default 10
-	BudgetTokens    int     `toml:"budget_tokens"`    // default 50000
-	BudgetCostUSD   float64 `toml:"budget_cost_usd"`  // default 0
-	Task            string    `toml:"task"`              // task name for synthesis mode
+	Mode            string     `toml:"mode"`             // goal_generator | issue_worker | synthesis
+	Objective       string     `toml:"objective"`        // optional explicit daemon objective
+	Repo            string     `toml:"repo"`             // optional owner/repo for gh issue operations
+	IssueLimit      int        `toml:"issue_limit"`      // open issues to consider per cycle
+	Provider        string     `toml:"provider"`         // inherits defaults.provider if empty
+	IntervalSeconds int        `toml:"interval_seconds"` // default 3600
+	MaxBackoffSecs  int        `toml:"max_backoff_secs"` // default 86400
+	MaxFailures     int        `toml:"max_failures"`     // 0 = unlimited
+	BudgetSteps     int        `toml:"budget_steps"`     // default 10
+	BudgetTokens    int        `toml:"budget_tokens"`    // default 50000
+	BudgetCostUSD   float64    `toml:"budget_cost_usd"`  // default 0
+	Task            string     `toml:"task"`             // task name for synthesis mode
 	Tasks           []WakeTask `toml:"tasks,omitempty"`
 }
-
 
 // WakeTask defines a named multi-step task for synthesis wake mode.
 type WakeTask struct {
@@ -93,7 +92,7 @@ type ProviderConfig struct {
 	Type         string     `toml:"type"`
 	DefaultModel string     `toml:"default_model"`
 	BaseURL      string     `toml:"base_url"`
-	Fallbacks    []string   `toml:"fallbacks"`    // ordered list of provider names to try on failure
+	Fallbacks    []string   `toml:"fallbacks"` // ordered list of provider names to try on failure
 	Auth         AuthConfig `toml:"auth"`
 }
 
@@ -132,7 +131,7 @@ type AgentConfig struct {
 type DefaultsConfig struct {
 	Provider              string   `toml:"provider"`
 	SmartProvider         string   `toml:"smart_provider"` // for router solver
-	SubProvider            string   `toml:"sub_provider"` // for rlm solver
+	SubProvider           string   `toml:"sub_provider"`   // for rlm solver
 	CheapProvider         string   `toml:"cheap_provider"` // for router solver
 	Solver                string   `toml:"solver"`         // react | plan_execute | router
 	MaxReplans            int      `toml:"max_replans"`
@@ -221,7 +220,7 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_community_detect", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"},
 		},
@@ -364,7 +363,7 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_graph_explorer", "atproto_community_detect", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post"]
 
 [policies.default]
@@ -465,6 +464,7 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "atproto_get_followers")
 	ensureString(&cfg.Tools.Enabled, "atproto_get_profile")
 	ensureString(&cfg.Tools.Enabled, "atproto_graph_explorer")
+	ensureString(&cfg.Tools.Enabled, "atproto_community_detect")
 	ensureString(&cfg.Tools.Enabled, "atproto_vibe_check")
 	ensureString(&cfg.Tools.Enabled, "atproto_daily_digest")
 	ensureString(&cfg.Tools.Enabled, "atproto_index")
