@@ -22,6 +22,8 @@ const (
 	EventToolCallDelta    EventType = "tool.call_delta"
 	EventToolOutputDelta  EventType = "tool.output_delta"
 	EventToolResult       EventType = "tool.result"
+	EventToolPrediction   EventType = "tool.prediction"
+	EventRealityDelta     EventType = "reality.delta"
 	EventReflect          EventType = "tool.reflect"
 	EventRunError         EventType = "run.error"
 	EventRunEnd           EventType = "run.end"
@@ -273,6 +275,25 @@ type ToolResultPayload struct {
 	Output     string `json:"output"`
 	Stdout     string `json:"stdout,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
+}
+
+// ToolPredictionPayload is emitted before physical tool execution when
+// trajectory mirroring is enabled.
+type ToolPredictionPayload struct {
+	CallID          string `json:"call_id"`
+	Name            string `json:"name"`
+	PredictedResult string `json:"predicted_result"`
+	Error           string `json:"error,omitempty"`
+}
+
+// RealityDeltaPayload compares a tool-result prediction with physical output.
+type RealityDeltaPayload struct {
+	CallID              string  `json:"call_id"`
+	Name                string  `json:"name"`
+	PredictedResult     string  `json:"predicted_result"`
+	GroundTruth         string  `json:"ground_truth"`
+	HallucinationCoeff  float64 `json:"hallucination_coefficient"`
+	RealitySyncInjected bool    `json:"reality_sync_injected,omitempty"`
 }
 
 // ToolReflectPayload is the Payload for EventToolReflect.

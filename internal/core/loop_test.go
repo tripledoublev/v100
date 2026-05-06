@@ -246,6 +246,66 @@ func TestLoopToolCall(t *testing.T) {
 	}
 }
 
+func TestLoopMirrorsToolRealityDelta(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(testFile, []byte("world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prov := &mockProvider{
+		responses: []providers.CompleteResponse{
+			{
+				ToolCalls: []providers.ToolCall{{
+					ID:   "call-1",
+					Name: "fs_read",
+					Args: json.RawMessage(`{"path":"` + testFile + `"}`),
+				}},
+			},
+			{AssistantText: `{"predicted_result":"empty file"}`},
+			{AssistantText: "done"},
+		},
+	}
+	loop, trace := newTestLoop(t, prov, []string{"fs_read"})
+	loop.Run.Dir = dir
+	loop.Policy.MirrorToolResults = true
+	defer func() { _ = trace.Close() }()
+
+	if err := loop.Step(context.Background(), "read the file"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawPrediction, sawDelta bool
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventToolPrediction:
+			var payload core.ToolPredictionPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.CallID == "call-1" && payload.PredictedResult == "empty file" {
+				sawPrediction = true
+			}
+		case core.EventRealityDelta:
+			var payload core.RealityDeltaPayload
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.CallID == "call-1" && payload.HallucinationCoeff > 0.5 && payload.RealitySyncInjected {
+				sawDelta = true
+			}
+		}
+	}
+	if !sawPrediction {
+		t.Fatal("missing tool.prediction event")
+	}
+	if !sawDelta {
+		t.Fatal("missing high-HC reality.delta event")
+	}
+}
+
 func TestLoopBudgetExceeded(t *testing.T) {
 	prov := &mockProvider{}
 	dir := t.TempDir()

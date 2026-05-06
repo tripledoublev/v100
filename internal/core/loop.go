@@ -419,6 +419,15 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 	if l.Policy != nil && l.Policy.ToolTimeoutMS > 0 {
 		timeout = l.Policy.ToolTimeoutMS
 	}
+	var predictedResult string
+	if l.Policy != nil && l.Policy.MirrorToolResults {
+		predictedResult, err = l.predictToolResult(ctx, stepID, tc)
+		payload := ToolPredictionPayload{CallID: tc.ID, Name: tc.Name, PredictedResult: predictedResult}
+		if err != nil {
+			payload.Error = err.Error()
+		}
+		_, _ = l.emit(EventToolPrediction, stepID, payload)
+	}
 	if l.Snapshots != nil && tool.Effects().MutatesWorkspace {
 		snap, err := l.snapshotManager().Capture(ctx, SnapshotRequest{
 			RunID:    l.Run.ID,
@@ -483,6 +492,31 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 
 	if err := l.emitToolResult(stepID, tc, result); err != nil {
 		return false, err
+	}
+	if l.Policy != nil && l.Policy.MirrorToolResults && predictedResult != "" {
+		hc := hallucinationCoefficient(predictedResult, result.Output)
+		injected := false
+		if hc > 0.5 {
+			l.Messages = append(l.Messages, providers.Message{
+				Role: "system",
+				Content: fmt.Sprintf(
+					"Reality-Sync: before %s returned, you predicted %q. Ground truth was %q. Hallucination coefficient %.2f. Acknowledge this delta before relying on the result.",
+					tc.Name,
+					truncateForRealityDelta(predictedResult),
+					truncateForRealityDelta(result.Output),
+					hc,
+				),
+			})
+			injected = true
+		}
+		_, _ = l.emit(EventRealityDelta, stepID, RealityDeltaPayload{
+			CallID:              tc.ID,
+			Name:                tc.Name,
+			PredictedResult:     predictedResult,
+			GroundTruth:         result.Output,
+			HallucinationCoeff:  hc,
+			RealitySyncInjected: injected,
+		})
 	}
 
 	// Add tool result to message history
@@ -645,6 +679,111 @@ func (l *Loop) reflectOnTool(ctx context.Context, stepID string, tc providers.To
 	}
 
 	return res.Confidence, res.Uncertainty, nil
+}
+
+func (l *Loop) predictToolResult(ctx context.Context, stepID string, tc providers.ToolCall) (string, error) {
+	if l.Provider == nil {
+		return "", fmt.Errorf("no provider configured")
+	}
+	prompt := fmt.Sprintf("Before executing the tool %q with arguments %s, predict the exact kind of result you expect the physical environment to return. Respond ONLY as JSON: {\"predicted_result\":\"...\"}", tc.Name, string(tc.Args))
+	msgs := append([]providers.Message{}, l.buildMessages(false)...)
+	msgs = append(msgs, providers.Message{Role: "user", Content: prompt})
+	resp, err := l.Provider.Complete(ctx, providers.CompleteRequest{
+		RunID:    l.Run.ID,
+		StepID:   stepID,
+		Messages: msgs,
+		Hints:    providers.Hints{JSONOnly: true},
+		Model:    l.Model,
+	})
+	if err != nil {
+		return "", err
+	}
+	var parsed struct {
+		PredictedResult string `json:"predicted_result"`
+	}
+	if json.Unmarshal([]byte(resp.AssistantText), &parsed) == nil && strings.TrimSpace(parsed.PredictedResult) != "" {
+		return strings.TrimSpace(parsed.PredictedResult), nil
+	}
+	return strings.TrimSpace(resp.AssistantText), nil
+}
+
+func hallucinationCoefficient(predicted, actual string) float64 {
+	predicted = strings.TrimSpace(predicted)
+	actual = strings.TrimSpace(actual)
+	if predicted == "" && actual == "" {
+		return 0
+	}
+	if predicted == "" || actual == "" {
+		return 1
+	}
+	p := []rune(truncateForDistance(predicted))
+	a := []rune(truncateForDistance(actual))
+	dist := levenshteinDistance(p, a)
+	denom := len(p)
+	if len(a) > denom {
+		denom = len(a)
+	}
+	if denom == 0 {
+		return 0
+	}
+	return float64(dist) / float64(denom)
+}
+
+func truncateForDistance(s string) string {
+	const maxRunes = 4000
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes])
+}
+
+func truncateForRealityDelta(s string) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= 160 {
+		return s
+	}
+	return string(r[:160]) + "..."
+}
+
+func levenshteinDistance(a, b []rune) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i, ar := range a {
+		curr := make([]int, len(b)+1)
+		curr[0] = i + 1
+		for j, br := range b {
+			cost := 0
+			if ar != br {
+				cost = 1
+			}
+			curr[j+1] = minInt(curr[j]+1, prev[j+1]+1, prev[j]+cost)
+		}
+		prev = curr
+	}
+	return prev[len(b)]
+}
+
+func minInt(vals ...int) int {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
 }
 
 func (l *Loop) buildMessages(includeMemory bool) []providers.Message {

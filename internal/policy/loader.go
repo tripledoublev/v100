@@ -16,6 +16,7 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 		Name:                name,
 		MaxToolCallsPerStep: cfg.MaxToolCallsPerStep,
 		Streaming:           true, // default ON; --streaming=false to disable
+		MirrorToolResults:   cfg.MirrorToolResults,
 		MemoryMode:          "auto",
 		MemoryMaxTokens:     256,
 	}
@@ -53,6 +54,7 @@ func Default() *Policy {
 		MaxToolCallsPerStep: 20,
 		ToolTimeoutMS:       30000,
 		Streaming:           true,
+		MirrorToolResults:   false,
 		MemoryMode:          "auto",
 		MemoryMaxTokens:     256,
 	}

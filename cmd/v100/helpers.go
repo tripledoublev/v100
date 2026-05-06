@@ -1053,6 +1053,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	if cfg.Defaults.MemoryMaxTokens > 0 {
 		p.MemoryMaxTokens = cfg.Defaults.MemoryMaxTokens
 	}
+	if cfg.Defaults.MirrorToolResults {
+		p.MirrorToolResults = true
+	}
 	return p
 }
 

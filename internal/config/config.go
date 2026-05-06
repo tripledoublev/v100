@@ -115,6 +115,7 @@ type PolicyConfig struct {
 	SystemPrompt        string `toml:"system_prompt"` // inline prompt override
 	MaxToolCallsPerStep int    `toml:"max_tool_calls_per_step"`
 	Streaming           bool   `toml:"streaming"`
+	MirrorToolResults   bool   `toml:"mirror_tool_results"`
 }
 
 // AgentConfig holds sub-agent persona definitions.
@@ -152,6 +153,7 @@ type DefaultsConfig struct {
 	MaxToolResultChars    int      `toml:"max_tool_result_chars"`
 	CompressProtectRecent int      `toml:"compress_protect_recent"`
 	CompressProvider      string   `toml:"compress_provider"`
+	MirrorToolResults     bool     `toml:"mirror_tool_results"`
 }
 
 // DefaultConfig returns a built-in baseline configuration.
@@ -386,6 +388,7 @@ context_limit = 80000        # estimated token threshold; compress history when 
 max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
 compress_protect_recent = 6   # recent messages protected from targeted compression
 compress_provider = "glm"     # provider for compression calls (empty = main provider for cloud runs)
+mirror_tool_results = false   # when true, predict tool outputs and log hallucination coefficients
 
 [sandbox]
 enabled = false
