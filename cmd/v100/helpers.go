@@ -467,6 +467,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoGetProfile(cfg))
 	reg.Register(tools.ATProtoGraphExplorer(cfg))
 	reg.Register(tools.ATProtoCommunityDetect(cfg))
+	reg.Register(tools.ATProtoEngagementHealth(cfg))
 	reg.Register(tools.ATProtoVibeCheck(cfg))
 	reg.Register(tools.ATProtoDailyDigest(cfg))
 	reg.Register(tools.ATProtoIndex(cfg))

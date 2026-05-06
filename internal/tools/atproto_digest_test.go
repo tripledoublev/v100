@@ -332,8 +332,8 @@ func TestATProtoDailyDigest_TopN(t *testing.T) {
 	postCount := 0
 	for _, line := range strings.Split(result.Output, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "1.") ||
-		   strings.HasPrefix(strings.TrimSpace(line), "2.") ||
-		   strings.HasPrefix(strings.TrimSpace(line), "3.") {
+			strings.HasPrefix(strings.TrimSpace(line), "2.") ||
+			strings.HasPrefix(strings.TrimSpace(line), "3.") {
 			postCount++
 		}
 	}
@@ -401,6 +401,67 @@ func TestATProtoDailyDigest_ScoreOrder(t *testing.T) {
 	}
 }
 
+func TestATProtoEngagementHealth_Basic(t *testing.T) {
+	mux := http.NewServeMux()
+	_, cfg := setupDigestServer(t, mux)
+	mux.HandleFunc("/xrpc/app.bsky.feed.getAuthorFeed", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("actor") != "did:plc:digest-test" {
+			t.Fatalf("actor = %q, want session did", r.URL.Query().Get("actor"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"feed": []map[string]any{
+			{
+				"post": map[string]any{
+					"uri": "at://did:plc:test/app.bsky.feed.post/1",
+					"author": map[string]string{
+						"handle":      "test.bsky.social",
+						"displayName": "Tester",
+					},
+					"record": map[string]string{
+						"text":      "Building agent tools with useful feedback loops",
+						"createdAt": time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339),
+					},
+					"likeCount":   5,
+					"repostCount": 2,
+					"replyCount":  3,
+				},
+			},
+			{
+				"post": map[string]any{
+					"uri": "at://did:plc:test/app.bsky.feed.post/2",
+					"author": map[string]string{
+						"handle":      "test.bsky.social",
+						"displayName": "Tester",
+					},
+					"record": map[string]string{
+						"text":      "agent tools need better evaluation",
+						"createdAt": time.Now().UTC().Add(-26 * time.Hour).Format(time.RFC3339),
+					},
+					"likeCount":   1,
+					"repostCount": 0,
+					"replyCount":  0,
+				},
+			},
+		}})
+	})
+
+	tool := ATProtoEngagementHealth(&config.Config{ATProto: cfg})
+	result, err := tool.Exec(context.Background(), ToolCallContext{}, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Exec error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("Exec failed: %s", result.Output)
+	}
+	for _, want := range []string{"Engagement health", "posts analyzed: 2", "Top posts:", "Suggested actions:"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("output missing %q: %s", want, result.Output)
+		}
+	}
+	if !strings.Contains(result.Output, "[12] Building agent tools") {
+		t.Fatalf("expected top post score in output: %s", result.Output)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // tool metadata tests
 // ---------------------------------------------------------------------------
@@ -412,6 +473,7 @@ func TestATProtoToolMetadata_Digest(t *testing.T) {
 		name      string
 		dangerous bool
 	}{
+		{ATProtoEngagementHealth(cfg), "atproto_engagement_health", false},
 		{ATProtoVibeCheck(cfg), "atproto_vibe_check", false},
 		{ATProtoDailyDigest(cfg), "atproto_daily_digest", false},
 	}

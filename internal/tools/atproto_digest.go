@@ -148,11 +148,212 @@ func fetchFilteredFeed(ctx context.Context, cli *atProtoClient, hours int, limit
 	return result, nil
 }
 
+func fetchAuthorFeed(cli *atProtoClient, actor string, limit int) ([]digestPost, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	params := url.Values{
+		"actor": {actor},
+		"limit": {fmt.Sprintf("%d", limit)},
+	}
+	data, err := cli.xrpcGet("app.bsky.feed.getAuthorFeed", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Feed []struct {
+			Post struct {
+				URI    string `json:"uri"`
+				Author struct {
+					Handle      string `json:"handle"`
+					DisplayName string `json:"displayName"`
+				} `json:"author"`
+				Record struct {
+					Text      string `json:"text"`
+					CreatedAt string `json:"createdAt"`
+				} `json:"record"`
+				LikeCount   int `json:"likeCount"`
+				RepostCount int `json:"repostCount"`
+				ReplyCount  int `json:"replyCount"`
+			} `json:"post"`
+		} `json:"feed"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+
+	posts := make([]digestPost, 0, len(resp.Feed))
+	for _, item := range resp.Feed {
+		createdAt, err := time.Parse(time.RFC3339, item.Post.Record.CreatedAt)
+		if err != nil {
+			continue
+		}
+		posts = append(posts, digestPost{
+			URI:          item.Post.URI,
+			Author:       item.Post.Author.DisplayName,
+			AuthorHandle: item.Post.Author.Handle,
+			Text:         item.Post.Record.Text,
+			CreatedAt:    createdAt,
+			Likes:        item.Post.LikeCount,
+			Reposts:      item.Post.RepostCount,
+			Replies:      item.Post.ReplyCount,
+		})
+	}
+	return posts, nil
+}
+
 func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------
+// atproto_engagement_health tool
+// ---------------------------------------------------------------------------
+
+type atprotoEngagementHealthTool struct{ cfg config.ATProtoConfig }
+
+// ATProtoEngagementHealth returns the engagement_health tool.
+func ATProtoEngagementHealth(cfg *config.Config) Tool {
+	return &atprotoEngagementHealthTool{cfg: cfg.ATProto}
+}
+
+func (t *atprotoEngagementHealthTool) Name() string { return "atproto_engagement_health" }
+func (t *atprotoEngagementHealthTool) Description() string {
+	return "Track your Bluesky posting patterns and engagement health. Summarizes cadence, average engagement, best posts, recurring topics, and practical next actions."
+}
+func (t *atprotoEngagementHealthTool) DangerLevel() DangerLevel { return Safe }
+func (t *atprotoEngagementHealthTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
+
+func (t *atprotoEngagementHealthTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"actor": {"type": "string", "description": "Handle or DID to analyze. Defaults to the authenticated user."},
+			"limit": {"type": "integer", "description": "Recent posts to inspect (default 50, max 100)."}
+		}
+	}`)
+}
+
+func (t *atprotoEngagementHealthTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":     {"type": "boolean"},
+			"output": {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoEngagementHealthTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Actor string `json:"actor"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	if in.Limit <= 0 {
+		in.Limit = 50
+	}
+	if in.Limit > 100 {
+		in.Limit = 100
+	}
+
+	cli := newATProtoClient(t.cfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	actor := strings.TrimSpace(in.Actor)
+	if actor == "" {
+		actor = cli.session.DID
+	}
+
+	posts, err := fetchAuthorFeed(cli, actor, in.Limit)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	if len(posts) == 0 {
+		return ToolResult{OK: true, Output: "no recent posts found to analyze."}, nil
+	}
+
+	sort.Slice(posts, func(i, j int) bool {
+		return posts[i].CreatedAt.After(posts[j].CreatedAt)
+	})
+	totalEngagement := 0
+	replyPosts := 0
+	quoteOrLinkish := 0
+	for _, post := range posts {
+		totalEngagement += engagementScore(post)
+		if strings.HasPrefix(strings.TrimSpace(post.Text), "@") {
+			replyPosts++
+		}
+		if strings.Contains(post.Text, "http://") || strings.Contains(post.Text, "https://") || strings.Contains(post.Text, "quote") {
+			quoteOrLinkish++
+		}
+	}
+	avgEngagement := float64(totalEngagement) / float64(len(posts))
+	newest := posts[0].CreatedAt
+	oldest := posts[len(posts)-1].CreatedAt
+	windowHours := newest.Sub(oldest).Hours()
+	if windowHours < 1 {
+		windowHours = 1
+	}
+	postsPerDay := float64(len(posts)) / (windowHours / 24)
+
+	top := append([]digestPost(nil), posts...)
+	sort.Slice(top, func(i, j int) bool {
+		return engagementScore(top[i]) > engagementScore(top[j])
+	})
+	if len(top) > 3 {
+		top = top[:3]
+	}
+
+	topWordsList := topWords(posts, 8)
+	suggestions := engagementHealthSuggestions(postsPerDay, avgEngagement, replyPosts, quoteOrLinkish, len(posts))
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Engagement health for %s\n", actor)
+	fmt.Fprintf(&sb, "posts analyzed: %d · cadence: %.1f/day · avg engagement: %.1f · replies: %d%%\n", len(posts), postsPerDay, avgEngagement, replyPosts*100/len(posts))
+	if len(topWordsList) > 0 {
+		fmt.Fprintf(&sb, "recurring topics: %s\n", strings.Join(topWordsList, ", "))
+	}
+	fmt.Fprintf(&sb, "\nTop posts:\n")
+	for idx, post := range top {
+		fmt.Fprintf(&sb, "%d. [%d] %s\n", idx+1, engagementScore(post), post.Text)
+	}
+	fmt.Fprintf(&sb, "\nSuggested actions:\n")
+	for _, suggestion := range suggestions {
+		fmt.Fprintf(&sb, "- %s\n", suggestion)
+	}
+	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+}
+
+func engagementHealthSuggestions(postsPerDay, avgEngagement float64, replyPosts, quoteOrLinkish, totalPosts int) []string {
+	var out []string
+	switch {
+	case postsPerDay < 0.5:
+		out = append(out, "Increase cadence: recent posting is sparse, so test a predictable daily post window.")
+	case postsPerDay > 6:
+		out = append(out, "Reduce burstiness: many posts per day can fragment attention; consolidate weaker updates.")
+	default:
+		out = append(out, "Cadence looks sustainable; keep testing repeatable formats around your strongest topics.")
+	}
+	if avgEngagement < 2 {
+		out = append(out, "Ask more direct questions or add clearer context hooks to invite replies.")
+	} else {
+		out = append(out, "Double down on posts similar to the top performers by topic and format.")
+	}
+	if totalPosts > 0 && replyPosts*100/totalPosts < 20 {
+		out = append(out, "Add more conversational replies; your recent mix is mostly standalone posts.")
+	}
+	if totalPosts > 0 && quoteOrLinkish*100/totalPosts > 60 {
+		out = append(out, "Balance link-heavy posts with original summaries or takeaways.")
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
