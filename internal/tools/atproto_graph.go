@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 )
@@ -690,4 +693,218 @@ func topSharedFollowLabels(cluster communityCluster, limit int) []string {
 		out = append(out, fmt.Sprintf("%s (%d)", item.Label, item.Count))
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// atproto_follower_momentum — compare followers against a local snapshot
+// ---------------------------------------------------------------------------
+
+type atprotoFollowerMomentumTool struct{ cfg config.ATProtoConfig }
+
+// ATProtoFollowerMomentum returns the atproto_follower_momentum tool.
+func ATProtoFollowerMomentum(cfg *config.Config) Tool {
+	return &atprotoFollowerMomentumTool{cfg: cfg.ATProto}
+}
+
+func (t *atprotoFollowerMomentumTool) Name() string { return "atproto_follower_momentum" }
+func (t *atprotoFollowerMomentumTool) Description() string {
+	return "Track Bluesky follower momentum by comparing current followers with the previous local snapshot under XDG_STATE_HOME. Reports new followers and the topics suggested by their bios."
+}
+func (t *atprotoFollowerMomentumTool) DangerLevel() DangerLevel { return Safe }
+func (t *atprotoFollowerMomentumTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, MutatesRunState: true}
+}
+
+func (t *atprotoFollowerMomentumTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"actor": {"type": "string", "description": "Handle or DID whose followers should be tracked. Defaults to the authenticated user."},
+			"limit": {"type": "integer", "description": "Followers to fetch for the snapshot (default 100, max 100)."},
+			"dry_run": {"type": "boolean", "description": "When true, do not update the local follower snapshot."}
+		}
+	}`)
+}
+
+func (t *atprotoFollowerMomentumTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"ok":     {"type": "boolean"},
+			"output": {"type": "string"}
+		}
+	}`)
+}
+
+func (t *atprotoFollowerMomentumTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	var in struct {
+		Actor  string `json:"actor"`
+		Limit  int    `json:"limit"`
+		DryRun bool   `json:"dry_run"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
+	}
+	if in.Limit <= 0 {
+		in.Limit = 100
+	}
+	if in.Limit > 100 {
+		in.Limit = 100
+	}
+
+	cli := newATProtoClient(t.cfg)
+	if err := cli.login(); err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	actor := strings.TrimSpace(in.Actor)
+	if actor == "" {
+		actor = cli.session.DID
+	}
+
+	followers, err := fetchFollowerProfiles(cli, actor, in.Limit)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	snapshotPath, err := followerMomentumSnapshotPath(actor)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	previous := readFollowerMomentumSnapshot(snapshotPath)
+	current := make(map[string]followerMomentumProfile, len(followers))
+	var newFollowers []followerMomentumProfile
+	for _, follower := range followers {
+		current[follower.DID] = follower
+		if _, ok := previous[follower.DID]; !ok {
+			newFollowers = append(newFollowers, follower)
+		}
+	}
+	sort.Slice(newFollowers, func(i, j int) bool {
+		return newFollowers[i].Handle < newFollowers[j].Handle
+	})
+
+	if !in.DryRun {
+		if err := writeFollowerMomentumSnapshot(snapshotPath, current); err != nil {
+			return ToolResult{OK: false, Output: err.Error()}, nil
+		}
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Follower momentum for %s\n", actor)
+	fmt.Fprintf(&sb, "followers fetched: %d · previous snapshot: %d · new: %d\n", len(followers), len(previous), len(newFollowers))
+	if len(newFollowers) == 0 {
+		fmt.Fprintf(&sb, "No new followers since the last snapshot.")
+		return ToolResult{OK: true, Output: sb.String()}, nil
+	}
+	fmt.Fprintf(&sb, "new follower topics: %s\n\n", strings.Join(topFollowerBioWords(newFollowers, 8), ", "))
+	for idx, follower := range newFollowers {
+		if idx >= 10 {
+			fmt.Fprintf(&sb, "...and %d more\n", len(newFollowers)-idx)
+			break
+		}
+		label := follower.DisplayName
+		if label == "" {
+			label = follower.Handle
+		}
+		fmt.Fprintf(&sb, "- %s (@%s)", label, follower.Handle)
+		if strings.TrimSpace(follower.Description) != "" {
+			fmt.Fprintf(&sb, ": %s", clipAtprotoText(follower.Description, 140))
+		}
+		fmt.Fprintln(&sb)
+	}
+	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+}
+
+type followerMomentumProfile struct {
+	DID         string `json:"did"`
+	Handle      string `json:"handle"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+func fetchFollowerProfiles(cli *atProtoClient, actor string, limit int) ([]followerMomentumProfile, error) {
+	data, err := cli.xrpcGet("app.bsky.graph.getFollowers", url.Values{
+		"actor": {actor},
+		"limit": {fmt.Sprintf("%d", limit)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Followers []struct {
+			DID         string `json:"did"`
+			Handle      string `json:"handle"`
+			DisplayName string `json:"displayName"`
+			Description string `json:"description"`
+		} `json:"followers"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]followerMomentumProfile, 0, len(resp.Followers))
+	for _, follower := range resp.Followers {
+		out = append(out, followerMomentumProfile{
+			DID:         follower.DID,
+			Handle:      follower.Handle,
+			DisplayName: follower.DisplayName,
+			Description: follower.Description,
+		})
+	}
+	return out, nil
+}
+
+func followerMomentumSnapshotPath(actor string) (string, error) {
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	safeActor := strings.NewReplacer("/", "_", ":", "_", "@", "_").Replace(actor)
+	return filepath.Join(base, "v100", "atproto_followers_"+safeActor+".json"), nil
+}
+
+func readFollowerMomentumSnapshot(path string) map[string]followerMomentumProfile {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]followerMomentumProfile{}
+	}
+	var snapshot struct {
+		Followers map[string]followerMomentumProfile `json:"followers"`
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil || snapshot.Followers == nil {
+		return map[string]followerMomentumProfile{}
+	}
+	return snapshot.Followers
+}
+
+func writeFollowerMomentumSnapshot(path string, followers map[string]followerMomentumProfile) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(struct {
+		UpdatedAt time.Time                          `json:"updated_at"`
+		Followers map[string]followerMomentumProfile `json:"followers"`
+	}{UpdatedAt: time.Now().UTC(), Followers: followers}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func topFollowerBioWords(followers []followerMomentumProfile, limit int) []string {
+	posts := make([]digestPost, 0, len(followers))
+	for _, follower := range followers {
+		posts = append(posts, digestPost{Text: follower.Description})
+	}
+	return topWords(posts, limit)
+}
+
+func clipAtprotoText(s string, limit int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "..."
 }

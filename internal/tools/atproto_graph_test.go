@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -49,6 +50,16 @@ func TestATProtoGraphTools(t *testing.T) {
 		}
 		if !strings.Contains(string(tool.InputSchema()), "min_shared") {
 			t.Error("input schema should contain min_shared")
+		}
+	})
+
+	t.Run("follower_momentum_schema", func(t *testing.T) {
+		tool := ATProtoFollowerMomentum(cfg)
+		if tool.Name() != "atproto_follower_momentum" {
+			t.Errorf("expected name atproto_follower_momentum, got %s", tool.Name())
+		}
+		if !tool.Effects().MutatesRunState {
+			t.Error("follower momentum should declare snapshot state mutation")
 		}
 	})
 }
@@ -108,5 +119,72 @@ func TestATProtoCommunityDetectClustersBySharedFollows(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "Xavier (@x.bsky.social) (2)") {
 		t.Fatalf("expected shared follow evidence: %s", res.Output)
+	}
+}
+
+func TestATProtoFollowerMomentumReportsNewFollowersAndPersistsSnapshot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"accessJwt": "jwt",
+			"did":       "did:plc:me",
+			"handle":    "me.bsky.social",
+		})
+	})
+	mux.HandleFunc("/xrpc/app.bsky.graph.getFollowers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("actor") != "did:plc:me" {
+			t.Fatalf("actor = %q, want did:plc:me", r.URL.Query().Get("actor"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"followers": []map[string]string{
+			{
+				"did":         "did:plc:old",
+				"handle":      "old.bsky.social",
+				"displayName": "Old",
+				"description": "existing systems account",
+			},
+			{
+				"did":         "did:plc:new",
+				"handle":      "new.bsky.social",
+				"displayName": "New",
+				"description": "agent evaluation research and tools",
+			},
+		}})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := &config.Config{ATProto: config.ATProtoConfig{
+		Handle:      "me.bsky.social",
+		AppPassword: "pw",
+		PDSURL:      srv.URL,
+	}}
+	snapshotPath, err := followerMomentumSnapshotPath("did:plc:me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFollowerMomentumSnapshot(snapshotPath, map[string]followerMomentumProfile{
+		"did:plc:old": {DID: "did:plc:old", Handle: "old.bsky.social"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := ATProtoFollowerMomentum(cfg)
+	res, err := tool.Exec(t.Context(), ToolCallContext{}, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("tool failed: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, "new: 1") || !strings.Contains(res.Output, "New (@new.bsky.social)") {
+		t.Fatalf("unexpected output: %s", res.Output)
+	}
+	data, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "did:plc:new") {
+		t.Fatalf("snapshot not updated: %s", string(data))
 	}
 }
