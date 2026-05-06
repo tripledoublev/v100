@@ -1,12 +1,6 @@
 # Changelog
 
-## v0.2.31 — 2026-05-06
-
-### Fixes
-
-- Wake task multi-step execution
-
-## v0.2.30 — 2026-05-05
+## v0.2.30 — 2026-05-06
 
 **Trace Provenance, ATProto Intelligence, and Run Steering**
 
@@ -28,6 +22,7 @@
 
 - Persist mutation rejection reports
 - Go workflow and GLM compression cleanup
+- Wake task multi-step execution
 
 ### Docs
 
