@@ -37,7 +37,7 @@ func ATProtoIndex(cfg *config.Config) Tool { return &atprotoIndexTool{cfg: cfg} 
 
 func (t *atprotoIndexTool) Name() string { return "atproto_index" }
 func (t *atprotoIndexTool) Description() string {
-	return "Fetch ATProto/Bluesky records (feed, notifications, a user profile, or a user's posts directly from their PDS) and store them as vector embeddings for later semantic retrieval with atproto_recall."
+	return "Fetch ATProto/Bluesky records (feed, a user profile, or a user's posts directly from their PDS) and store them as vector embeddings for later semantic retrieval."
 }
 func (t *atprotoIndexTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoIndexTool) Effects() ToolEffects {
@@ -51,8 +51,8 @@ func (t *atprotoIndexTool) InputSchema() json.RawMessage {
 		"properties": {
 			"source": {
 				"type": "string",
-				"enum": ["feed", "notifications", "profile", "user_posts"],
-				"description": "What to index: feed (home timeline), notifications, a user profile, or user_posts (fetches posts directly from a user's PDS — works even when the appview/Bsky.app is down)."
+				"enum": ["feed", "profile", "user_posts"],
+				"description": "What to index: feed (home timeline), a user profile, or user_posts (fetches posts directly from a user's PDS — works even when the appview/Bsky.app is down)."
 			},
 			"limit": {
 				"type": "integer",
@@ -159,14 +159,12 @@ func fetchRecordsForIndexing(cli *atProtoClient, source string, limit int, handl
 	switch source {
 	case "feed":
 		return fetchFeedRecords(cli, limit)
-	case "notifications":
-		return fetchNotificationRecords(cli, limit)
 	case "profile":
 		return fetchProfileRecord(cli, handle)
 	case "user_posts":
 		return fetchUserPostsPDS(handle, limit)
 	default:
-		return nil, fmt.Errorf("unknown source %q; must be feed, notifications, profile, or user_posts", source)
+		return nil, fmt.Errorf("unknown source %q; must be feed, profile, or user_posts", source)
 	}
 }
 
@@ -372,49 +370,6 @@ func fetchFeedRecords(cli *atProtoClient, limit int) ([]indexRecord, error) {
 	return out, nil
 }
 
-func fetchNotificationRecords(cli *atProtoClient, limit int) ([]indexRecord, error) {
-	params := url.Values{"limit": {fmt.Sprintf("%d", limit)}}
-	data, err := cli.xrpcGet("app.bsky.notification.listNotifications", params)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Notifications []struct {
-			URI    string `json:"uri"`
-			Reason string `json:"reason"`
-			Author struct {
-				Handle      string `json:"handle"`
-				DisplayName string `json:"displayName"`
-			} `json:"author"`
-			Record struct {
-				Text string `json:"text"`
-			} `json:"record"`
-		} `json:"notifications"`
-	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("parse notifications: %w", err)
-	}
-	out := make([]indexRecord, 0, len(resp.Notifications))
-	for _, n := range resp.Notifications {
-		author := "@" + n.Author.Handle
-		if n.Author.DisplayName != "" {
-			author = n.Author.DisplayName + " (" + author + ")"
-		}
-		text := strings.TrimSpace(n.Record.Text)
-		content := fmt.Sprintf("[%s] %s", n.Reason, author)
-		if text != "" {
-			content += ": " + text
-		}
-		out = append(out, indexRecord{
-			text:       content,
-			uri:        n.URI,
-			author:     n.Author.Handle,
-			recordType: "notification",
-		})
-	}
-	return out, nil
-}
-
 func fetchProfileRecord(cli *atProtoClient, handle string) ([]indexRecord, error) {
 	if handle == "" {
 		handle = cli.cfg.Handle
@@ -460,7 +415,7 @@ func ATProtoRecall(cfg *config.Config) Tool { return &atprotoRecallTool{cfg: cfg
 
 func (t *atprotoRecallTool) Name() string { return "atproto_recall" }
 func (t *atprotoRecallTool) Description() string {
-	return "Semantic search over ATProto/Bluesky records previously indexed with atproto_index. Returns the most relevant posts, notifications, or profiles as RAG context."
+	return "Semantic search over ATProto/Bluesky records previously indexed with atproto_index. Returns the most relevant posts, or profiles as RAG context."
 }
 func (t *atprotoRecallTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoRecallTool) Effects() ToolEffects {
@@ -482,7 +437,7 @@ func (t *atprotoRecallTool) InputSchema() json.RawMessage {
 			},
 			"record_type": {
 				"type": "string",
-				"enum": ["post", "notification", "profile"],
+				"enum": ["post", "profile"],
 				"description": "Filter results to a specific record type (optional)."
 			}
 		}
