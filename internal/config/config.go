@@ -82,9 +82,23 @@ type WakeTask struct {
 
 // WakeTaskStep is a single step within a wake task.
 type WakeTaskStep struct {
-	Name   string `toml:"name"`
-	Tool   string `toml:"tool,omitempty"`
-	Prompt string `toml:"prompt"`
+	Name   string   `toml:"name"`
+	Tool   string   `toml:"tool,omitempty"`
+	Tools  []string `toml:"tools,omitempty"` // multi-tool allowlist; merged with Tool if both set
+	Prompt string   `toml:"prompt"`
+}
+
+// EnabledTools returns the deduplicated list of tools for this step.
+func (s WakeTaskStep) EnabledTools() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range append([]string{s.Tool}, s.Tools...) {
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // ProviderConfig holds per-provider settings.

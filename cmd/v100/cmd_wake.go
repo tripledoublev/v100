@@ -1547,7 +1547,7 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 	var carryContext string
 
 	for i, step := range task.Steps {
-		reg := buildScopedToolRegistry(cfg, step.Tool)
+		reg := buildScopedToolRegistry(cfg, step.EnabledTools()...)
 
 		pol := policy.Default()
 		loop := &core.Loop{
@@ -1597,12 +1597,12 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 	return runID, nil, nil
 }
 
-func buildScopedToolRegistry(cfg *config.Config, toolName string) *tools.Registry {
-	if toolName == "" {
+func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Registry {
+	if len(toolNames) == 0 {
 		return tools.NewRegistry(nil)
 	}
 
-	reg := tools.NewRegistry([]string{toolName})
+	reg := tools.NewRegistry(toolNames)
 	reg.Register(tools.FSRead())
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
@@ -1633,6 +1633,8 @@ func buildScopedToolRegistry(cfg *config.Config, toolName string) *tools.Registr
 	reg.Register(tools.ATProtoIndex(cfg))
 	reg.Register(tools.ATProtoRecall(cfg))
 	reg.Register(tools.ATProtoAnonSynth(cfg))
+	reg.Register(tools.BlackboardRead())
+	reg.Register(tools.BlackboardWrite())
 	return reg
 }
 
@@ -1642,8 +1644,8 @@ func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskS
 	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
 	fmt.Fprintf(&b, "%s\n\n", step.Prompt)
 
-	if step.Tool != "" {
-		fmt.Fprintf(&b, "Call the %s tool now.\n", step.Tool)
+	if enabled := step.EnabledTools(); len(enabled) > 0 {
+		fmt.Fprintf(&b, "Available tools: %s. Use them as needed.\n", strings.Join(enabled, ", "))
 	}
 
 	if carryContext != "" {
