@@ -174,6 +174,7 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
+	loop.Hooks = append(loop.Hooks, core.SteerHook(trace.Path()))
 	tui.SetAppendConversationMessageFn(func(role, content string) {
 		if err := loop.AppendConversationMessage(role, content); err != nil && logger != nil {
 			logger.Printf("append external review: %v", err)

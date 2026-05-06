@@ -244,6 +244,7 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
+	loop.Hooks = append(loop.Hooks, core.SteerHook(trace.Path()))
 	loop.OutputFn = outputFn
 	defer persistRunSelection(filepath.Dir(run.TraceFile), prov.Name(), model, loop.ModelMetadata, false)
 
@@ -428,6 +429,7 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}
+	loop.Hooks = append(loop.Hooks, core.SteerHook(trace.Path()))
 	tui.SetAppendConversationMessageFn(func(role, content string) {
 		if err := loop.AppendConversationMessage(role, content); err != nil && logger != nil {
 			logger.Printf("append external review: %v", err)

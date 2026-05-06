@@ -68,6 +68,7 @@ func rootCmd() *cobra.Command {
 		verifyCmd(),
 		queryCmd(),
 		runsCmd(&cfgPath),
+		steerCmd(),
 		evolveCmd(&cfgPath),
 		researchCmd(&cfgPath),
 		compressCmd(&cfgPath),

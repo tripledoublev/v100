@@ -351,6 +351,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	}
 
 	// Register default hooks for behavioral safety.
+	loop.Hooks = append(loop.Hooks, core.SteerHook(trace.Path()))
 	loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))
 	loop.Hooks = append(loop.Hooks, core.DeduplicationHook(2))
 
@@ -480,10 +481,10 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	var (
 		firstStep        = true
 		voiceInteractive = false
-		contInput  string
-		contImages []providers.ImageAttachment
-		loopInput  string
-		loopImages []providers.ImageAttachment
+		contInput        string
+		contImages       []providers.ImageAttachment
+		loopInput        string
+		loopImages       []providers.ImageAttachment
 	)
 
 	if initialPrompt != "" {
