@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.2.31 — 2026-05-06
+
+### Fixes
+
+- Wake task multi-step execution
+
+## v0.2.30 — 2026-05-05
+
+**Trace Provenance, ATProto Intelligence, and Run Steering**
+
+### Features
+
+- Cross-harness trace adapters
+- Semantic taint isolation
+- Trajectory mirroring metrics
+- ATProto provenance publishing
+- Trace DAG explorer
+- Run provenance lookup
+- Asynchronous run steering
+- ATProto follower momentum
+- ATProto engagement health
+- ATProto community detection
+- Autonomous wake and evolution workflows
+
+### Fixes
+
+- Persist mutation rejection reports
+- Go workflow and GLM compression cleanup
+
+### Docs
+
+- ATProto tool summary refresh
+
 ## v0.2.29 — 2026-05-05
 
 **Synthesis Wake Tasks and Multi-Step Autonomous Workflows**
