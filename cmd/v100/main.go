@@ -38,6 +38,7 @@ func rootCmd() *cobra.Command {
 		resumeCmd(&cfgPath),
 		restoreCmd(&cfgPath),
 		replayCmd(&cfgPath),
+		graphCmd(),
 		blameCmd(),
 		wakeCmd(&cfgPath),
 		toolsCmd(&cfgPath),
