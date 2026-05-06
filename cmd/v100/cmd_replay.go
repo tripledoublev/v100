@@ -24,9 +24,10 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	var replaceModel string
 	var injectTool []string
 	var useTUI bool
+	var traceFormat string
 
 	cmd := &cobra.Command{
-		Use:   "replay <run_id>",
+		Use:   "replay <run_id_or_trace_file>",
 		Short: "Pretty-print a run trace as a readable transcript",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -34,13 +35,7 @@ func replayCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 
-			runID := args[0]
-			runDir, err := findRunDir(runID)
-			if err != nil {
-				return err
-			}
-
-			events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+			runID, events, err := loadReplayEvents(args[0], traceFormat)
 			if err != nil {
 				return err
 			}
@@ -79,7 +74,21 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&replaceModel, "replace-model", "", "run recorded model.call events against this model and show counterfactual responses")
 	cmd.Flags().StringArrayVar(&injectTool, "inject-tool", nil, "inject tool output during deterministic replay: name=output (repeatable)")
 	cmd.Flags().BoolVar(&useTUI, "tui", false, "launch interactive trace scrubber")
+	cmd.Flags().StringVar(&traceFormat, "format", "", "read an external trace file as inspect or metr instead of a v100 run id")
 	return cmd
+}
+
+func loadReplayEvents(arg, traceFormat string) (string, []core.Event, error) {
+	if strings.TrimSpace(traceFormat) != "" {
+		events, err := readHarnessTrace(arg, traceFormat)
+		return filepath.Base(strings.TrimSuffix(arg, filepath.Ext(arg))), events, err
+	}
+	runDir, err := findRunDir(arg)
+	if err != nil {
+		return "", nil, err
+	}
+	events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+	return filepath.Base(runDir), events, err
 }
 
 func validateReplayFlags(deterministic, stepMode bool, replaceModel string, injectTool []string, useTUI bool) error {
