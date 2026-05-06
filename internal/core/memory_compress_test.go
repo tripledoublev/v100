@@ -987,3 +987,66 @@ func TestMemoryAutoModeOnlyInjectsOnFirstModelCallOfStep(t *testing.T) {
 		}
 	}
 }
+
+// TestCompressionAlignsWithRoleBoundaries ensures that bulk compression doesn't
+// create an illegal message sequence (like System followed by Tool).
+func TestCompressionAlignsWithRoleBoundaries(t *testing.T) {
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{
+			{AssistantText: "summary text", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
+			{AssistantText: "final answer"},
+		},
+	}
+	// Low context limit to trigger bulk compression.
+	loop := newCompressLoop(t, prov, 100)
+
+	// Construct a sequence where the natural cutoff (len/2) would land right before a Tool message.
+	// Initial state:
+	// 0: System
+	// 1: User
+	// 2: Assistant (Call)
+	// 3: Tool (Result)
+	// 4: Assistant (Final)
+	// 5: User (New)
+	// 6: Assistant (Call)
+	// 7: Tool (Result)
+	// 8: Assistant (Final)
+	
+	loop.Messages = []providers.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: "u3"},
+		{Role: "assistant", Content: "call1", ToolCalls: []providers.ToolCall{{ID: "c1", Name: "noop"}}},
+		{Role: "tool", Content: "res1", ToolCallID: "c1"},
+		{Role: "assistant", Content: "done1"},
+		{Role: "user", Content: "u4"},
+		{Role: "assistant", Content: "a4"},
+		{Role: "user", Content: "u5"},
+		{Role: "assistant", Content: "a5"},
+	}
+
+	// len = 12, cutoff = 6.
+	// Summarized: 0..5 (up to Assistant Call).
+	// Remaining: 6 (Tool), 7..11.
+	// Result: [Summary, Tool, Assistant, ...]. ILLEGAL.
+	if err := loop.ForceCompress(context.Background(), "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The summary (System) must NOT be followed by a Tool message.
+	if len(loop.Messages) < 2 {
+		t.Fatalf("expected at least 2 messages after compression, got %d", len(loop.Messages))
+	}
+
+	first := loop.Messages[0]
+	second := loop.Messages[1]
+
+	if first.Role != "system" {
+		t.Errorf("first message role = %q, want system", first.Role)
+	}
+	if second.Role == "tool" {
+		t.Errorf("illegal sequence: System followed by Tool. Sequence: %s, %s", first.Role, second.Role)
+	}
+}

@@ -1258,8 +1258,14 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 
 	// ── Pass 2: Bulk fallback (oldest-half summarization) ─────────────────
 	cutoff := len(l.Messages) / 2
-	if cutoff < 4 {
-		return nil // too short to compress meaningfully
+	// Ensure we don't orphan tool results. If the message immediately after the
+	// cutoff is a tool result, it must be included in the summary.
+	for cutoff < len(l.Messages) && l.Messages[cutoff].Role == "tool" {
+		cutoff++
+	}
+
+	if cutoff < 4 || cutoff >= len(l.Messages)-1 {
+		return nil // too short or too near the end to compress meaningfully
 	}
 	toSummarize := l.Messages[:cutoff]
 
