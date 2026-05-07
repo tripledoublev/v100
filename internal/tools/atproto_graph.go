@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
+	"golang.org/x/sync/errgroup"
 )
 
 type sampledFollow struct {
@@ -474,7 +476,7 @@ func (t *atprotoCommunityDetectTool) OutputSchema() json.RawMessage {
 	}`)
 }
 
-func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+func (t *atprotoCommunityDetectTool) Exec(ctx context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
 	var in struct {
 		Actor        string `json:"actor"`
 		SampleSize   int    `json:"sample_size"`
@@ -532,46 +534,68 @@ func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, 
 		return ToolResult{OK: true, Output: "no follows found to cluster."}, nil
 	}
 
-	sampled := make([]sampledFollow, 0, minInt(len(seedResp.Follows), in.SampleSize))
-	for _, follow := range seedResp.Follows {
-		if len(sampled) >= in.SampleSize {
-			break
-		}
-		data, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
-			"actor": {follow.DID},
-			"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
-		})
-		if err != nil {
-			continue
-		}
-		var resp struct {
-			Follows []struct {
-				DID         string `json:"did"`
-				Handle      string `json:"handle"`
-				DisplayName string `json:"displayName"`
-			} `json:"follows"`
-		}
-		if err := json.Unmarshal(data, &resp); err != nil {
-			continue
-		}
-		outbound := make(map[string]string, len(resp.Follows))
-		for _, f := range resp.Follows {
-			label := f.DisplayName
-			if label == "" {
-				label = f.Handle
+	sampleLimit := minInt(len(seedResp.Follows), in.SampleSize)
+	sampledByIndex := make([]sampledFollow, sampleLimit)
+	keep := make([]bool, sampleLimit)
+	var sampledMu sync.Mutex
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(5)
+	for idx := 0; idx < sampleLimit; idx++ {
+		idx := idx
+		follow := seedResp.Follows[idx]
+		group.Go(func() error {
+			if err := groupCtx.Err(); err != nil {
+				return err
 			}
-			outbound[f.DID] = fmt.Sprintf("%s (@%s)", label, f.Handle)
-		}
-		name := follow.DisplayName
-		if name == "" {
-			name = follow.Handle
-		}
-		sampled = append(sampled, sampledFollow{
-			DID:     follow.DID,
-			Handle:  follow.Handle,
-			Name:    name,
-			Follows: outbound,
+			data, err := cli.xrpcGet("app.bsky.graph.getFollows", url.Values{
+				"actor": {follow.DID},
+				"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
+			})
+			if err != nil {
+				return nil
+			}
+			var resp struct {
+				Follows []struct {
+					DID         string `json:"did"`
+					Handle      string `json:"handle"`
+					DisplayName string `json:"displayName"`
+				} `json:"follows"`
+			}
+			if err := json.Unmarshal(data, &resp); err != nil {
+				return nil
+			}
+			outbound := make(map[string]string, len(resp.Follows))
+			for _, f := range resp.Follows {
+				label := f.DisplayName
+				if label == "" {
+					label = f.Handle
+				}
+				outbound[f.DID] = fmt.Sprintf("%s (@%s)", label, f.Handle)
+			}
+			name := follow.DisplayName
+			if name == "" {
+				name = follow.Handle
+			}
+			sampledMu.Lock()
+			sampledByIndex[idx] = sampledFollow{
+				DID:     follow.DID,
+				Handle:  follow.Handle,
+				Name:    name,
+				Follows: outbound,
+			}
+			keep[idx] = true
+			sampledMu.Unlock()
+			return nil
 		})
+	}
+	if err := group.Wait(); err != nil {
+		return ToolResult{OK: false, Output: "failed to fetch sampled follows: " + err.Error()}, nil
+	}
+	sampled := make([]sampledFollow, 0, sampleLimit)
+	for idx, item := range sampledByIndex {
+		if keep[idx] {
+			sampled = append(sampled, item)
+		}
 	}
 
 	if len(sampled) == 0 {

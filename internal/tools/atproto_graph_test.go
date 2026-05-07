@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 )
@@ -186,5 +188,68 @@ func TestATProtoFollowerMomentumReportsNewFollowersAndPersistsSnapshot(t *testin
 	}
 	if !strings.Contains(string(data), "did:plc:new") {
 		t.Fatalf("snapshot not updated: %s", string(data))
+	}
+}
+
+func TestATProtoCommunityDetectFetchesSampledFollowsConcurrently(t *testing.T) {
+	var inFlight int32
+	var maxInFlight int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"accessJwt": "jwt",
+			"did":       "did:plc:me",
+			"handle":    "me.bsky.social",
+		})
+	})
+	mux.HandleFunc("/xrpc/app.bsky.graph.getFollows", func(w http.ResponseWriter, r *http.Request) {
+		actor := r.URL.Query().Get("actor")
+		if actor == "did:plc:me" {
+			follows := make([]map[string]string, 0, 8)
+			for i := 0; i < 8; i++ {
+				follows = append(follows, map[string]string{
+					"did":         "did:plc:follow" + string(rune('a'+i)),
+					"handle":      "follow.bsky.social",
+					"displayName": "Follow",
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"follows": follows})
+			return
+		}
+		cur := atomic.AddInt32(&inFlight, 1)
+		for {
+			max := atomic.LoadInt32(&maxInFlight)
+			if cur <= max || atomic.CompareAndSwapInt32(&maxInFlight, max, cur) {
+				break
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+		atomic.AddInt32(&inFlight, -1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"follows": []map[string]string{
+			{
+				"did":         "did:plc:shared",
+				"handle":      "shared.bsky.social",
+				"displayName": "Shared",
+			},
+		}})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := &config.Config{ATProto: config.ATProtoConfig{
+		Handle:      "me.bsky.social",
+		AppPassword: "pw",
+		PDSURL:      srv.URL,
+	}}
+	tool := ATProtoCommunityDetect(cfg)
+	res, err := tool.Exec(t.Context(), ToolCallContext{}, json.RawMessage(`{"sample_size":8,"follows_limit":5,"min_shared":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("tool failed: %s", res.Output)
+	}
+	if got := atomic.LoadInt32(&maxInFlight); got < 2 || got > 5 {
+		t.Fatalf("max concurrent sampled getFollows calls = %d, want between 2 and 5", got)
 	}
 }
