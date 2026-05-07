@@ -307,6 +307,26 @@ func (r *CLIRenderer) RenderEvent(ev core.Event) {
 			styleFail.Render(p.Error),
 		)
 
+	case core.EventHookIntervention:
+		var p core.HookInterventionPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		label := "hook"
+		if p.Reason == "external_steer" {
+			label = "STEER"
+		}
+		detail := strings.TrimSpace(p.Message)
+		if detail == "" {
+			detail = strings.TrimSpace(p.Action)
+		}
+		if p.Reason != "" && p.Reason != "external_steer" {
+			detail = strings.TrimSpace(detail + " (" + p.Reason + ")")
+		}
+		fmt.Printf("\n%s  %s  %s\n",
+			ts,
+			styleWarn.Render(label),
+			styleWarn.Render(detail),
+		)
+
 	case core.EventRunEnd:
 		var p core.RunEndPayload
 		_ = json.Unmarshal(ev.Payload, &p)

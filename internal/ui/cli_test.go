@@ -111,6 +111,25 @@ func TestCLIRendererShowsSystemWarningBeforeRunEnd(t *testing.T) {
 	}
 }
 
+func TestCLIRendererShowsSteerInterventionBanner(t *testing.T) {
+	r := NewCLIRenderer()
+
+	out := captureStdout(t, func() {
+		r.RenderEvent(eventWithPayload(t, core.EventHookIntervention, core.HookInterventionPayload{
+			Action:  "inject_message",
+			Message: "Operator steering update: pivot to tests",
+			Reason:  "external_steer",
+		}))
+	})
+
+	plain := stripANSI(out)
+	for _, want := range []string{"STEER", "pivot to tests"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("steer intervention output missing %q in %q", want, plain)
+		}
+	}
+}
+
 func TestPromptWithImagesReadsPlainCLIInput(t *testing.T) {
 	old := os.Stdin
 	r, w, err := os.Pipe()

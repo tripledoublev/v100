@@ -467,6 +467,21 @@ func (m *TUIModel) renderTraceEvent(ev core.Event) string {
 		return sep + "  " + indent + styleFail.Render("✗") + "  " + styleFail.Render(p.Name) + "  " + dur + "  " + styleFail.Render("[err] ") + styleMuted.Render(summary)
 	case core.EventRunError:
 		return sep + "  " + indent + styleFail.Render("!!") + "  " + styleFail.Render("error")
+	case core.EventHookIntervention:
+		var p core.HookInterventionPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		label := "hook"
+		if p.Reason == "external_steer" {
+			label = "STEER"
+		}
+		detail := strings.TrimSpace(p.Message)
+		if detail == "" {
+			detail = strings.TrimSpace(p.Action)
+		}
+		if detail == "" {
+			detail = string(ev.Type)
+		}
+		return sep + "  " + indent + styleWarn.Render("!!") + "  " + styleWarn.Render(label+"  "+detail)
 	case core.EventRunEnd:
 		return sep + "  " + styleMuted.Render("■■") + "  " + styleMuted.Render("end")
 	case core.EventAgentStart:
@@ -651,6 +666,14 @@ func (m *TUIModel) updateStatus(ev core.Event) {
 		m.StatusMode = i18n.StatusError
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = i18n.T("status_run_error")
+	case core.EventHookIntervention:
+		var p core.HookInterventionPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		m.StatusMode = i18n.StatusThinking
+		m.statusMode = m.StatusMode.String()
+		if p.Reason == "external_steer" {
+			m.statusLine = "steering update received"
+		}
 	case core.EventRunEnd:
 		m.StatusMode = i18n.StatusIdle
 		m.statusMode = m.StatusMode.String()

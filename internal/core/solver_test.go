@@ -136,6 +136,62 @@ func TestReactSolverThresholdHookIgnoresToolFreeTurn(t *testing.T) {
 	}
 }
 
+func TestReactSolverInjectsTokenBudgetSoftCapSystemPrompt(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{{AssistantText: "wrapping up"}},
+	}
+	l := &Loop{
+		Run:      &Run{ID: "test", Dir: t.TempDir()},
+		Provider: p,
+		Tools:    tools.NewRegistry(nil),
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10, MaxTokens: 1000, UsedTokens: 800}),
+		Policy:   &policy.Policy{SystemPrompt: "base prompt"},
+		Solver:   &ReactSolver{},
+	}
+
+	if _, err := l.Solver.Solve(ctx, l, "finish"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Requests) == 0 {
+		t.Fatal("expected provider request")
+	}
+	found := false
+	for _, msg := range p.Requests[0].Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "SOFT CAP") && strings.Contains(msg.Content, "Wrap up") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("provider request missing soft cap system prompt: %+v", p.Requests[0].Messages)
+	}
+}
+
+func TestReactSolverOmitsTokenBudgetSoftCapBelowThreshold(t *testing.T) {
+	ctx := context.Background()
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{{AssistantText: "continue"}},
+	}
+	l := &Loop{
+		Run:      &Run{ID: "test", Dir: t.TempDir()},
+		Provider: p,
+		Tools:    tools.NewRegistry(nil),
+		Budget:   NewBudgetTracker(&Budget{MaxSteps: 10, MaxTokens: 1000, UsedTokens: 799}),
+		Policy:   &policy.Policy{SystemPrompt: "base prompt"},
+		Solver:   &ReactSolver{},
+	}
+
+	if _, err := l.Solver.Solve(ctx, l, "continue"); err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range p.Requests[0].Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "SOFT CAP") {
+			t.Fatalf("unexpected soft cap system prompt below threshold: %+v", p.Requests[0].Messages)
+		}
+	}
+}
+
 func TestReactSolverDeduplicationHookWarnsBeforeThirdRequest(t *testing.T) {
 	ctx := context.Background()
 	p := &MockProvider{

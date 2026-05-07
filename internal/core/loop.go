@@ -827,9 +827,35 @@ func (l *Loop) buildMessagesWithStepMemory(stepID string, includeMemory bool, co
 		}
 	}
 
-	// 3. Conversation history
+	// 3. Dynamic budget soft cap.
+	if msg := l.tokenBudgetSoftCapMessage(); msg != "" {
+		msgs = append(msgs, providers.Message{
+			Role:    "system",
+			Content: msg,
+		})
+	}
+
+	// 4. Conversation history
 	msgs = append(msgs, l.Messages...)
 	return msgs
+}
+
+func (l *Loop) tokenBudgetSoftCapMessage() string {
+	if l == nil || l.Budget == nil {
+		return ""
+	}
+	b := l.Budget.Budget()
+	if b.MaxTokens <= 0 || b.UsedTokens <= 0 {
+		return ""
+	}
+	if b.UsedTokens*100 < b.MaxTokens*80 {
+		return ""
+	}
+	remaining := b.MaxTokens - b.UsedTokens
+	if remaining < 0 {
+		remaining = 0
+	}
+	return fmt.Sprintf("SOFT CAP: token budget is at or above 80%% (%d/%d tokens used, %d remaining). Wrap up the current task immediately: stop broad exploration, avoid optional tool calls, and deliver the smallest complete answer or patch.", b.UsedTokens, b.MaxTokens, remaining)
 }
 
 // SanitizeLiveMessages removes unresolved assistant tool calls from l.Messages

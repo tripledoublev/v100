@@ -165,6 +165,22 @@ func TestModelResponseDoesNotStealInputFocus(t *testing.T) {
 	}
 }
 
+func TestRenderTraceEventShowsSteerInterventionBanner(t *testing.T) {
+	m := NewTUIModel(false, false)
+	ev := eventWithPayload(t, core.EventHookIntervention, core.HookInterventionPayload{
+		Action:  "inject_message",
+		Message: "Operator steering update: pivot to tests",
+		Reason:  "external_steer",
+	})
+
+	got := stripANSI(m.renderTraceEvent(ev))
+	for _, want := range []string{"STEER", "pivot to tests"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("trace event missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestUserMessageAppearsInTranscript(t *testing.T) {
 	m := NewTUIModel(false, false)
 	m.width = 100
