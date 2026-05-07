@@ -55,6 +55,7 @@ func TestATProtoToolMetadata(t *testing.T) {
 		{ATProtoNotifications(cfg), "atproto_notifications", false, true, false},
 		{ATProtoPost(cfg), "atproto_post", true, true, true},
 		{ATProtoCreateRecord(cfg), "atproto_create_record", true, true, true},
+		{ATProtoPutRecord(cfg), "atproto_put_record", true, true, true},
 		{ATProtoResolve(cfg), "atproto_resolve", false, true, false},
 		{ATProtoUploadBlob(cfg), "atproto_upload_blob", true, true, true},
 	}
@@ -1046,8 +1047,14 @@ func TestATProtoCreateRecord_CustomProvenanceAltAccount(t *testing.T) {
 		"collection": "art.xx-c.provenance",
 		"account":    "alt",
 		"record": map[string]any{
-			"post":      "at://did:plc:xxc/app.bsky.feed.post/post1",
-			"sources":   []string{"at://did:plc:a/app.bsky.feed.post/src1"},
+			"subject": map[string]string{
+				"uri": "at://did:plc:xxc/app.bsky.feed.post/post1",
+				"cid": "bafypost",
+			},
+			"sources": []map[string]string{{
+				"uri": "at://did:plc:a/app.bsky.feed.post/src1",
+				"cid": "bafysrc",
+			}},
 			"agent":     "v100/run-1",
 			"createdAt": "2026-05-06T00:00:00Z",
 		},
@@ -1072,10 +1079,122 @@ func TestATProtoCreateRecord_CustomProvenanceAltAccount(t *testing.T) {
 	if record["$type"] != "art.xx-c.provenance" {
 		t.Fatalf("$type = %v", record["$type"])
 	}
-	if record["post"] != "at://did:plc:xxc/app.bsky.feed.post/post1" {
-		t.Fatalf("post = %v", record["post"])
+	subject, ok := record["subject"].(map[string]any)
+	if !ok {
+		t.Fatalf("subject = %#v", record["subject"])
+	}
+	if subject["uri"] != "at://did:plc:xxc/app.bsky.feed.post/post1" || subject["cid"] != "bafypost" {
+		t.Fatalf("subject = %#v", subject)
 	}
 	if !strings.Contains(result.Output, "at://did:plc:xxc/art.xx-c.provenance/abc123") {
 		t.Fatalf("result missing provenance URI: %s", result.Output)
+	}
+}
+
+func TestATProtoCreateRecord_CanDisableValidation(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Identifier string `json:"identifier"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"accessJwt": "tok", "did": "did:plc:xxc", "handle": body.Identifier,
+		})
+	})
+	var captured map[string]any
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"uri": "at://did:plc:xxc/com.atproto.lexicon.schema/art.xx-c.provenance",
+			"cid": "bafylex",
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{
+		ATProtoAlt: config.ATProtoConfig{Handle: "alt.art", AppPassword: "pw-alt", PDSURL: srv.URL},
+	}
+	validate := false
+	args, _ := json.Marshal(map[string]any{
+		"collection": "com.atproto.lexicon.schema",
+		"account":    "alt",
+		"rkey":       "art.xx-c.provenance",
+		"validate":   validate,
+		"record": map[string]any{
+			"$type":   "com.atproto.lexicon.schema",
+			"lexicon": 1,
+			"id":      "art.xx-c.provenance",
+			"defs":    map[string]any{},
+		},
+	})
+	result, err := ATProtoCreateRecord(cfg).Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK, got: %s", result.Output)
+	}
+	if captured["validate"] != false {
+		t.Fatalf("validate = %v, want false", captured["validate"])
+	}
+	if captured["rkey"] != "art.xx-c.provenance" {
+		t.Fatalf("rkey = %v", captured["rkey"])
+	}
+}
+
+func TestATProtoPutRecord_UpsertsFixedRKey(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Identifier string `json:"identifier"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"accessJwt": "tok", "did": "did:plc:xxc", "handle": body.Identifier,
+		})
+	})
+	var captured map[string]any
+	mux.HandleFunc("/xrpc/com.atproto.repo.putRecord", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"uri": "at://did:plc:xxc/com.atproto.lexicon.schema/art.xx-c.provenance",
+			"cid": "bafyupdated",
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{
+		ATProto: config.ATProtoConfig{Handle: "main.art", AppPassword: "pw-main", PDSURL: srv.URL},
+	}
+	validate := false
+	args, _ := json.Marshal(map[string]any{
+		"collection": "com.atproto.lexicon.schema",
+		"rkey":       "art.xx-c.provenance",
+		"validate":   validate,
+		"record": map[string]any{
+			"$type":   "com.atproto.lexicon.schema",
+			"lexicon": 1,
+			"id":      "art.xx-c.provenance",
+			"defs":    map[string]any{},
+		},
+	})
+	result, err := ATProtoPutRecord(cfg).Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected OK, got: %s", result.Output)
+	}
+	if captured["repo"] != "did:plc:xxc" {
+		t.Fatalf("repo = %v", captured["repo"])
+	}
+	if captured["rkey"] != "art.xx-c.provenance" {
+		t.Fatalf("rkey = %v", captured["rkey"])
+	}
+	if captured["validate"] != false {
+		t.Fatalf("validate = %v", captured["validate"])
 	}
 }

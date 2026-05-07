@@ -1537,6 +1537,10 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 	if err := core.WriteMeta(runDir, meta); err != nil {
 		return runID, nil, fmt.Errorf("write wake meta: %w", err)
 	}
+	blackboard, err := snapshotWakeSynthesisBlackboard(workspace)
+	if err != nil {
+		return runID, nil, err
+	}
 
 	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
 	if err != nil {
@@ -1572,7 +1576,7 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 			ModelMetadata: providersModelMetadata(ctx, prov, model),
 		}
 
-		stepPrompt := buildStepPrompt(task, i, step, carryContext)
+		stepPrompt := buildStepPrompt(task, i, step, carryContext, meta.CreatedAt)
 
 		if err := loop.Step(ctx, stepPrompt); err != nil {
 			_ = loop.EmitRunError("wake-synthesis", err.Error())
@@ -1593,8 +1597,51 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 		}
 	}
 
+	if err := restoreWakeSynthesisBlackboard(blackboard); err != nil {
+		return runID, nil, err
+	}
+
 	_ = core.WriteMeta(runDir, meta)
 	return runID, nil, nil
+}
+
+type wakeBlackboardSnapshot struct {
+	Path    string
+	Content []byte
+	Exists  bool
+}
+
+func snapshotWakeSynthesisBlackboard(workspace string) (wakeBlackboardSnapshot, error) {
+	snapshot := wakeBlackboardSnapshot{Path: filepath.Join(workspace, "blackboard.md")}
+	if strings.TrimSpace(workspace) == "" {
+		return snapshot, nil
+	}
+	content, err := os.ReadFile(snapshot.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return snapshot, nil
+		}
+		return snapshot, fmt.Errorf("snapshot wake blackboard: %w", err)
+	}
+	snapshot.Content = content
+	snapshot.Exists = true
+	return snapshot, nil
+}
+
+func restoreWakeSynthesisBlackboard(snapshot wakeBlackboardSnapshot) error {
+	if strings.TrimSpace(snapshot.Path) == "" {
+		return nil
+	}
+	if snapshot.Exists {
+		if err := os.WriteFile(snapshot.Path, snapshot.Content, 0o644); err != nil {
+			return fmt.Errorf("restore wake blackboard: %w", err)
+		}
+		return nil
+	}
+	if err := os.Remove(snapshot.Path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clean wake blackboard: %w", err)
+	}
+	return nil
 }
 
 func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Registry {
@@ -1620,6 +1667,7 @@ func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Reg
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
 	reg.Register(tools.ATProtoCreateRecord(cfg))
+	reg.Register(tools.ATProtoPutRecord(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
 	reg.Register(tools.ATProtoGetFollows(cfg))
 	reg.Register(tools.ATProtoGetFollowers(cfg))
@@ -1638,10 +1686,13 @@ func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Reg
 	return reg
 }
 
-func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskStep, carryContext string) string {
+func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskStep, carryContext string, createdAt time.Time) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
+	if !createdAt.IsZero() {
+		fmt.Fprintf(&b, "Run createdAt UTC: %s\n", createdAt.UTC().Format(time.RFC3339Nano))
+	}
 	fmt.Fprintf(&b, "%s\n\n", step.Prompt)
 
 	if enabled := step.EnabledTools(); len(enabled) > 0 {

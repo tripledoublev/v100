@@ -14,7 +14,7 @@ schedule = "24h"
 [[wake.tasks.steps]]
 name = "gather"
 tool = "atproto_anon_synth"
-prompt = "Gather the feed corpus. Write the returned sources array to blackboard_write under synthesis_sources. Pass only corpus text to the next step."
+prompt = "Make a fresh pull from ATProto now with atproto_anon_synth. Write the returned sources array of {uri,cid} strong refs to blackboard_write under synthesis_sources with append:false. Pass only corpus text to the next step."
 
 [[wake.tasks.steps]]
 name = "synthesize"
@@ -23,9 +23,9 @@ prompt = "Read the corpus. Write exactly 2 poetic sentences that capture what's 
 [[wake.tasks.steps]]
 name = "post"
 tool = "atproto_post"
-prompt = "Publish the SYNTHESIS text from the alt account (xx-c.art). Save the returned post URI."
+prompt = "Publish the SYNTHESIS text from the alt account (xx-c.art). Save both the returned post URI and CID."
 
 [[wake.tasks.steps]]
 name = "provenance"
 tool = "atproto_create_record"
-prompt = "Read synthesis_sources from blackboard_read. Create an art.xx-c.provenance record with post, sources, agent, and createdAt."
+prompt = "Read synthesis_sources from blackboard_read. Create an art.xx-c.provenance record with subject:{uri,cid} for the synthesis post, sources as the gathered {uri,cid} refs, agent, and createdAt exactly equal to the Run createdAt UTC value from this prompt."

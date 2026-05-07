@@ -45,7 +45,7 @@ func (t *atrotoAnonSynthTool) OutputSchema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"corpus":     {"type": "string",  "description": "Anonymized text corpus from recent feed."},
-			"sources":    {"type": "array",   "description": "AT URIs for source feed records included in the corpus, captured before anonymization.", "items": {"type": "string", "format": "at-uri"}},
+			"sources":    {"type": "array",   "description": "Strong refs for source feed records included in the corpus, captured before anonymization.", "items": {"type": "object", "required": ["uri", "cid"], "properties": {"uri": {"type": "string", "format": "at-uri"}, "cid": {"type": "string", "format": "cid"}}}},
 			"post_count": {"type": "integer", "description": "Number of posts included in corpus."},
 			"skipped":    {"type": "integer", "description": "Posts excluded (outside time window or empty)."}
 		}
@@ -107,6 +107,7 @@ func (t *atrotoAnonSynthTool) Exec(_ context.Context, _ ToolCallContext, args js
 		Feed []struct {
 			Post struct {
 				URI    string `json:"uri"`
+				CID    string `json:"cid"`
 				Record struct {
 					Text      string `json:"text"`
 					CreatedAt string `json:"createdAt"`
@@ -121,7 +122,7 @@ func (t *atrotoAnonSynthTool) Exec(_ context.Context, _ ToolCallContext, args js
 	// Build anonymized corpus — text only, no identifiers.
 	cutoff := time.Now().Add(-time.Duration(in.Hours) * time.Hour)
 	var lines []string
-	var sources []string
+	var sources []map[string]string
 	var skipped int
 	var parseFails int
 	for _, item := range resp.Feed {
@@ -148,8 +149,10 @@ func (t *atrotoAnonSynthTool) Exec(_ context.Context, _ ToolCallContext, args js
 			continue
 		}
 		lines = append(lines, clean)
-		if sourceURI := strings.TrimSpace(item.Post.URI); strings.HasPrefix(sourceURI, "at://") {
-			sources = append(sources, sourceURI)
+		sourceURI := strings.TrimSpace(item.Post.URI)
+		sourceCID := strings.TrimSpace(item.Post.CID)
+		if strings.HasPrefix(sourceURI, "at://") && sourceCID != "" {
+			sources = append(sources, map[string]string{"uri": sourceURI, "cid": sourceCID})
 		}
 	}
 

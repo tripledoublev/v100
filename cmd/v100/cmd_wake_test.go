@@ -83,6 +83,68 @@ func TestResolveWakeProviderPrefersFlagThenConfigThenDefault(t *testing.T) {
 	}
 }
 
+func TestWakeSynthesisBlackboardSnapshotRestore(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "blackboard.md")
+	original := []byte("operator notes\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := snapshotWakeSynthesisBlackboard(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("wake temporary state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreWakeSynthesisBlackboard(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("blackboard = %q, want %q", got, original)
+	}
+}
+
+func TestWakeSynthesisBlackboardRestoreRemovesNewFile(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "blackboard.md")
+	snapshot, err := snapshotWakeSynthesisBlackboard(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("wake temporary state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreWakeSynthesisBlackboard(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("blackboard stat err = %v, want removed", err)
+	}
+}
+
+func TestBuildStepPromptIncludesRunCreatedAt(t *testing.T) {
+	task := &config.WakeTask{
+		Name: "daily_synth_post",
+		Steps: []config.WakeTaskStep{{
+			Name:   "provenance",
+			Prompt: "create provenance",
+		}},
+	}
+	createdAt := time.Date(2026, 5, 7, 1, 15, 30, 123456789, time.UTC)
+
+	prompt := buildStepPrompt(task, 0, task.Steps[0], "", createdAt)
+
+	if !strings.Contains(prompt, "Run createdAt UTC: 2026-05-07T01:15:30.123456789Z") {
+		t.Fatalf("prompt missing run createdAt: %s", prompt)
+	}
+}
+
 func TestWakeRunRequiresToken(t *testing.T) {
 	cfgPath := ""
 	cmd := wakeRunCmd(&cfgPath)

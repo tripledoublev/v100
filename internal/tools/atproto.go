@@ -249,10 +249,12 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 
 type atprotoPostTool struct{ cfg *config.Config }
 type atprotoCreateRecordTool struct{ cfg *config.Config }
+type atprotoPutRecordTool struct{ cfg *config.Config }
 
 // ATProtoPost returns the atproto_post tool.
 func ATProtoPost(cfg *config.Config) Tool         { return &atprotoPostTool{cfg: cfg} }
 func ATProtoCreateRecord(cfg *config.Config) Tool { return &atprotoCreateRecordTool{cfg: cfg} }
+func ATProtoPutRecord(cfg *config.Config) Tool    { return &atprotoPutRecordTool{cfg: cfg} }
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
@@ -272,6 +274,15 @@ func (t *atprotoCreateRecordTool) Effects() ToolEffects {
 	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
 }
 
+func (t *atprotoPutRecordTool) Name() string { return "atproto_put_record" }
+func (t *atprotoPutRecordTool) Description() string {
+	return "Create or replace a raw ATProto record at a specific collection/rkey."
+}
+func (t *atprotoPutRecordTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *atprotoPutRecordTool) Effects() ToolEffects {
+	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
+}
+
 func (t *atprotoCreateRecordTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
@@ -280,7 +291,8 @@ func (t *atprotoCreateRecordTool) InputSchema() json.RawMessage {
 			"collection": {"type": "string", "description": "ATProto collection NSID, e.g. app.bsky.feed.post or art.xx-c.provenance."},
 			"record":     {"type": "object", "description": "Record JSON object to publish. If $type is omitted, collection is used."},
 			"account":    {"type": "string", "description": "Which account to publish from: \"main\" (default) or \"alt\"."},
-			"rkey":       {"type": "string", "description": "Optional record key to request from the PDS."}
+			"rkey":       {"type": "string", "description": "Optional record key to request from the PDS."},
+			"validate":   {"type": "boolean", "description": "Whether the PDS should validate the record against a known lexicon. Defaults to true; set false when bootstrapping custom lexicons."}
 		}
 	}`)
 }
@@ -298,12 +310,47 @@ func (t *atprotoCreateRecordTool) OutputSchema() json.RawMessage {
 	}`)
 }
 
+func (t *atprotoPutRecordTool) InputSchema() json.RawMessage {
+	return atprotoRawRecordSchema(true)
+}
+
+func (t *atprotoPutRecordTool) OutputSchema() json.RawMessage {
+	return (&atprotoCreateRecordTool{}).OutputSchema()
+}
+
+func atprotoRawRecordSchema(requireRKey bool) json.RawMessage {
+	required := `["collection", "record"]`
+	if requireRKey {
+		required = `["collection", "rkey", "record"]`
+	}
+	return json.RawMessage(`{
+		"type": "object",
+		"required": ` + required + `,
+		"properties": {
+			"collection": {"type": "string", "description": "ATProto collection NSID, e.g. app.bsky.feed.post or art.xx-c.provenance."},
+			"record":     {"type": "object", "description": "Record JSON object to publish. If $type is omitted, collection is used."},
+			"account":    {"type": "string", "description": "Which account to publish from: \"main\" (default) or \"alt\"."},
+			"rkey":       {"type": "string", "description": "Record key."},
+			"validate":   {"type": "boolean", "description": "Whether the PDS should validate the record against a known lexicon. Defaults to true; set false when bootstrapping custom lexicons."}
+		}
+	}`)
+}
+
 func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	return execATProtoRawRecord(t.cfg, args, false)
+}
+
+func (t *atprotoPutRecordTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
+	return execATProtoRawRecord(t.cfg, args, true)
+}
+
+func execATProtoRawRecord(cfg *config.Config, args json.RawMessage, put bool) (ToolResult, error) {
 	var in struct {
 		Collection string         `json:"collection"`
 		Record     map[string]any `json:"record"`
 		Account    string         `json:"account"`
 		RKey       string         `json:"rkey"`
+		Validate   *bool          `json:"validate"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
@@ -315,8 +362,11 @@ func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, arg
 	if len(in.Record) == 0 {
 		return ToolResult{OK: false, Output: "record is required"}, nil
 	}
+	if put && strings.TrimSpace(in.RKey) == "" {
+		return ToolResult{OK: false, Output: "rkey is required"}, nil
+	}
 
-	accountCfg, err := pickATProtoAccount(t.cfg, in.Account)
+	accountCfg, err := pickATProtoAccount(cfg, in.Account)
 	if err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
@@ -338,10 +388,17 @@ func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, arg
 		"collection": in.Collection,
 		"record":     record,
 	}
+	if in.Validate != nil {
+		payload["validate"] = *in.Validate
+	}
 	if strings.TrimSpace(in.RKey) != "" {
 		payload["rkey"] = strings.TrimSpace(in.RKey)
 	}
-	data, err := cli.xrpcPost("com.atproto.repo.createRecord", payload)
+	method := "com.atproto.repo.createRecord"
+	if put {
+		method = "com.atproto.repo.putRecord"
+	}
+	data, err := cli.xrpcPost(method, payload)
 	if err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}

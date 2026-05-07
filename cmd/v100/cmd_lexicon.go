@@ -33,13 +33,15 @@ func publishProvenanceLexiconCmd(cfgPath *string) *cobra.Command {
 				return err
 			}
 			record := provenanceLexiconRecord()
+			validate := false
 			payload, _ := json.Marshal(map[string]any{
 				"collection": "com.atproto.lexicon.schema",
 				"rkey":       "art.xx-c.provenance",
 				"account":    account,
 				"record":     record,
+				"validate":   validate,
 			})
-			result, err := tools.ATProtoCreateRecord(cfg).Exec(context.Background(), tools.ToolCallContext{}, payload)
+			result, err := tools.ATProtoPutRecord(cfg).Exec(context.Background(), tools.ToolCallContext{}, payload)
 			if err != nil {
 				return err
 			}
@@ -47,7 +49,10 @@ func publishProvenanceLexiconCmd(cfgPath *string) *cobra.Command {
 				return fmt.Errorf("%s", result.Output)
 			}
 			fmt.Println(ui.Info("published provenance lexicon: " + result.Output))
-			verifyLexiconDNS("xx-c.art")
+			repoDID := publishedRecordRepoDID(result.Output)
+			if err := verifyLexiconDNS("xx-c.art", repoDID); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -68,19 +73,19 @@ func provenanceLexiconRecord() map[string]any {
 				"description": "Provenance for v100 autonomous synthesis.",
 				"record": map[string]any{
 					"type":     "object",
-					"required": []string{"post", "sources", "createdAt"},
+					"required": []string{"subject", "sources", "createdAt"},
 					"properties": map[string]any{
-						"post": map[string]any{
-							"type":        "string",
-							"format":      "at-uri",
-							"description": "URI of the synthesis post.",
+						"subject": map[string]any{
+							"type":        "ref",
+							"ref":         "com.atproto.repo.strongRef",
+							"description": "Strong reference to the synthesis post this provenance record describes.",
 						},
 						"sources": map[string]any{
 							"type":        "array",
-							"description": "Source URIs used for the synthesis.",
+							"description": "Strong references to source records used for the synthesis.",
 							"items": map[string]any{
-								"type":   "string",
-								"format": "at-uri",
+								"type": "ref",
+								"ref":  "com.atproto.repo.strongRef",
 							},
 						},
 						"agent": map[string]any{
@@ -98,17 +103,34 @@ func provenanceLexiconRecord() map[string]any {
 	}
 }
 
-func verifyLexiconDNS(domain string) {
+func publishedRecordRepoDID(output string) string {
+	var payload struct {
+		Repo string `json:"repo"`
+	}
+	if json.Unmarshal([]byte(output), &payload) == nil {
+		return strings.TrimSpace(payload.Repo)
+	}
+	return ""
+}
+
+func verifyLexiconDNS(domain, wantDID string) error {
 	records, err := net.LookupTXT("_lexicon." + domain)
 	if err != nil {
-		fmt.Println(ui.Warn("lexicon DNS not verified: " + err.Error()))
-		return
+		return fmt.Errorf("lexicon DNS not verified: %w", err)
 	}
 	for _, record := range records {
-		if strings.Contains(record, "did=") || strings.Contains(record, "did:") {
+		record = strings.TrimSpace(record)
+		if wantDID != "" && (record == "did="+wantDID || record == wantDID) {
 			fmt.Println(ui.Info("lexicon DNS: " + record))
-			return
+			return nil
+		}
+		if wantDID == "" && (strings.Contains(record, "did=") || strings.Contains(record, "did:")) {
+			fmt.Println(ui.Warn("lexicon DNS has DID pointer, but published repo DID could not be checked: " + record))
+			return nil
 		}
 	}
-	fmt.Println(ui.Warn("lexicon DNS records found, but no DID pointer was detected"))
+	if wantDID != "" {
+		return fmt.Errorf("lexicon DNS mismatch: _lexicon.%s must point to did=%s (records: %s)", domain, wantDID, strings.Join(records, "; "))
+	}
+	return fmt.Errorf("lexicon DNS records found, but no DID pointer was detected")
 }
