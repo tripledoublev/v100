@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.31 — 2026-05-07
+
+**StrongRef Provenance, Trace Replay, and Run Operations**
+
+### Features
+
+- **StrongRef ATProto provenance** — Published `art.xx-c.provenance` as a strong-reference lexicon using `subject:{uri,cid}` and `sources:[{uri,cid}]`, with fixed-rkey lexicon upserts and DNS/DID verification.
+- **Wake provenance sidecars** — Updated the daily synthesis wake flow to gather fresh ATProto sources, preserve source CIDs, post from the alt account, create provenance sidecar records, use the run timestamp for `createdAt`, and restore the blackboard after successful runs.
+- **Trace replay from graph nodes** — Added `v100 replay --from-event`, replay commands and deep links in the trace DAG, and grouping for contiguous model-token events so graph views remain readable.
+- **Run pulse command** — Added `v100 pulse` for a one-line status summary of the latest active run or an explicit run.
+- **Concurrent community graph sampling** — `atproto_community_detect` now fetches sampled follow graphs concurrently with bounded parallelism.
+- **Categorized tool dispatchers** — Added optional category-level tool surfaces for files, code, network, ATProto, agent, and knowledge tools.
+- **Runtime steering cues** — CLI and TUI now surface external steering interventions, and the solver injects a soft-cap prompt when token budget use crosses 80%.
+
+### Fixes
+
+- **Provider config diagnostics** — Doctor now reports default auth env vars for known providers and warns when smartrouter dependencies are missing credentials.
+- **Config loading** — `.env` lookup now walks up from the current workspace instead of checking only the immediate directory.
+- **GLM model normalization** — GLM model names are normalized to lowercase consistently.
+
+### Maintenance
+
+- **Targeted test runs** — `make test` now supports `TEST_TARGETS` and `RUN=...` for focused red/green iteration through the repo test script.
+
 ## v0.2.30 — 2026-05-06
 
 **Trace Provenance, ATProto Intelligence, and Run Steering**
