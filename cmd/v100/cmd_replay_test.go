@@ -3,13 +3,18 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tripledoublev/v100/internal/core"
 )
 
-func TestReplayCmdRegistersTUIFlag(t *testing.T) {
+func TestReplayCmdRegistersTUIAndFromEventFlags(t *testing.T) {
 	cfgPath := ""
 	cmd := replayCmd(&cfgPath)
 	if flag := cmd.Flags().Lookup("tui"); flag == nil {
 		t.Fatal("expected replay command to register --tui")
+	}
+	if flag := cmd.Flags().Lookup("from-event"); flag == nil {
+		t.Fatal("expected replay command to register --from-event")
 	}
 }
 
@@ -62,6 +67,40 @@ func TestValidateReplayFlagsRejectsInvalidCombinations(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestFilterReplayEventsFromEvent(t *testing.T) {
+	events := []core.Event{
+		{EventID: "e1", Type: core.EventRunStart},
+		{EventID: "e2", Type: core.EventModelCall},
+		{EventID: "e3", Type: core.EventModelResp},
+	}
+
+	filtered, err := filterReplayEventsFromEvent(events, " e2 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 2 || filtered[0].EventID != "e2" || filtered[1].EventID != "e3" {
+		t.Fatalf("filtered events = %#v, want e2 onward", filtered)
+	}
+
+	all, err := filterReplayEventsFromEvent(events, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != len(events) {
+		t.Fatalf("unfiltered events len = %d, want %d", len(all), len(events))
+	}
+}
+
+func TestFilterReplayEventsFromEventRejectsMissingEvent(t *testing.T) {
+	_, err := filterReplayEventsFromEvent([]core.Event{{EventID: "e1"}}, "missing")
+	if err == nil {
+		t.Fatal("expected missing event error")
+	}
+	if !strings.Contains(err.Error(), `event id "missing" not found`) {
+		t.Fatalf("error = %q, want missing event id", err)
 	}
 }
 

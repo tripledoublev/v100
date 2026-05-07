@@ -57,6 +57,7 @@ type dagNode struct {
 	Type           string `json:"type"`
 	StepID         string `json:"step_id,omitempty"`
 	EventID        string `json:"event_id,omitempty"`
+	ReplayEventID  string `json:"replay_event_id,omitempty"`
 	SnapshotID     string `json:"snapshot_id,omitempty"`
 	WorkspaceState string `json:"workspace_state,omitempty"`
 	Payload        string `json:"payload"`
@@ -84,6 +85,7 @@ func renderTraceDAGHTML(runID, runDir string, events []core.Event) (string, erro
 }
 
 func buildTraceDAG(runDir string, events []core.Event) ([]dagNode, []dagEdge) {
+	events = groupContiguousModelTokens(events)
 	nodes := make([]dagNode, 0, len(events))
 	edges := make([]dagEdge, 0, maxInt(0, len(events)-1))
 	latestSnapshotID := ""
@@ -93,6 +95,7 @@ func buildTraceDAG(runDir string, events []core.Event) ([]dagNode, []dagEdge) {
 		if eventID == "" {
 			eventID = fmt.Sprintf("event-%d", i+1)
 		}
+		replayEventID := replayEventIDForDAGEvent(ev, eventID)
 		nodeID := fmt.Sprintf("n%d", i)
 		snapshotID := snapshotIDForEvent(ev)
 		if ev.Type == core.EventSandboxSnapshot && snapshotID != "" {
@@ -110,6 +113,7 @@ func buildTraceDAG(runDir string, events []core.Event) ([]dagNode, []dagEdge) {
 			Type:           string(ev.Type),
 			StepID:         ev.StepID,
 			EventID:        eventID,
+			ReplayEventID:  replayEventID,
 			SnapshotID:     snapshotID,
 			WorkspaceState: snapshotTreeSummary(runDir, stateSnapshot),
 			Payload:        prettyPayload(ev.Payload),
@@ -128,8 +132,76 @@ func buildTraceDAG(runDir string, events []core.Event) ([]dagNode, []dagEdge) {
 	return nodes, edges
 }
 
+func groupContiguousModelTokens(events []core.Event) []core.Event {
+	grouped := make([]core.Event, 0, len(events))
+	for i := 0; i < len(events); i++ {
+		ev := events[i]
+		if ev.Type != core.EventModelToken {
+			grouped = append(grouped, ev)
+			continue
+		}
+		text := modelTokenText(ev)
+		eventIDs := []string{ev.EventID}
+		count := 1
+		j := i + 1
+		for j < len(events) && events[j].Type == core.EventModelToken && events[j].StepID == ev.StepID {
+			text += modelTokenText(events[j])
+			eventIDs = append(eventIDs, events[j].EventID)
+			count++
+			j++
+		}
+		if count > 1 {
+			payload, _ := json.Marshal(map[string]any{
+				"count":     count,
+				"text":      text,
+				"event_ids": eventIDs,
+			})
+			ev.EventID = strings.Join(eventIDs, "+")
+			ev.Payload = payload
+		}
+		grouped = append(grouped, ev)
+		i = j - 1
+	}
+	return grouped
+}
+
+func replayEventIDForDAGEvent(ev core.Event, fallback string) string {
+	if ev.Type != core.EventModelToken {
+		return fallback
+	}
+	var payload struct {
+		EventIDs []string `json:"event_ids"`
+	}
+	if json.Unmarshal(ev.Payload, &payload) == nil {
+		for _, eventID := range payload.EventIDs {
+			if strings.TrimSpace(eventID) != "" {
+				return eventID
+			}
+		}
+	}
+	return fallback
+}
+
+func modelTokenText(ev core.Event) string {
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(ev.Payload, &payload) != nil {
+		return ""
+	}
+	return payload.Text
+}
+
 func dagNodeLabel(ev core.Event, index int) string {
 	name := string(ev.Type)
+	if ev.Type == core.EventModelToken {
+		var payload struct {
+			Count int `json:"count"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) == nil && payload.Count > 1 {
+			name = fmt.Sprintf("%s x%d", name, payload.Count)
+		}
+	}
 	if len(name) > 24 {
 		name = name[:24]
 	}
@@ -240,6 +312,8 @@ svg{min-width:1240px;min-height:820px}
 pre{white-space:pre-wrap;background:#fff;border:1px solid #d8d6cf;border-radius:6px;padding:10px;overflow:auto}
 .pill{display:inline-block;border:1px solid #c9c6bd;border-radius:999px;padding:2px 8px;margin:2px 4px 8px 0;background:#fff}
 button{border:1px solid #b9b6ad;border-radius:6px;background:#fff;padding:6px 10px;cursor:pointer}
+a{color:#0a66c2}
+.actions{display:flex;gap:8px;align-items:center;margin:0 0 14px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -254,6 +328,9 @@ button{border:1px solid #b9b6ad;border-radius:6px;background:#fff;padding:6px 10
 <aside class="panel">
 <h1 id="title">Select a node</h1>
 <div id="tags"></div>
+<h1>Replay</h1>
+<pre id="replay">Click a node in the graph.</pre>
+<div class="actions"><button type="button" id="copyReplay">Copy command</button><a id="replayLink" href="#" rel="noopener">Open replay link</a></div>
 <h1>Payload</h1>
 <pre id="payload">Click a node in the graph.</pre>
 <h1>Workspace State</h1>
@@ -282,8 +359,25 @@ function showNode(n, group) {
   ].filter(Boolean).map(v => '<span class="pill">'+escapeHTML(v)+'</span>').join('');
   document.getElementById('payload').textContent = n.payload || '{}';
   document.getElementById('workspace').textContent = n.workspace_state || 'No workspace state recorded.';
+  const replayEvent = n.replay_event_id || n.event_id || '';
+  const replayCommand = replayEvent ? ` + "`v100 replay ${shellQuote(data.run_id)} --from-event ${shellQuote(replayEvent)}`" + ` : '';
+  document.getElementById('replay').textContent = replayCommand || 'This node has no replayable event id.';
+  const replayLink = document.getElementById('replayLink');
+  if (replayEvent) {
+    replayLink.href = ` + "`v100://replay?run=${encodeURIComponent(data.run_id)}&from_event=${encodeURIComponent(replayEvent)}`" + `;
+    replayLink.removeAttribute('aria-disabled');
+  } else {
+    replayLink.href = '#';
+    replayLink.setAttribute('aria-disabled','true');
+  }
 }
 function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function shellQuote(s){return "'" + String(s).replace(/'/g, "'\\''") + "'";}
+document.getElementById('copyReplay').addEventListener('click', async () => {
+  const command = document.getElementById('replay').textContent;
+  if (!command || command.startsWith('Click ') || command.startsWith('This node ')) return;
+  await navigator.clipboard.writeText(command);
+});
 for (const n of data.nodes) {
   const g=document.createElementNS('http://www.w3.org/2000/svg','g');
   const cls = n.type === 'sandbox.snapshot' ? 'node snapshot' : (n.type === 'sandbox.restore' ? 'node restore' : 'node');

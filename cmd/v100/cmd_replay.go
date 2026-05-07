@@ -25,6 +25,7 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	var injectTool []string
 	var useTUI bool
 	var traceFormat string
+	var fromEvent string
 
 	cmd := &cobra.Command{
 		Use:   "replay <run_id_or_trace_file>",
@@ -36,6 +37,10 @@ func replayCmd(cfgPath *string) *cobra.Command {
 			}
 
 			runID, events, err := loadReplayEvents(args[0], traceFormat)
+			if err != nil {
+				return err
+			}
+			events, err = filterReplayEventsFromEvent(events, fromEvent)
 			if err != nil {
 				return err
 			}
@@ -75,6 +80,7 @@ func replayCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringArrayVar(&injectTool, "inject-tool", nil, "inject tool output during deterministic replay: name=output (repeatable)")
 	cmd.Flags().BoolVar(&useTUI, "tui", false, "launch interactive trace scrubber")
 	cmd.Flags().StringVar(&traceFormat, "format", "", "read an external trace file as inspect or metr instead of a v100 run id")
+	cmd.Flags().StringVar(&fromEvent, "from-event", "", "start replay at the selected trace event id")
 	return cmd
 }
 
@@ -110,6 +116,21 @@ func validateReplayFlags(deterministic, stepMode bool, replaceModel string, inje
 		}
 	}
 	return nil
+}
+
+func filterReplayEventsFromEvent(events []core.Event, eventID string) ([]core.Event, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return events, nil
+	}
+	for i, ev := range events {
+		if ev.EventID == eventID {
+			filtered := make([]core.Event, len(events)-i)
+			copy(filtered, events[i:])
+			return filtered, nil
+		}
+	}
+	return nil, fmt.Errorf("event id %q not found in replay trace", eventID)
 }
 
 type deterministicReplayOptions struct {

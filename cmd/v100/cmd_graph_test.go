@@ -61,6 +61,36 @@ func TestBuildTraceDAGMarksSnapshotAndRestore(t *testing.T) {
 	}
 }
 
+func TestBuildTraceDAGGroupsContiguousModelTokens(t *testing.T) {
+	events := []core.Event{
+		graphEvent(t, core.EventModelCall, "s1", "call-1", core.ModelCallPayload{Model: "test"}),
+		graphEvent(t, core.EventModelToken, "s1", "tok-1", map[string]string{"text": "hel"}),
+		graphEvent(t, core.EventModelToken, "s1", "tok-2", map[string]string{"text": "lo"}),
+		graphEvent(t, core.EventModelResp, "s1", "resp-1", core.ModelRespPayload{Text: "hello"}),
+		graphEvent(t, core.EventModelToken, "s2", "tok-3", map[string]string{"text": "bye"}),
+	}
+
+	nodes, edges := buildTraceDAG(t.TempDir(), events)
+	if len(nodes) != 4 {
+		t.Fatalf("nodes len = %d, want 4 after grouping contiguous model.token events", len(nodes))
+	}
+	if nodes[1].Type != string(core.EventModelToken) {
+		t.Fatalf("grouped token node type = %q, want model.token", nodes[1].Type)
+	}
+	if !strings.Contains(nodes[1].Label, "model.token x2") {
+		t.Fatalf("grouped token label = %q, want count", nodes[1].Label)
+	}
+	if !strings.Contains(nodes[1].Payload, `"count": 2`) || !strings.Contains(nodes[1].Payload, "hello") {
+		t.Fatalf("grouped token payload = %q, want count and merged text", nodes[1].Payload)
+	}
+	if nodes[1].ReplayEventID != "tok-1" {
+		t.Fatalf("grouped token replay event id = %q, want first original token id", nodes[1].ReplayEventID)
+	}
+	if len(edges) != 3 {
+		t.Fatalf("edges len = %d, want 3 timeline edges after grouping", len(edges))
+	}
+}
+
 func TestRenderTraceDAGHTMLContainsInteractivePanel(t *testing.T) {
 	doc, err := renderTraceDAGHTML("run-1", t.TempDir(), []core.Event{
 		graphEvent(t, core.EventRunStart, "s1", "e1", core.RunStartPayload{Provider: "test"}),
@@ -68,7 +98,7 @@ func TestRenderTraceDAGHTMLContainsInteractivePanel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Trace DAG", "click any node", "Workspace State", "addEventListener('click'"} {
+	for _, want := range []string{"Trace DAG", "click any node", "Workspace State", "Replay", "v100 replay", "--from-event", "copyReplay", "v100://replay", "addEventListener('click'"} {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("html missing %q", want)
 		}
