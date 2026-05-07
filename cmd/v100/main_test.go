@@ -150,6 +150,7 @@ func TestNormalizeModelOverride(t *testing.T) {
 		{name: "codex 4o remapped", providerType: "codex", in: "gpt-4o", want: "gpt-5.4", wantChanged: true},
 		{name: "codex old codex remapped", providerType: "codex", in: "gpt-5.3-codex", want: "gpt-5.4", wantChanged: true},
 		{name: "codex keep gpt5", providerType: "codex", in: "gpt-5.4", want: "gpt-5.4", wantChanged: false},
+		{name: "glm lowercases model", providerType: "glm", in: "GLM-5.1", want: "glm-5.1", wantChanged: true},
 		{name: "openai keep 4o mini", providerType: "openai", in: "gpt-4o-mini", want: "gpt-4o-mini", wantChanged: false},
 		{name: "blank unchanged", providerType: "codex", in: " ", want: "", wantChanged: false},
 	}
@@ -179,6 +180,70 @@ func TestNormalizedProviderConfig(t *testing.T) {
 	})
 	if other.DefaultModel != "gpt-4o" {
 		t.Fatalf("normalizedProviderConfig should leave non-codex models unchanged, got %q", other.DefaultModel)
+	}
+
+	glm := normalizedProviderConfig(config.ProviderConfig{
+		Type:         "glm",
+		DefaultModel: "GLM-5.1",
+	})
+	if glm.DefaultModel != "glm-5.1" {
+		t.Fatalf("normalizedProviderConfig GLM default model = %q, want %q", glm.DefaultModel, "glm-5.1")
+	}
+}
+
+func TestProviderAuthEnvDefaultsKnownProviders(t *testing.T) {
+	tests := []struct {
+		name string
+		pc   config.ProviderConfig
+		want string
+	}{
+		{name: "explicit env wins", pc: config.ProviderConfig{Type: "glm", Auth: config.AuthConfig{Env: "CUSTOM_GLM_KEY"}}, want: "CUSTOM_GLM_KEY"},
+		{name: "glm default", pc: config.ProviderConfig{Type: "glm"}, want: "ZHIPU_API_KEY"},
+		{name: "mistral default", pc: config.ProviderConfig{Type: "mistral"}, want: "MISTRAL_API_KEY"},
+		{name: "openai default", pc: config.ProviderConfig{Type: "openai"}, want: "OPENAI_API_KEY"},
+		{name: "unknown empty", pc: config.ProviderConfig{Type: "unknown"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := providerAuthEnv(tt.pc); got != tt.want {
+				t.Fatalf("providerAuthEnv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSmartRouterDependencyWarningsMissingSmartProviderKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := config.DefaultConfig()
+	cfg.Defaults.Provider = "smartrouter"
+	cfg.Defaults.SmartProvider = "openai"
+	cfg.Defaults.CheapProvider = "ollama"
+
+	warnings := smartrouterDependencyWarnings(cfg)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %+v, want one missing smart provider key warning", warnings)
+	}
+	if !strings.Contains(warnings[0], "smart tier provider \"openai\" requires OPENAI_API_KEY") {
+		t.Fatalf("warning = %q, want explicit OPENAI_API_KEY smartrouter dependency", warnings[0])
+	}
+}
+
+func TestSmartRouterDependencyWarningsUsesProviderDefaultAuthEnv(t *testing.T) {
+	t.Setenv("ZHIPU_API_KEY", "")
+	cfg := config.DefaultConfig()
+	cfg.Defaults.Provider = "smartrouter"
+	cfg.Defaults.SmartProvider = "glm"
+	cfg.Defaults.CheapProvider = "ollama"
+	pc := cfg.Providers["glm"]
+	pc.Auth.Env = ""
+	cfg.Providers["glm"] = pc
+
+	warnings := smartrouterDependencyWarnings(cfg)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %+v, want one missing GLM key warning", warnings)
+	}
+	if !strings.Contains(warnings[0], "smart tier provider \"glm\" requires ZHIPU_API_KEY") {
+		t.Fatalf("warning = %q, want default GLM env name", warnings[0])
 	}
 }
 
@@ -346,6 +411,28 @@ func TestBuildToolRegistryDefaultConfigValidates(t *testing.T) {
 	reg := buildToolRegistry(cfg)
 	if err := validateToolRegistry(reg); err != nil {
 		t.Fatalf("default tool registry should validate, got %v", err)
+	}
+}
+
+func TestBuildToolRegistryCategorizedExposesDispatchersOnly(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Tools.Categorized = true
+	reg := buildToolRegistry(cfg)
+	if err := validateToolRegistry(reg); err != nil {
+		t.Fatalf("categorized tool registry should validate, got %v", err)
+	}
+
+	got := strings.Join(reg.List(), ",")
+	for _, want := range categoryDispatcherNames() {
+		if !strings.Contains(got, want) {
+			t.Fatalf("categorized registry missing %q in %s", want, got)
+		}
+	}
+	if strings.Contains(got, "fs_read") || strings.Contains(got, "atproto_post") {
+		t.Fatalf("categorized registry should expose dispatchers only, got %s", got)
+	}
+	if _, ok := reg.Lookup("fs_read"); !ok {
+		t.Fatal("underlying tools should remain registered for category dispatch")
 	}
 }
 

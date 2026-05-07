@@ -119,8 +119,9 @@ type AuthConfig struct {
 
 // ToolsConfig lists enabled and dangerous tools.
 type ToolsConfig struct {
-	Enabled   []string `toml:"enabled"`
-	Dangerous []string `toml:"dangerous"`
+	Enabled     []string `toml:"enabled"`
+	Dangerous   []string `toml:"dangerous"`
+	Categorized bool     `toml:"categorized"`
 }
 
 // PolicyConfig holds specific named policies.
@@ -236,9 +237,9 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
+				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_put_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record", "atproto_put_record"},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -379,8 +380,10 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"]
+# Set categorized=true to expose category dispatchers instead of every tool.
+categorized = false
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_put_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record", "atproto_put_record"]
 
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
@@ -434,7 +437,7 @@ check_interval = "24h"
 // Load reads and parses a TOML config file, expanding ~ in paths.
 func Load(path string) (*Config, error) {
 	// Try loading .env first if it exists in the current directory or parent
-	_ = LoadDotEnv(".env")
+	_ = LoadDotEnvFromCWD()
 
 	path = expandHome(path)
 	data, err := os.ReadFile(path)
@@ -476,6 +479,8 @@ func Load(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Dangerous, "atproto_post")
 	ensureString(&cfg.Tools.Enabled, "atproto_create_record")
 	ensureString(&cfg.Tools.Dangerous, "atproto_create_record")
+	ensureString(&cfg.Tools.Enabled, "atproto_put_record")
+	ensureString(&cfg.Tools.Dangerous, "atproto_put_record")
 	ensureString(&cfg.Tools.Enabled, "atproto_resolve")
 	ensureString(&cfg.Tools.Enabled, "wiki")
 	ensureString(&cfg.Tools.Enabled, "git_commit")
@@ -511,6 +516,28 @@ func Load(path string) (*Config, error) {
 		cfg.Embedding.Model = DefaultConfig().Embedding.Model
 	}
 	return &cfg, nil
+}
+
+// LoadDotEnvFromCWD loads the first .env found in the current directory or one
+// of its parents.
+func LoadDotEnvFromCWD() error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	for {
+		envPath := filepath.Join(dir, ".env")
+		if err := LoadDotEnv(envPath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return os.ErrNotExist
+		}
+		dir = parent
+	}
 }
 
 func applyProviderDefaults(cfg *Config, defaults *Config) {

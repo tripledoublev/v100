@@ -212,14 +212,11 @@ func buildSmartRouterProvider(cfg *config.Config, smartModel string) (providers.
 }
 
 func normalizedProviderConfig(pc config.ProviderConfig) config.ProviderConfig {
-	if pc.Type == "codex" {
-		original := pc.DefaultModel
-		normalized, changed := normalizeCodexModelOverride(pc.DefaultModel)
-		// Fix #11: Log model normalization to prevent silent changes
-		if changed {
-			fmt.Fprintf(os.Stderr, "→ model normalized: %s → %s (%s)\n", original, normalized, pc.Type)
-			pc.DefaultModel = normalized
-		}
+	original := pc.DefaultModel
+	normalized, changed := normalizeModelOverride(pc.Type, pc.DefaultModel)
+	if changed {
+		fmt.Fprintf(os.Stderr, "→ model normalized: %s → %s (%s)\n", original, normalized, pc.Type)
+		pc.DefaultModel = normalized
 	}
 	return pc
 }
@@ -293,6 +290,87 @@ func buildProviderFromConfig(cfg *config.Config, pc config.ProviderConfig) (prov
 		}
 	}
 	return providers.WithRetry(raw, providers.DefaultRetryConfig()), nil
+}
+
+func providerAuthEnv(pc config.ProviderConfig) string {
+	if strings.TrimSpace(pc.Auth.Env) != "" {
+		return strings.TrimSpace(pc.Auth.Env)
+	}
+	switch pc.Type {
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "glm":
+		return "ZHIPU_API_KEY"
+	case "mistral":
+		return "MISTRAL_API_KEY"
+	default:
+		return ""
+	}
+}
+
+func providerConfigOrDefault(cfg *config.Config, providerName string) (config.ProviderConfig, bool) {
+	if cfg != nil {
+		if pc, ok := cfg.Providers[providerName]; ok {
+			return pc, true
+		}
+	}
+	defaults := config.DefaultConfig()
+	if defaults != nil {
+		if pc, ok := defaults.Providers[providerName]; ok {
+			return pc, true
+		}
+	}
+	return config.ProviderConfig{}, false
+}
+
+func smartrouterDependencyWarnings(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Defaults.Provider) != "smartrouter" {
+		if pc, ok := cfg.Providers["smartrouter"]; !ok || strings.TrimSpace(pc.Type) != "smartrouter" {
+			return nil
+		}
+	}
+	deps := []struct {
+		tier string
+		name string
+	}{
+		{tier: "cheap", name: resolveCheapProviderName(cfg)},
+		{tier: "smart", name: resolveSmartProviderName(cfg)},
+	}
+	var warnings []string
+	seen := map[string]bool{}
+	for _, dep := range deps {
+		name := strings.TrimSpace(dep.name)
+		if name == "" || name == "smartrouter" {
+			continue
+		}
+		key := dep.tier + ":" + name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		pc, ok := providerConfigOrDefault(cfg, name)
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("Provider smartrouter: %s tier provider %q is not configured", dep.tier, name))
+			continue
+		}
+		if isLocalProviderType(pc.Type) || pc.Type == "codex" || pc.Type == "gemini" {
+			continue
+		}
+		authEnv := providerAuthEnv(pc)
+		if authEnv == "" {
+			warnings = append(warnings, fmt.Sprintf("Provider smartrouter: %s tier provider %q has no auth env configured", dep.tier, name))
+			continue
+		}
+		if os.Getenv(authEnv) == "" {
+			warnings = append(warnings, fmt.Sprintf("Provider smartrouter: %s tier provider %q requires %s, but it is not set", dep.tier, name, authEnv))
+		}
+	}
+	return warnings
 }
 
 func persistModelMetadata(runDir string, metadata providers.ModelMetadata) {
@@ -427,7 +505,11 @@ func solverDisplayName(s core.Solver) string {
 }
 
 func buildToolRegistry(cfg *config.Config) *tools.Registry {
-	reg := tools.NewRegistry(cfg.Tools.Enabled)
+	enabled := cfg.Tools.Enabled
+	if cfg.Tools.Categorized {
+		enabled = categoryDispatcherNames()
+	}
+	reg := tools.NewRegistry(enabled)
 	reg.Register(tools.FSRead())
 	reg.Register(tools.FSWrite())
 	reg.Register(tools.FSList())
@@ -464,6 +546,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoNotifications(cfg))
 	reg.Register(tools.ATProtoPost(cfg))
 	reg.Register(tools.ATProtoCreateRecord(cfg))
+	reg.Register(tools.ATProtoPutRecord(cfg))
 	reg.Register(tools.ATProtoResolve(cfg))
 	reg.Register(tools.ATProtoUploadBlob(cfg))
 	reg.Register(tools.ATProtoGetFollows(cfg))
@@ -478,7 +561,40 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoIndex(cfg))
 	reg.Register(tools.ATProtoRecall(cfg))
 	reg.Register(tools.ATProtoAnonSynth(cfg))
+	registerCategoryDispatchers(reg)
 	return reg
+}
+
+func categoryDispatcherNames() []string {
+	return []string{
+		"tools_agent",
+		"tools_atproto",
+		"tools_code",
+		"tools_files",
+		"tools_knowledge",
+		"tools_network",
+	}
+}
+
+func registerCategoryDispatchers(reg *tools.Registry) {
+	reg.Register(tools.NewCategoryDispatch("tools_files", "files", "Run file and shell workspace tools by name.", []string{
+		"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "fs_outline", "sh",
+	}))
+	reg.Register(tools.NewCategoryDispatch("tools_code", "code", "Run code navigation, git, patch, semantic, and provenance tools by name.", []string{
+		"project_search", "git_status", "git_diff", "git_commit", "git_push", "patch_apply", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "fingerprint",
+	}))
+	reg.Register(tools.NewCategoryDispatch("tools_network", "network", "Run web and network retrieval tools by name.", []string{
+		"curl_fetch", "web_extract", "web_search", "news_fetch", "wiki",
+	}))
+	reg.Register(tools.NewCategoryDispatch("tools_atproto", "atproto", "Run ATProto social graph, posting, and recall tools by name.", []string{
+		"atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_put_record", "atproto_resolve", "atproto_upload_blob", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
+	}))
+	reg.Register(tools.NewCategoryDispatch("tools_agent", "agent", "Run delegation and coordination tools by name.", []string{
+		"agent", "dispatch", "orchestrate",
+	}))
+	reg.Register(tools.NewCategoryDispatch("tools_knowledge", "knowledge", "Run memory, blackboard, reflection, and introspection tools by name.", []string{
+		"blackboard_read", "blackboard_write", "blackboard_search", "blackboard_store", "inspect_tool", "reflect",
+	}))
 }
 
 func enabledToolSummary(reg *tools.Registry) string {
@@ -1513,10 +1629,15 @@ func normalizeModelOverride(providerType, model string) (string, bool) {
 	if model == "" {
 		return "", false
 	}
-	if providerType != "codex" {
+	switch providerType {
+	case "codex":
+		return normalizeCodexModelOverride(model)
+	case "glm":
+		normalized := strings.ToLower(model)
+		return normalized, normalized != model
+	default:
 		return model, false
 	}
-	return normalizeCodexModelOverride(model)
 }
 
 func normalizeCodexModelOverride(model string) (string, bool) {

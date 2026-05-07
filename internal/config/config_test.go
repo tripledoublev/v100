@@ -183,6 +183,51 @@ budget_steps = 25
 	}
 }
 
+func TestLoadConfigLoadsDotEnvFromParentDirectory(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "work")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("V100_TEST_DOTENV_KEY=from-parent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("V100_TEST_DOTENV_KEY", "")
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(child); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(originalWD)
+	})
+
+	path := filepath.Join(child, "config.toml")
+	toml := `
+[providers.openai]
+type = "openai"
+default_model = "gpt-4o"
+[providers.openai.auth]
+env = "V100_TEST_DOTENV_KEY"
+
+[defaults]
+provider = "openai"
+`
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("V100_TEST_DOTENV_KEY"); got != "from-parent" {
+		t.Fatalf("V100_TEST_DOTENV_KEY = %q, want %q", got, "from-parent")
+	}
+}
+
 func TestLoadConfigGenParams(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

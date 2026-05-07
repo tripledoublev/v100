@@ -388,6 +388,9 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			} else {
 				fmt.Println(ui.OK("Sandbox backend: host"))
 			}
+			for _, warning := range smartrouterDependencyWarnings(cfg) {
+				fmt.Println(ui.Warn(warning))
+			}
 
 			printOAuthConfigStatus := func(name string, err error) {
 				credsPath := auth.DefaultCredentialsPath()
@@ -554,11 +557,16 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 						providerIssue(name, fmt.Sprintf("Provider %s: no token at %s — run 'v100 login --provider minimax'", name, tokenPath))
 					}
 				default:
-					key := os.Getenv(pc.Auth.Env)
+					authEnv := providerAuthEnv(pc)
+					if authEnv == "" {
+						providerIssue(name, fmt.Sprintf("Provider %s: no auth env configured", name))
+						break
+					}
+					key := os.Getenv(authEnv)
 					if key == "" {
-						providerIssue(name, fmt.Sprintf("Provider %s: env var %s not set", name, pc.Auth.Env))
+						providerIssue(name, fmt.Sprintf("Provider %s: env var %s not set", name, authEnv))
 					} else {
-						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, pc.Auth.Env, len(key))))
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
 					}
 				}
 			}
