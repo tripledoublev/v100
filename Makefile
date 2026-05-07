@@ -1,4 +1,9 @@
 GO_TARGETS := ./cmd/... ./internal/...
+TEST_TARGETS ?= $(GO_TARGETS)
+TEST_FLAGS ?=
+ifneq ($(strip $(RUN)),)
+TEST_FLAGS += -run '$(RUN)'
+endif
 
 export GOWORK := off
 export GOCACHE ?= $(CURDIR)/.gocache
@@ -13,4 +18,4 @@ lint:
 	./scripts/lint.sh
 
 test:
-	go test -race -coverprofile=coverage.out $(GO_TARGETS)
+	TEST_TARGETS="$(TEST_TARGETS)" ./scripts/test.sh $(TEST_FLAGS)

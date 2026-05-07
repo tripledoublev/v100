@@ -9,6 +9,6 @@ export GOWORK=off
 
 cd "$ROOT_DIR"
 
-TARGETS=(./cmd/... ./internal/...)
+read -r -a TARGETS <<< "${TEST_TARGETS:-./cmd/... ./internal/...}"
 
 go test -race -coverprofile=coverage.out "$@" "${TARGETS[@]}"
