@@ -167,18 +167,10 @@ func sourceLabel(recompress bool) string {
 	return "trace.jsonl (original)"
 }
 
-// estimateTokensSlice is a package-level wrapper so cmd_compress.go can call
-// the unexported estimateTokens in internal/core without import tricks.
-// We inline the same formula here to avoid coupling.
+// estimateTokensSlice delegates to the exported core.EstimateTokens to
+// keep the token estimation formula in a single place.
 func estimateTokensSlice(msgs []providers.Message) int {
-	n := 0
-	for _, m := range msgs {
-		n += 4 + len(m.Content)*10/33 + 1
-		for _, tc := range m.ToolCalls {
-			n += 10 + len(tc.Args)*10/33 + 1
-		}
-	}
-	return n
+	return core.EstimateTokens(msgs)
 }
 
 // loadCheckpoint loads a compress.checkpoint.json from the run dir if it exists.

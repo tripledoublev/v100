@@ -1035,26 +1035,56 @@ func (l *Loop) providerAwareEvidenceThreshold() int {
 	return 0
 }
 
+// charsToTokens converts a byte length to an estimated token count using
+// the ~3.3 chars/token heuristic with ceiling division.
+func charsToTokens(charLen int) int {
+	if charLen <= 0 {
+		return 0
+	}
+	// Ceiling division: (charLen + 3.3 - 1) / 3.3 ≈ (charLen*10 + 32) / 33
+	return (charLen*10 + 32) / 33
+}
+
 // estimateTokensSingle returns the estimated token count for a single message.
+// Accounts for role, content, tool call ID/name, tool results, and image attachments.
 func estimateTokensSingle(m providers.Message) int {
-	n := 4 // per-message framing (role markers, separators)
-	n += len(m.Content)*10/33 + 1
+	// Per-message framing: role label, separators, message boundary tokens.
+	n := 4 + len(m.Role)
+
+	// Content tokens.
+	n += charsToTokens(len(m.Content))
+
+	// Tool result fields (role=tool messages).
+	n += charsToTokens(len(m.ToolCallID))
+	n += charsToTokens(len(m.Name))
+
+	// Image attachments: each image costs ~85 tokens (low-detail mode estimate).
+	n += len(m.Images) * 85
+
 	for _, tc := range m.ToolCalls {
-		n += 10 // tool call framing (id, name, type fields)
-		n += len(tc.Args)*10/33 + 1
+		// Tool call overhead: ID, name, type fields, plus argument tokens.
+		n += 4 // framing for the tool call block
+		n += charsToTokens(len(tc.ID))
+		n += charsToTokens(len(tc.Name))
+		n += charsToTokens(len(tc.Args))
 	}
 	return n
 }
 
-// estimateTokens returns an estimated token count for a message slice.
-// Uses ~3.3 chars/token (more accurate than len/4 for mixed code/text) plus
-// per-message framing overhead and tool call structure tokens.
-func estimateTokens(msgs []providers.Message) int {
+// EstimateTokens returns an estimated token count for a message slice.
+// Uses ~3.3 chars/token with ceiling division, plus per-message framing
+// overhead, tool call structure tokens, and image attachment estimates.
+func EstimateTokens(msgs []providers.Message) int {
 	n := 0
 	for _, m := range msgs {
 		n += estimateTokensSingle(m)
 	}
 	return n
+}
+
+// estimateTokens is the unexported alias for EstimateTokens.
+func estimateTokens(msgs []providers.Message) int {
+	return EstimateTokens(msgs)
 }
 
 func targetedCompressionLimit(p providers.Provider) int {
