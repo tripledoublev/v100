@@ -1062,11 +1062,6 @@ func targetedCompressionLimit(p providers.Provider) int {
 		return 0
 	}
 	switch p.Name() {
-	case "glm":
-		// GLM is more likely to reject compression inputs and can hit request
-		// limits quickly when targeted compression fans out into many calls.
-		// Prefer a single bulk summary call instead.
-		return 0
 	default:
 		// Keep targeted compression bounded so one overloaded step cannot
 		// explode into a long burst of extra provider requests.
