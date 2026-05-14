@@ -17,6 +17,7 @@ type Policy struct {
 	MirrorToolResults     bool    // if true, predict tool outputs and log reality deltas
 	DisableWatchdogs      bool    // if true, disable step-level inspection/read-heavy watchdog interventions
 	PressureThreshold     float64 // context pressure ratio to trigger proactive compression (0 = disabled, default 0.70)
+	StaleToolElideSteps   int     // messages protected from stale tool-result eliding (0 = use default, -1 = disabled)
 }
 
 // LegacyDefaultSystemPrompt is the historical generated default prompt kept for exact-match migrations.
