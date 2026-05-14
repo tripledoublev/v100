@@ -136,7 +136,7 @@ func prefillMessages(loop *core.Loop, n, charsEach int) {
 // ── Threshold tests ───────────────────────────────────────────────────────────
 
 // TestCompressionNotTriggeredBelowThreshold verifies that when the estimated
-// token count is below 3/4 of ContextLimit, no extra provider call is made.
+// token count is below 65% of ContextLimit, no extra provider call is made.
 func TestCompressionNotTriggeredBelowThreshold(t *testing.T) {
 	prov := &capturingProvider{
 		responses: []providers.CompleteResponse{

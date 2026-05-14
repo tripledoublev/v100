@@ -16,7 +16,7 @@ type Policy struct {
 	ReflectOnDangerous    bool    // if true, run an extra model call to assess confidence before dangerous tool execution
 	MirrorToolResults     bool    // if true, predict tool outputs and log reality deltas
 	DisableWatchdogs      bool    // if true, disable step-level inspection/read-heavy watchdog interventions
-	PressureThreshold     float64 // context pressure ratio to trigger proactive compression (0 = disabled, default 0.70)
+	PressureThreshold     float64 // context pressure ratio to trigger proactive compression (0 = disabled, default 0.60)
 }
 
 // LegacyDefaultSystemPrompt is the historical generated default prompt kept for exact-match migrations.
