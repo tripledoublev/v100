@@ -77,6 +77,10 @@ Start a standard interactive run using MiniMax (the preferred provider):
 
 Enable Bubble Tea TUI for a better visual experience:
 
+<p align="center">
+  <img src="assets/tui-hello-internet.png" alt="v100 TUI" width="720" />
+</p>
+
 ```bash
 ./v100 run --provider minimax --tui --workspace .
 ```
