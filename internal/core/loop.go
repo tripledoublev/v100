@@ -827,7 +827,8 @@ func (l *Loop) buildMessagesWithStepMemory(stepID string, includeMemory bool, co
 		}
 	}
 
-	// 3. Conversation history
+	// 3. Conversation history (with stale tool result eliding applied)
+	l.elideStaleInMessages()
 	msgs = append(msgs, l.Messages...)
 	return msgs
 }
