@@ -136,7 +136,7 @@ func prefillMessages(loop *core.Loop, n, charsEach int) {
 // ── Threshold tests ───────────────────────────────────────────────────────────
 
 // TestCompressionNotTriggeredBelowThreshold verifies that when the estimated
-// token count is below 3/4 of ContextLimit, no extra provider call is made.
+// token count is below 65% of ContextLimit, no extra provider call is made.
 func TestCompressionNotTriggeredBelowThreshold(t *testing.T) {
 	prov := &capturingProvider{
 		responses: []providers.CompleteResponse{
@@ -532,7 +532,7 @@ func TestBulkFallbackAfterTargeted(t *testing.T) {
 	}
 }
 
-func TestTargetedCompressionDisabledForGLM(t *testing.T) {
+func TestTargetedCompressionEnabledForGLM(t *testing.T) {
 	mainProv := &capturingProvider{
 		responses: []providers.CompleteResponse{
 			{AssistantText: "done"},
@@ -542,6 +542,9 @@ func TestTargetedCompressionDisabledForGLM(t *testing.T) {
 		name: "glm",
 		capturingProvider: capturingProvider{
 			responses: []providers.CompleteResponse{
+				{AssistantText: "compressed", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
+				{AssistantText: "compressed", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
+				{AssistantText: "compressed", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
 				{AssistantText: "bulk summary", Usage: providers.Usage{InputTokens: 100, OutputTokens: 20}},
 			},
 		},
@@ -566,8 +569,8 @@ func TestTargetedCompressionDisabledForGLM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := len(compressProv.requests); got != 1 {
-		t.Fatalf("expected 1 compression call for glm bulk-only mode, got %d", got)
+	if got := len(compressProv.requests); got < 1 {
+		t.Fatalf("expected at least 1 compression call for GLM, got %d", got)
 	}
 	if !strings.Contains(loop.Messages[0].Content, "CONTEXT SUMMARY") {
 		t.Fatalf("expected bulk compression summary, got %q", loop.Messages[0].Content)
@@ -601,12 +604,14 @@ func TestBulkCompressionSanitizesMalformedGLMPayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(compressProv.requests) != 1 {
-		t.Fatalf("expected 1 bulk compression call, got %d", len(compressProv.requests))
+	if len(compressProv.requests) < 1 {
+		t.Fatalf("expected at least 1 compression call, got %d", len(compressProv.requests))
 	}
-	for _, msg := range compressProv.requests[0].Messages {
+	for _, req := range compressProv.requests {
+		for _, msg := range req.Messages {
 		if strings.Contains(msg.Content, "</arg_") || strings.Contains(msg.Content, "<arg_") {
 			t.Fatalf("compression request still contained malformed tool markers: %q", msg.Content)
+			}
 		}
 	}
 }

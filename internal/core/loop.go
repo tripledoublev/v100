@@ -1035,21 +1035,46 @@ func (l *Loop) providerAwareEvidenceThreshold() int {
 	return 0
 }
 
+// charsToTokens converts a byte length to an estimated token count using
+// the ~3.3 chars/token heuristic with ceiling division.
+func charsToTokens(charLen int) int {
+	if charLen <= 0 {
+		return 0
+	}
+	// Ceiling division: (charLen + 3.3 - 1) / 3.3 ≈ (charLen*10 + 32) / 33
+	return (charLen*10 + 32) / 33
+}
+
 // estimateTokensSingle returns the estimated token count for a single message.
+// Accounts for role, content, tool call ID/name, tool results, and image attachments.
 func estimateTokensSingle(m providers.Message) int {
-	n := 4 // per-message framing (role markers, separators)
-	n += len(m.Content)*10/33 + 1
+	// Per-message framing: role label, separators, message boundary tokens.
+	n := 4 + len(m.Role)
+
+	// Content tokens.
+	n += charsToTokens(len(m.Content))
+
+	// Tool result fields (role=tool messages).
+	n += charsToTokens(len(m.ToolCallID))
+	n += charsToTokens(len(m.Name))
+
+	// Image attachments: each image costs ~85 tokens (low-detail mode estimate).
+	n += len(m.Images) * 85
+
 	for _, tc := range m.ToolCalls {
-		n += 10 // tool call framing (id, name, type fields)
-		n += len(tc.Args)*10/33 + 1
+		// Tool call overhead: ID, name, type fields, plus argument tokens.
+		n += 4 // framing for the tool call block
+		n += charsToTokens(len(tc.ID))
+		n += charsToTokens(len(tc.Name))
+		n += charsToTokens(len(tc.Args))
 	}
 	return n
 }
 
-// estimateTokens returns an estimated token count for a message slice.
-// Uses ~3.3 chars/token (more accurate than len/4 for mixed code/text) plus
-// per-message framing overhead and tool call structure tokens.
-func estimateTokens(msgs []providers.Message) int {
+// EstimateTokens returns an estimated token count for a message slice.
+// Uses ~3.3 chars/token with ceiling division, plus per-message framing
+// overhead, tool call structure tokens, and image attachment estimates.
+func EstimateTokens(msgs []providers.Message) int {
 	n := 0
 	for _, m := range msgs {
 		n += estimateTokensSingle(m)
@@ -1057,16 +1082,16 @@ func estimateTokens(msgs []providers.Message) int {
 	return n
 }
 
+// estimateTokens is the unexported alias for EstimateTokens.
+func estimateTokens(msgs []providers.Message) int {
+	return EstimateTokens(msgs)
+}
+
 func targetedCompressionLimit(p providers.Provider) int {
 	if p == nil {
 		return 0
 	}
 	switch p.Name() {
-	case "glm":
-		// GLM is more likely to reject compression inputs and can hit request
-		// limits quickly when targeted compression fans out into many calls.
-		// Prefer a single bulk summary call instead.
-		return 0
 	default:
 		// Keep targeted compression bounded so one overloaded step cannot
 		// explode into a long burst of extra provider requests.
@@ -1145,9 +1170,37 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	startTime := time.Now()
 
 	// ── Pass 1: Targeted per-message compression ──────────────────────────
-	protectRecent := 6
+	baseProtectRecent := 6
 	if l.Policy != nil && l.Policy.CompressProtectRecent > 0 {
-		protectRecent = l.Policy.CompressProtectRecent
+		baseProtectRecent = l.Policy.CompressProtectRecent
+	}
+
+	// Dynamic protectRecent: when recent messages are large, protect fewer
+	// so we have more room to compress. Compute token size of the most recent
+	// messages and shrink the protected window proportionally.
+	protectRecent := baseProtectRecent
+	if n := len(l.Messages); n > 0 {
+		sampleStart := n - baseProtectRecent
+		if sampleStart < 0 {
+			sampleStart = 0
+		}
+		var recentTokens int
+		for i := sampleStart; i < n; i++ {
+			recentTokens += estimateTokensSingle(l.Messages[i])
+		}
+		// If the average recent message exceeds 2000 tokens, reduce
+		// protectRecent proportionally (min floor of 2).
+		sampled := n - sampleStart
+		if sampled > 0 {
+			avgRecent := recentTokens / sampled
+			if avgRecent > 2000 {
+				adjusted := baseProtectRecent * 2000 / avgRecent
+				if adjusted < 2 {
+					adjusted = 2
+				}
+				protectRecent = adjusted
+			}
+		}
 	}
 
 	compressible := len(l.Messages) - protectRecent
@@ -1312,7 +1365,7 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 
 func (l *Loop) compressionTrigger(tokensBefore int) string {
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		threshold := l.Policy.ContextLimit * 3 / 4
+		threshold := l.Policy.ContextLimit * 65 / 100
 		if tokensBefore >= threshold {
 			return "context_limit"
 		}

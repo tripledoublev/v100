@@ -141,13 +141,13 @@ func TruncateOutput(s string, verbose bool) string {
 
 // estimateTokens estimates token count from string length using ~3.3 chars/token ratio.
 // This is a rough estimate; actual token counts vary by model and content.
+// Uses ceiling division for consistency with internal/core token estimation.
 func estimateTokens(s string) int {
 	if s == "" {
 		return 0
 	}
-	// Approximate: ~3.3 characters per token (based on Claude's tokenizer).
-	// Round to nearest int, with minimum of 1 for non-empty strings.
-	tokens := (len(s) + 1) / 3
+	// Ceiling division: (len(s) + 3.3 - 1) / 3.3 ≈ (len(s)*10 + 32) / 33
+	tokens := (len(s)*10 + 32) / 33
 	if tokens == 0 {
 		tokens = 1
 	}
