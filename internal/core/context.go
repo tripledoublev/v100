@@ -12,10 +12,10 @@ import (
 // The hook reads ContextPressure and ContextWindowSize from LoopState
 // (populated by runHooks). When pressure exceeds the threshold it returns
 // HookContinue with a logged warning at first breach; if pressure continues
-// to rise above threshold * 1.15 it forces compression.
+// to rise above threshold * 1.10 it forces compression.
 func PressureMonitor(threshold float64) PolicyHook {
 	if threshold <= 0 {
-		threshold = 0.70
+		threshold = 0.60
 	}
 	var warned bool
 
@@ -48,12 +48,12 @@ func PressureMonitor(threshold float64) PolicyHook {
 		}
 
 		// Sustained high pressure: force compression
-		if p > threshold*1.15 {
+		if p > threshold*1.10 {
 			warned = false // reset so we can warn again after compression
 			return HookResult{
 				Action:  HookForceReplan,
 				Message: "context_pressure_compress",
-				Reason:  fmt.Sprintf("context pressure %.0f%% exceeds %.0f%% — forcing compression", p*100, threshold*1.15*100),
+				Reason:  fmt.Sprintf("context pressure %.0f%% exceeds %.0f%% — forcing compression", p*100, threshold*1.10*100),
 			}
 		}
 

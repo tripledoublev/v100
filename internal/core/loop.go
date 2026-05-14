@@ -1175,9 +1175,37 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	startTime := time.Now()
 
 	// ── Pass 1: Targeted per-message compression ──────────────────────────
-	protectRecent := 6
+	baseProtectRecent := 6
 	if l.Policy != nil && l.Policy.CompressProtectRecent > 0 {
-		protectRecent = l.Policy.CompressProtectRecent
+		baseProtectRecent = l.Policy.CompressProtectRecent
+	}
+
+	// Dynamic protectRecent: when recent messages are large, protect fewer
+	// so we have more room to compress. Compute token size of the most recent
+	// messages and shrink the protected window proportionally.
+	protectRecent := baseProtectRecent
+	if n := len(l.Messages); n > 0 {
+		sampleStart := n - baseProtectRecent
+		if sampleStart < 0 {
+			sampleStart = 0
+		}
+		var recentTokens int
+		for i := sampleStart; i < n; i++ {
+			recentTokens += estimateTokensSingle(l.Messages[i])
+		}
+		// If the average recent message exceeds 2000 tokens, reduce
+		// protectRecent proportionally (min floor of 2).
+		sampled := n - sampleStart
+		if sampled > 0 {
+			avgRecent := recentTokens / sampled
+			if avgRecent > 2000 {
+				adjusted := baseProtectRecent * 2000 / avgRecent
+				if adjusted < 2 {
+					adjusted = 2
+				}
+				protectRecent = adjusted
+			}
+		}
 	}
 
 	compressible := len(l.Messages) - protectRecent
@@ -1342,7 +1370,7 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 
 func (l *Loop) compressionTrigger(tokensBefore int) string {
 	if l.Policy != nil && l.Policy.ContextLimit > 0 {
-		threshold := l.Policy.ContextLimit * 3 / 4
+		threshold := l.Policy.ContextLimit * 65 / 100
 		if tokensBefore >= threshold {
 			return "context_limit"
 		}

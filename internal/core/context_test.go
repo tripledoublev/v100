@@ -7,7 +7,7 @@ import (
 )
 
 func TestPressureMonitorNoPressure(t *testing.T) {
-	hook := PressureMonitor(0.70)
+	hook := PressureMonitor(0.60)
 
 	// No context size info — should continue
 	state := LoopState{ContextPressure: 0, ContextWindowSize: 0}
@@ -18,7 +18,7 @@ func TestPressureMonitorNoPressure(t *testing.T) {
 }
 
 func TestPressureMonitorBelowThreshold(t *testing.T) {
-	hook := PressureMonitor(0.70)
+	hook := PressureMonitor(0.60)
 
 	state := LoopState{ContextPressure: 0.50, ContextWindowSize: 128000}
 	res := hook(state)
@@ -28,9 +28,9 @@ func TestPressureMonitorBelowThreshold(t *testing.T) {
 }
 
 func TestPressureMonitorWarnOnFirstBreach(t *testing.T) {
-	hook := PressureMonitor(0.70)
+	hook := PressureMonitor(0.60)
 
-	state := LoopState{ContextPressure: 0.75, ContextWindowSize: 128000}
+	state := LoopState{ContextPressure: 0.65, ContextWindowSize: 128000}
 	res := hook(state)
 	if res.Action != HookInjectMessage {
 		t.Fatalf("expected HookInjectMessage on first breach, got %v", res.Action)
@@ -41,17 +41,17 @@ func TestPressureMonitorWarnOnFirstBreach(t *testing.T) {
 }
 
 func TestPressureMonitorSustainedHighForcesReplan(t *testing.T) {
-	hook := PressureMonitor(0.70)
+	hook := PressureMonitor(0.60)
 
 	// First breach: warn
-	state := LoopState{ContextPressure: 0.75, ContextWindowSize: 128000}
+	state := LoopState{ContextPressure: 0.65, ContextWindowSize: 128000}
 	res := hook(state)
 	if res.Action != HookInjectMessage {
 		t.Fatalf("expected HookInjectMessage on first breach, got %v", res.Action)
 	}
 
-	// Sustained high pressure (above threshold * 1.15 = 0.805): force replan
-	state = LoopState{ContextPressure: 0.85, ContextWindowSize: 128000}
+	// Sustained high pressure (above threshold * 1.10 = 0.66): force replan
+	state = LoopState{ContextPressure: 0.70, ContextWindowSize: 128000}
 	res = hook(state)
 	if res.Action != HookForceReplan {
 		t.Fatalf("expected HookForceReplan at sustained high pressure, got %v", res.Action)
@@ -59,10 +59,10 @@ func TestPressureMonitorSustainedHighForcesReplan(t *testing.T) {
 }
 
 func TestPressureMonitorResetsAfterDrop(t *testing.T) {
-	hook := PressureMonitor(0.70)
+	hook := PressureMonitor(0.60)
 
 	// First breach
-	state := LoopState{ContextPressure: 0.75, ContextWindowSize: 128000}
+	state := LoopState{ContextPressure: 0.65, ContextWindowSize: 128000}
 	res := hook(state)
 	if res.Action != HookInjectMessage {
 		t.Fatalf("expected HookInjectMessage on first breach, got %v", res.Action)
@@ -76,7 +76,7 @@ func TestPressureMonitorResetsAfterDrop(t *testing.T) {
 	}
 
 	// Breach again — should warn again (not replan)
-	state = LoopState{ContextPressure: 0.72, ContextWindowSize: 128000}
+	state = LoopState{ContextPressure: 0.62, ContextWindowSize: 128000}
 	res = hook(state)
 	if res.Action != HookInjectMessage {
 		t.Fatalf("expected HookInjectMessage on re-breach after reset, got %v", res.Action)
@@ -84,18 +84,18 @@ func TestPressureMonitorResetsAfterDrop(t *testing.T) {
 }
 
 func TestPressureMonitorDefaultThreshold(t *testing.T) {
-	// threshold=0 should default to 0.70
+	// threshold=0 should default to 0.60
 	hook := PressureMonitor(0)
 
-	// Below 0.70: continue
-	state := LoopState{ContextPressure: 0.60, ContextWindowSize: 128000}
+	// Below 0.60: continue
+	state := LoopState{ContextPressure: 0.50, ContextWindowSize: 128000}
 	res := hook(state)
 	if res.Action != HookContinue {
 		t.Fatalf("expected HookContinue below default threshold, got %v", res.Action)
 	}
 
-	// At 0.75: warn
-	state = LoopState{ContextPressure: 0.75, ContextWindowSize: 128000}
+	// At 0.65: warn (above 0.60)
+	state = LoopState{ContextPressure: 0.65, ContextWindowSize: 128000}
 	res = hook(state)
 	if res.Action != HookInjectMessage {
 		t.Fatalf("expected HookInjectMessage above default threshold, got %v", res.Action)
