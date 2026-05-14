@@ -1,3 +1,5 @@
+<img width="555" height="198" alt="v100" src="https://github.com/user-attachments/assets/6dfa090c-f0a1-4167-a40e-d08ab9a1cf99" />
+
 # v100: Engine for Agentic Research
 
 v100 is my engine for building, running, studying, and evolving autonomous coding agents under real constraints. 
