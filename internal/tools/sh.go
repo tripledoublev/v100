@@ -98,15 +98,21 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		return failResult(start, "exec error: "+err.Error()), nil
 	}
 
+	// Apply tool-layer cap to stdout/stderr before serializing.
+	// The policy's MaxToolResultChars will still apply at the loop level;
+	// this prevents pathological shell output from blowing up memory.
+	cappedStdout := TruncateOutput(res.Stdout, DefaultToolResultChars)
+	cappedStderr := TruncateOutput(res.Stderr, DefaultToolResultChars)
+
 	payload := map[string]any{
-		"stdout":    res.Stdout,
-		"stderr":    res.Stderr,
+		"stdout":    cappedStdout,
+		"stderr":    cappedStderr,
 		"exit_code": res.ExitCode,
 	}
-	if lines := outputLines(res.Stdout); len(lines) > 0 {
+	if lines := outputLines(cappedStdout); len(lines) > 0 {
 		payload["stdout_lines"] = lines
 	}
-	if lines := outputLines(res.Stderr); len(lines) > 0 {
+	if lines := outputLines(cappedStderr); len(lines) > 0 {
 		payload["stderr_lines"] = lines
 	}
 
@@ -117,8 +123,8 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 	return sanitizeToolResult(call, ToolResult{
 		OK:         res.ExitCode == 0,
 		Output:     string(out),
-		Stdout:     res.Stdout,
-		Stderr:     res.Stderr,
+		Stdout:     cappedStdout,
+		Stderr:     cappedStderr,
 		DurationMS: time.Since(start).Milliseconds(),
 	}), nil
 }

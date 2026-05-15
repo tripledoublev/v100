@@ -137,6 +137,7 @@ func (t *wikiTool) doRead(ctx context.Context, call ToolCallContext, start time.
 			}
 			output := fmt.Sprintf("title: %s\npageid: %d\nsource: cache\nfetched_at: %s\nlang: %s\n\n%s",
 				cached.Title, cached.PageID, cached.FetchedAt.Format(time.RFC3339), cached.Lang, extract)
+			output = TruncateOutput(output, DefaultToolResultChars)
 			return ToolResult{OK: true, Output: output, Stdout: output, DurationMS: time.Since(start).Milliseconds()}, nil
 		}
 	}
