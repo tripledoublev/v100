@@ -123,7 +123,7 @@ func (t *atprotoFeedTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 	if resp.Cursor != "" {
 		fmt.Fprintf(&sb, "cursor: %s", resp.Cursor)
 	}
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 	if count == 0 {
 		return ToolResult{OK: true, Output: "no notifications"}, nil
 	}
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -712,7 +712,7 @@ func (t *atprotoUploadBlobTool) Exec(_ context.Context, _ ToolCallContext, args 
 		"size": blob.Size,
 		"alt":  in.AltText,
 	})
-	return ToolResult{OK: true, Output: string(out)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(out)}), nil
 }
 
 func isSupportedBskyImage(mime string) bool {

@@ -161,6 +161,7 @@ func (t *wikiTool) doRead(ctx context.Context, call ToolCallContext, start time.
 
 	output := fmt.Sprintf("title: %s\npageid: %d\nsource: remote\nfetched_at: %s\nlang: %s\n\n%s",
 		article.Title, article.PageID, article.FetchedAt.Format(time.RFC3339), article.Lang, extract)
+	output = TruncateOutput(output, DefaultToolResultChars)
 	return ToolResult{OK: true, Output: output, Stdout: output, DurationMS: time.Since(start).Milliseconds()}, nil
 }
 
@@ -184,6 +185,7 @@ func (t *wikiTool) doSearch(ctx context.Context, call ToolCallContext, start tim
 	}
 
 	output := strings.Join(lines, "\n")
+	output = TruncateOutput(output, DefaultToolResultChars)
 	return ToolResult{OK: true, Output: output, Stdout: output, DurationMS: time.Since(start).Milliseconds()}, nil
 }
 

@@ -166,5 +166,5 @@ func (t *atrotoAnonSynthTool) Exec(_ context.Context, _ ToolCallContext, args js
 		"post_count": len(lines),
 		"skipped":    skipped,
 	})
-	return ToolResult{OK: true, Output: string(out)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(out)}), nil
 }

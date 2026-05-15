@@ -60,6 +60,29 @@ func TestTruncateOutput_TinyMax(t *testing.T) {
 	}
 }
 
+func TestCapToolResult_AppliesToOutputAndStdout(t *testing.T) {
+	big := strings.Repeat("x", DefaultToolResultChars*2)
+	r := ToolResult{OK: true, Output: big, Stdout: big}
+	got := CapToolResult(r)
+	if len(got.Output) > DefaultToolResultChars {
+		t.Errorf("Output not capped: len=%d", len(got.Output))
+	}
+	if len(got.Stdout) > DefaultToolResultChars {
+		t.Errorf("Stdout not capped: len=%d", len(got.Stdout))
+	}
+	if !strings.Contains(got.Output, "truncated") {
+		t.Error("expected truncation marker on Output")
+	}
+}
+
+func TestCapToolResult_PreservesShort(t *testing.T) {
+	r := ToolResult{OK: true, Output: "short", Stdout: "short"}
+	got := CapToolResult(r)
+	if got.Output != "short" || got.Stdout != "short" {
+		t.Errorf("short output should pass through unchanged: %+v", got)
+	}
+}
+
 func TestDefaultCaps_Sanity(t *testing.T) {
 	// Tool-layer chars cap should be slightly above policy default (20000)
 	// but well below pathological sizes

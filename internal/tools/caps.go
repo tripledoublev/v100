@@ -22,6 +22,15 @@ const (
 	MaxFetchBytes int64 = 2 * 1024 * 1024
 )
 
+// CapToolResult applies DefaultToolResultChars to a ToolResult's Output and
+// Stdout fields. Convenience wrapper for tools that build large string/JSON
+// outputs and want consistent tool-layer truncation.
+func CapToolResult(r ToolResult) ToolResult {
+	r.Output = TruncateOutput(r.Output, DefaultToolResultChars)
+	r.Stdout = TruncateOutput(r.Stdout, DefaultToolResultChars)
+	return r
+}
+
 // TruncateOutput truncates s to maxChars characters, appending a
 // human-readable suffix indicating how many characters were elided.
 // If maxChars <= 0 or s is already short enough, returns s unchanged.
