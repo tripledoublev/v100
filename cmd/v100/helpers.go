@@ -1058,6 +1058,11 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	if cfg.Defaults.MirrorToolResults {
 		p.MirrorToolResults = true
 	}
+	// Wire stale_tool_elide_steps from config; -1 means "disabled" explicitly
+	// (any non-zero value is preserved so users can disable with -1).
+	if cfg.Defaults.StaleToolElideSteps != 0 {
+		p.StaleToolElideSteps = cfg.Defaults.StaleToolElideSteps
+	}
 	return p
 }
 

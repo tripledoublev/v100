@@ -7,10 +7,14 @@ import (
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
-// StaleToolElideSteps controls how many recent messages (from the end) are
+// DefaultStaleElideWindow is the default number of recent messages (from the end)
 // protected from stale eliding. Tool result messages beyond this window are
-// candidates for eliding. A value of 0 disables stale eliding entirely.
-// The default is 20 (protect the last 20 messages worth of conversation).
+// candidates for eliding.
+//
+// Policy.StaleToolElideSteps semantics:
+//   - > 0 : custom protect window
+//   - 0   : use DefaultStaleElideWindow (default behavior)
+//   - -1  : disable eliding entirely
 const DefaultStaleElideWindow = 20
 
 // ElideStaleToolResults scans the message history and replaces old tool result
