@@ -760,7 +760,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Dir: workspace,
 		}
 
-		systemPrompt := strings.TrimSpace(roleCfg.SystemPrompt)
+		// Resolve sub-agent system prompt, preferring system_prompt_path when set.
+		// Falls back to inline SystemPrompt on read error, then to a default.
+		systemPrompt, err := roleCfg.ResolvePrompt(config.XDGConfigDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v (falling back to inline system_prompt)\n", err)
+			systemPrompt = roleCfg.SystemPrompt
+		}
+		systemPrompt = strings.TrimSpace(systemPrompt)
 		if systemPrompt == "" {
 			systemPrompt = "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you."
 		}

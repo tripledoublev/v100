@@ -177,3 +177,49 @@ func TestLoadAgentsDirectory_MissingDir(t *testing.T) {
 		t.Errorf("expected empty map, got %d agents", len(agents))
 	}
 }
+
+func TestAgentConfig_ResolvePrompt_TildeExpansion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sub := filepath.Join(home, "promptdir")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "agent.md"), []byte("tilde works"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := AgentConfig{SystemPromptPath: "~/promptdir/agent.md"}
+	got, err := agent.ResolvePrompt("/some/other/dir")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "tilde works" {
+		t.Errorf("expected tilde-expanded content, got %q", got)
+	}
+}
+
+func TestWakeTaskStep_ResolvePrompt_TildeExpansion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "step.md"), []byte("step tilde"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	step := WakeTaskStep{PromptPath: "~/step.md"}
+	got, err := step.ResolvePrompt("/elsewhere")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "step tilde" {
+		t.Errorf("expected tilde-expanded content, got %q", got)
+	}
+}
+
+func TestXDGConfigDir(t *testing.T) {
+	got := XDGConfigDir()
+	if got == "" {
+		t.Error("XDGConfigDir returned empty string")
+	}
+	if filepath.Base(got) != "v100" {
+		t.Errorf("expected last segment v100, got %q", got)
+	}
+}

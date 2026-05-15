@@ -9,41 +9,48 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// resolvePromptPath reads a prompt from the given path, applying ~ expansion
+// and resolving relative paths against baseDir.
+func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
+	path := expandHome(rawPath)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s %q: %w", field, path, err)
+	}
+	return string(data), nil
+}
+
 // ResolvePrompt returns the resolved system prompt for an agent.
-// If SystemPromptPath is set, it reads the file (resolved relative to baseDir if not absolute).
+// If SystemPromptPath is set, it reads the file. The path may use ~/ for
+// home-relative paths and is otherwise resolved relative to baseDir.
 // Otherwise, falls back to inline SystemPrompt.
 // Returns an error if the path is set but the file cannot be read.
 func (a AgentConfig) ResolvePrompt(baseDir string) (string, error) {
 	if strings.TrimSpace(a.SystemPromptPath) == "" {
 		return a.SystemPrompt, nil
 	}
-	path := a.SystemPromptPath
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(baseDir, path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read system_prompt_path %q: %w", path, err)
-	}
-	return string(data), nil
+	return resolvePromptPath(a.SystemPromptPath, baseDir, "system_prompt_path")
 }
 
 // ResolvePrompt returns the resolved prompt for a wake task step.
-// If PromptPath is set, it reads the file (resolved relative to baseDir if not absolute).
+// If PromptPath is set, it reads the file. The path may use ~/ for
+// home-relative paths and is otherwise resolved relative to baseDir.
 // Otherwise, falls back to inline Prompt.
 func (s WakeTaskStep) ResolvePrompt(baseDir string) (string, error) {
 	if strings.TrimSpace(s.PromptPath) == "" {
 		return s.Prompt, nil
 	}
-	path := s.PromptPath
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(baseDir, path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read prompt_path %q: %w", path, err)
-	}
-	return string(data), nil
+	return resolvePromptPath(s.PromptPath, baseDir, "prompt_path")
+}
+
+// XDGConfigDir returns the directory containing the user's v100 config file.
+// Used as the default baseDir for resolving prompt_path / system_prompt_path
+// when callers do not supply one explicitly.
+func XDGConfigDir() string {
+	return filepath.Dir(XDGConfigPath())
 }
 
 // LoadAgentFile loads a standalone agent definition from a TOML file.

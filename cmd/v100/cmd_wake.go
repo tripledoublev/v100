@@ -1642,7 +1642,16 @@ func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskS
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
-	fmt.Fprintf(&b, "%s\n\n", step.Prompt)
+	// Resolve external prompt_path if set, falling back to inline Prompt.
+	// On read failure, fall back silently to inline so a missing file does not
+	// break wake execution — the runtime warning is left to the caller.
+	stepText := step.Prompt
+	if resolved, err := step.ResolvePrompt(config.XDGConfigDir()); err == nil && resolved != "" {
+		stepText = resolved
+	} else if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v (falling back to inline prompt)\n", err)
+	}
+	fmt.Fprintf(&b, "%s\n\n", stepText)
 
 	if enabled := step.EnabledTools(); len(enabled) > 0 {
 		fmt.Fprintf(&b, "Available tools: %s. Use them as needed.\n", strings.Join(enabled, ", "))
