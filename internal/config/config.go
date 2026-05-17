@@ -82,10 +82,11 @@ type WakeTask struct {
 
 // WakeTaskStep is a single step within a wake task.
 type WakeTaskStep struct {
-	Name   string   `toml:"name"`
-	Tool   string   `toml:"tool,omitempty"`
-	Tools  []string `toml:"tools,omitempty"` // multi-tool allowlist; merged with Tool if both set
-	Prompt string   `toml:"prompt"`
+	Name       string   `toml:"name"`
+	Tool       string   `toml:"tool,omitempty"`
+	Tools      []string `toml:"tools,omitempty"` // multi-tool allowlist; merged with Tool if both set
+	Prompt     string   `toml:"prompt"`
+	PromptPath string   `toml:"prompt_path,omitempty"` // optional path to external prompt file (.md/.txt)
 }
 
 // EnabledTools returns the deduplicated list of tools for this step.
@@ -134,12 +135,13 @@ type PolicyConfig struct {
 
 // AgentConfig holds sub-agent persona definitions.
 type AgentConfig struct {
-	SystemPrompt  string   `toml:"system_prompt"`
-	Tools         []string `toml:"tools"`
-	Model         string   `toml:"model"`
-	BudgetSteps   int      `toml:"budget_steps"`
-	BudgetTokens  int      `toml:"budget_tokens"`
-	BudgetCostUSD float64  `toml:"budget_cost_usd"`
+	SystemPrompt     string   `toml:"system_prompt"`
+	SystemPromptPath string   `toml:"system_prompt_path"` // optional path to .md/.txt file containing the system prompt
+	Tools            []string `toml:"tools"`
+	Model            string   `toml:"model"`
+	BudgetSteps      int      `toml:"budget_steps"`
+	BudgetTokens     int      `toml:"budget_tokens"`
+	BudgetCostUSD    float64  `toml:"budget_cost_usd"`
 }
 
 // DefaultsConfig holds run-level defaults.
