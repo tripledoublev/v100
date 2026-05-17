@@ -73,7 +73,57 @@ type Loop struct {
 const (
 	budgetCompressionMinContextTokens = 500
 	budgetCompressionLookaheadSteps   = 4
+
+	// bulkSummaryMaxTokens caps the length of the bulk-pass summary so it
+	// doesn't itself contribute meaningful context pressure (~500 tokens).
+	bulkSummaryMaxTokens = 500
+
+	// bulkProtectRecent is the minimum number of recent messages that must
+	// remain untouched after a bulk compress.
+	bulkProtectRecent = 4
+
+	// bulkSignificantMessageChars marks a message as "significant" — large
+	// enough to justify compression even in a short history.
+	bulkSignificantMessageChars = 4000
 )
+
+// computeBulkCutoff returns how many leading messages should be folded into
+// a single summary on the bulk fallback pass.
+//
+// Behavior:
+//   - For longer histories, take roughly the oldest half (legacy behavior),
+//     but never encroach on the last bulkProtectRecent messages.
+//   - For short histories where half-cutoff is below 4, fall back to including
+//     all but the protected tail if any of the older messages are "significant"
+//     (large content). This prevents giant single messages from slipping
+//     through in short conversations — the issue motivating this change.
+//
+// Returns 0 if there is nothing safe to compress.
+func computeBulkCutoff(msgs []providers.Message) int {
+	n := len(msgs)
+	if n <= bulkProtectRecent {
+		return 0
+	}
+	half := n / 2
+	if half >= 4 {
+		// Preserve legacy behavior: oldest half, but never touch the tail.
+		if half > n-bulkProtectRecent {
+			half = n - bulkProtectRecent
+		}
+		return half
+	}
+	// Short history: check for significant messages outside the protected tail.
+	candidates := n - bulkProtectRecent
+	if candidates <= 0 {
+		return 0
+	}
+	for i := 0; i < candidates; i++ {
+		if len(msgs[i].Content) >= bulkSignificantMessageChars {
+			return candidates
+		}
+	}
+	return 0
+}
 
 func (l *Loop) runHooks(stepID string, stage HookStage) HookResult {
 	// Lazily initialize built-in hooks.
@@ -1310,9 +1360,13 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 	}
 
 	// ── Pass 2: Bulk fallback (oldest-half summarization) ─────────────────
-	cutoff := len(l.Messages) / 2
-	if cutoff < 4 {
-		return nil // too short to compress meaningfully
+	// Choose a cutoff that always leaves at least bulkProtectRecent messages intact.
+	// Falls back to compressing fewer messages in short histories if their total
+	// content is significant, rather than the prior `cutoff < 4` escape hatch
+	// that let giant messages slip through.
+	cutoff := computeBulkCutoff(l.Messages)
+	if cutoff < 1 {
+		return nil // nothing meaningful to compress
 	}
 	toSummarize := l.Messages[:cutoff]
 
@@ -1321,10 +1375,11 @@ func (l *Loop) compress(ctx context.Context, stepID string, force bool) error {
 		Messages: append(
 			[]providers.Message{{
 				Role:    "system",
-				Content: "You are a summarizer. Produce a dense, structured summary of the following conversation segment. Preserve: decisions made, files read/edited, tool results, current task state. Be concise.",
+				Content: "You are a summarizer. Produce a dense, structured summary of the following conversation segment. Preserve: decisions made, files read/edited, tool results, current task state. Keep the summary under 500 tokens (~2000 characters). Use terse bullet points; omit pleasantries and redundant detail.",
 			}},
 			sanitizeCompressionMessages(toSummarize)...,
 		),
+		GenParams: providers.GenParams{MaxTokens: bulkSummaryMaxTokens},
 	}
 	resp, err := cp.Complete(ctx, summaryReq)
 	if err != nil {
