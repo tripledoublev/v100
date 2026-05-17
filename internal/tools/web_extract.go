@@ -51,7 +51,7 @@ func (t *webExtractTool) Exec(ctx context.Context, call ToolCallContext, args js
 		URL      string `json:"url"`
 		MaxBytes int64  `json:"max_bytes"`
 	}
-	a.MaxBytes = 128 * 1024
+	a.MaxBytes = DefaultFetchBytes
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
@@ -62,8 +62,8 @@ func (t *webExtractTool) Exec(ctx context.Context, call ToolCallContext, args js
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return failResult(start, "url must start with http:// or https://"), nil
 	}
-	if a.MaxBytes <= 0 || a.MaxBytes > 2*1024*1024 {
-		a.MaxBytes = 128 * 1024
+	if a.MaxBytes <= 0 || a.MaxBytes > MaxFetchBytes {
+		a.MaxBytes = DefaultFetchBytes
 	}
 
 	fetched, fail, err := fetchHTTPBody(ctx, call, start, url, a.MaxBytes, false)

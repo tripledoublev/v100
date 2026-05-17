@@ -567,9 +567,9 @@ func (t *atprotoRecallTool) Exec(ctx context.Context, call ToolCallContext, args
 	if err != nil {
 		return failResult(start, "marshal results: "+err.Error()), nil
 	}
-	return ToolResult{
+	return CapToolResult(ToolResult{
 		OK:         true,
 		Output:     string(b),
 		DurationMS: time.Since(start).Milliseconds(),
-	}, nil
+	}), nil
 }

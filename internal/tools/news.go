@@ -346,10 +346,11 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 		return failResult(start, "marshal output: "+err.Error()), nil
 	}
 
+	capped := TruncateOutput(string(body), DefaultToolResultChars)
 	result := ToolResult{
 		OK:         len(items) > 0,
-		Output:     string(body),
-		Stdout:     string(body),
+		Output:     capped,
+		Stdout:     capped,
 		DurationMS: time.Since(start).Milliseconds(),
 	}
 	return sanitizeToolResult(call, result), nil

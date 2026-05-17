@@ -329,7 +329,7 @@ func (t *atprotoEngagementHealthTool) Exec(_ context.Context, _ ToolCallContext,
 	for _, suggestion := range suggestions {
 		fmt.Fprintf(&sb, "- %s\n", suggestion)
 	}
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 func engagementHealthSuggestions(postsPerDay, avgEngagement float64, replyPosts, quoteOrLinkish, totalPosts int) []string {
@@ -443,7 +443,7 @@ func (t *atprotoVibeCheckTool) Exec(_ context.Context, _ ToolCallContext, args j
 			p.AuthorHandle, p.Likes, p.Reposts, p.Replies, p.Text)
 	}
 
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -549,5 +549,5 @@ func (t *atprotoDailyDigestTool) Exec(_ context.Context, _ ToolCallContext, args
 			idx+1, p.AuthorHandle, score, p.Text)
 	}
 
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }

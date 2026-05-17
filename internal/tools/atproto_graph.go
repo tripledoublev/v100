@@ -98,7 +98,7 @@ func (t *atprotoGetFollowsTool) Exec(_ context.Context, _ ToolCallContext, args 
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	return ToolResult{OK: true, Output: string(data)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ func (t *atprotoGetFollowersTool) Exec(_ context.Context, _ ToolCallContext, arg
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	return ToolResult{OK: true, Output: string(data)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ func (t *atprotoGetProfileTool) Exec(_ context.Context, _ ToolCallContext, args 
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	return ToolResult{OK: true, Output: string(data)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 }
 
 // ---------------------------------------------------------------------------
