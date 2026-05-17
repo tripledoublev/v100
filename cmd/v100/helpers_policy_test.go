@@ -28,6 +28,29 @@ func TestLoadPolicyKeepsNamedPolicyMaxToolCallsWhenDefaultUnset(t *testing.T) {
 	}
 }
 
+func TestLoadPolicyAppliesStaleToolElideSteps(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Defaults.StaleToolElideSteps = 42
+	cfg.Policies["default"] = config.PolicyConfig{}
+
+	p := loadPolicy(cfg, "default")
+	if p.StaleToolElideSteps != 42 {
+		t.Fatalf("StaleToolElideSteps = %d, want 42", p.StaleToolElideSteps)
+	}
+}
+
+func TestLoadPolicyPreservesStaleToolElideDisabled(t *testing.T) {
+	// -1 means "explicitly disabled"; must survive the != 0 guard.
+	cfg := config.DefaultConfig()
+	cfg.Defaults.StaleToolElideSteps = -1
+	cfg.Policies["default"] = config.PolicyConfig{}
+
+	p := loadPolicy(cfg, "default")
+	if p.StaleToolElideSteps != -1 {
+		t.Fatalf("StaleToolElideSteps = %d, want -1 (disabled)", p.StaleToolElideSteps)
+	}
+}
+
 func TestBuildSolverAcceptsDualChannel(t *testing.T) {
 	cfg := config.DefaultConfig()
 	solver, err := buildSolver(cfg, "dual_channel")

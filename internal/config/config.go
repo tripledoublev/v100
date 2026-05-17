@@ -170,6 +170,7 @@ type DefaultsConfig struct {
 	CompressProtectRecent int      `toml:"compress_protect_recent"`
 	CompressProvider      string   `toml:"compress_provider"`
 	MirrorToolResults     bool     `toml:"mirror_tool_results"`
+	StaleToolElideSteps   int      `toml:"stale_tool_elide_steps"`
 }
 
 // DefaultConfig returns a built-in baseline configuration.
@@ -288,6 +289,7 @@ func DefaultConfig() *Config {
 			MaxToolResultChars:    20000,
 			CompressProtectRecent: 6,
 			CompressProvider:      "glm",
+			StaleToolElideSteps:   20,
 		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
