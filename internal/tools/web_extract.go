@@ -22,14 +22,14 @@ func (t *webExtractTool) Effects() ToolEffects {
 }
 
 func (t *webExtractTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{
+	return json.RawMessage(fmt.Sprintf(`{
 		"type": "object",
 		"required": ["url"],
 		"properties": {
 			"url": {"type": "string", "description": "HTTP or HTTPS URL to fetch."},
-			"max_bytes": {"type": "integer", "description": "Maximum bytes to read from response body.", "default": 131072}
+			"max_bytes": {"type": "integer", "description": "Maximum bytes to read from response body.", "default": %d}
 		}
-	}`)
+	}`, DefaultFetchBytes))
 }
 
 func (t *webExtractTool) OutputSchema() json.RawMessage {

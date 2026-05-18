@@ -14,6 +14,9 @@ import (
 func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
 	path := expandHome(rawPath)
 	if !filepath.IsAbs(path) {
+		if strings.TrimSpace(baseDir) == "" {
+			baseDir = XDGConfigDir()
+		}
 		path = filepath.Join(baseDir, path)
 	}
 	data, err := os.ReadFile(path)
@@ -21,6 +24,25 @@ func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
 		return "", fmt.Errorf("read %s %q: %w", field, path, err)
 	}
 	return string(data), nil
+}
+
+// PromptBaseDir returns the directory relative prompt paths should resolve
+// against for this config.
+func (c *Config) PromptBaseDir() string {
+	if c != nil && strings.TrimSpace(c.SourceDir) != "" {
+		return c.SourceDir
+	}
+	return XDGConfigDir()
+}
+
+func configSourceDir(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return XDGConfigDir()
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return filepath.Dir(path)
 }
 
 // ResolvePrompt returns the resolved system prompt for an agent.

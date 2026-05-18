@@ -431,7 +431,7 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 			i+1, profileInfo[s.DID], s.Count)
 	}
 
-	return ToolResult{OK: true, Output: sb.String()}, nil
+	return CapToolResult(ToolResult{OK: true, Output: sb.String()}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -620,7 +620,7 @@ func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, 
 		}
 	}
 
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 func countFollowOccurrences(follows map[string]string) map[string]int {
@@ -793,7 +793,7 @@ func (t *atprotoFollowerMomentumTool) Exec(_ context.Context, _ ToolCallContext,
 	fmt.Fprintf(&sb, "followers fetched: %d · previous snapshot: %d · new: %d\n", len(followers), len(previous), len(newFollowers))
 	if len(newFollowers) == 0 {
 		fmt.Fprintf(&sb, "No new followers since the last snapshot.")
-		return ToolResult{OK: true, Output: sb.String()}, nil
+		return CapToolResult(ToolResult{OK: true, Output: sb.String()}), nil
 	}
 	fmt.Fprintf(&sb, "new follower topics: %s\n\n", strings.Join(topFollowerBioWords(newFollowers, 8), ", "))
 	for idx, follower := range newFollowers {
@@ -811,7 +811,7 @@ func (t *atprotoFollowerMomentumTool) Exec(_ context.Context, _ ToolCallContext,
 		}
 		fmt.Fprintln(&sb)
 	}
-	return ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}, nil
+	return CapToolResult(ToolResult{OK: true, Output: strings.TrimRight(sb.String(), "\n")}), nil
 }
 
 type followerMomentumProfile struct {

@@ -12,6 +12,10 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
+	// SourceDir is the directory containing the config file that produced this
+	// Config. It is runtime metadata, not a TOML setting.
+	SourceDir string `toml:"-"`
+
 	Providers  map[string]ProviderConfig `toml:"providers"`
 	Tools      ToolsConfig               `toml:"tools"`
 	Policies   map[string]PolicyConfig   `toml:"policies"`
@@ -176,6 +180,7 @@ type DefaultsConfig struct {
 // DefaultConfig returns a built-in baseline configuration.
 func DefaultConfig() *Config {
 	return &Config{
+		SourceDir: XDGConfigDir(),
 		Providers: map[string]ProviderConfig{
 			"smartrouter": {
 				Type: "smartrouter",
@@ -441,6 +446,7 @@ func Load(path string) (*Config, error) {
 	_ = LoadDotEnv(".env")
 
 	path = expandHome(path)
+	sourceDir := configSourceDir(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
@@ -450,6 +456,7 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	cfg.SourceDir = sourceDir
 	applyProviderDefaults(&cfg, DefaultConfig())
 	applyToolDefaults(&cfg.Tools, DefaultConfig().Tools)
 	// Backward-compatible tool migrations for older config files.

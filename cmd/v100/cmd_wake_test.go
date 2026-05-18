@@ -564,6 +564,44 @@ func TestBuildWakeIssuePromptIncludesIssueWorkflow(t *testing.T) {
 	}
 }
 
+func TestBuildStepPromptUsesConfigRelativePromptPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "step.md"), []byte("from file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	task := &config.WakeTask{Name: "daily", Steps: []config.WakeTaskStep{{Name: "read"}}}
+	step := config.WakeTaskStep{
+		Name:       "read",
+		Prompt:     "inline",
+		PromptPath: "step.md",
+	}
+
+	got, err := buildStepPrompt(dir, task, 0, step, "")
+	if err != nil {
+		t.Fatalf("buildStepPrompt() error = %v", err)
+	}
+	if !strings.Contains(got, "from file") {
+		t.Fatalf("prompt missing file content: %q", got)
+	}
+	if strings.Contains(got, "inline") {
+		t.Fatalf("prompt used inline fallback despite prompt_path: %q", got)
+	}
+}
+
+func TestBuildStepPromptFailsOnMissingPromptPath(t *testing.T) {
+	task := &config.WakeTask{Name: "daily", Steps: []config.WakeTaskStep{{Name: "read"}}}
+	step := config.WakeTaskStep{
+		Name:       "read",
+		Prompt:     "inline",
+		PromptPath: "missing.md",
+	}
+
+	_, err := buildStepPrompt(t.TempDir(), task, 0, step, "")
+	if err == nil {
+		t.Fatal("expected error for missing prompt_path")
+	}
+}
+
 func TestRunHeadlessIssueWorkerPassesWakeBudgetsAndToolCeiling(t *testing.T) {
 	oldExec := wakeExecCommand
 	defer func() { wakeExecCommand = oldExec }()

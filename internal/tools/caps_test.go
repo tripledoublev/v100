@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -104,5 +105,44 @@ func TestDefaultCaps_Sanity(t *testing.T) {
 	// MaxFetchBytes should be much larger (caller can request larger)
 	if MaxFetchBytes <= DefaultFetchBytes {
 		t.Errorf("MaxFetchBytes (%d) should exceed default (%d)", MaxFetchBytes, DefaultFetchBytes)
+	}
+}
+
+func TestFetchInputSchemasAdvertiseDefaultFetchBytes(t *testing.T) {
+	for name, schema := range map[string]json.RawMessage{
+		"curl_fetch":  CurlFetch().InputSchema(),
+		"web_extract": WebExtract().InputSchema(),
+	} {
+		var parsed struct {
+			Properties map[string]struct {
+				Default int64 `json:"default"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(schema, &parsed); err != nil {
+			t.Fatalf("%s schema invalid: %v", name, err)
+		}
+		if got := parsed.Properties["max_bytes"].Default; got != DefaultFetchBytes {
+			t.Fatalf("%s max_bytes default = %d, want %d", name, got, DefaultFetchBytes)
+		}
+	}
+}
+
+func TestMarshalShellResultCapsSerializedOutput(t *testing.T) {
+	out, stdout, stderr, err := marshalShellResult(strings.Repeat("x", DefaultToolResultChars*3), "", 0)
+	if err != nil {
+		t.Fatalf("marshalShellResult() error = %v", err)
+	}
+	if len(out) > DefaultToolResultChars {
+		t.Fatalf("serialized output length = %d, want <= %d", len(out), DefaultToolResultChars)
+	}
+	if len(stdout) > DefaultToolResultChars {
+		t.Fatalf("stdout length = %d, want <= %d", len(stdout), DefaultToolResultChars)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("serialized shell output is not valid JSON: %v\n%s", err, out)
 	}
 }

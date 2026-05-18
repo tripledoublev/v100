@@ -70,6 +70,18 @@ func validateExecutionSafety(cfg *config.Config, confirmMode string, allowUnsafe
 	return fmt.Errorf("refusing to run with confirmations disabled on the host workspace; enable --sandbox or pass --unsafe to acknowledge the risk")
 }
 
+func resolveAgentSystemPrompt(cfg *config.Config, roleCfg config.AgentConfig) (string, error) {
+	systemPrompt, err := roleCfg.ResolvePrompt(cfg.PromptBaseDir())
+	if err != nil {
+		return "", err
+	}
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you."
+	}
+	return systemPrompt, nil
+}
+
 func buildProvider(cfg *config.Config, providerName string) (providers.Provider, error) {
 	pc, ok := cfg.Providers[providerName]
 	if !ok {
@@ -760,16 +772,9 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Dir: workspace,
 		}
 
-		// Resolve sub-agent system prompt, preferring system_prompt_path when set.
-		// Falls back to inline SystemPrompt on read error, then to a default.
-		systemPrompt, err := roleCfg.ResolvePrompt(config.XDGConfigDir())
+		systemPrompt, err := resolveAgentSystemPrompt(cfg, roleCfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v (falling back to inline system_prompt)\n", err)
-			systemPrompt = roleCfg.SystemPrompt
-		}
-		systemPrompt = strings.TrimSpace(systemPrompt)
-		if systemPrompt == "" {
-			systemPrompt = "You are a focused sub-agent. Complete the given task concisely. Use the tools available to you."
+			return tools.AgentRunResult{OK: false, Result: "resolve agent system prompt: " + err.Error()}
 		}
 		policyName := "sub-agent"
 		if strings.TrimSpace(params.Agent) != "" {
