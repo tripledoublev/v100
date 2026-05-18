@@ -1572,7 +1572,10 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 			ModelMetadata: providersModelMetadata(ctx, prov, model),
 		}
 
-		stepPrompt := buildStepPrompt(task, i, step, carryContext)
+		stepPrompt, err := buildStepPrompt(cfg.PromptBaseDir(), task, i, step, carryContext)
+		if err != nil {
+			return runID, nil, fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
+		}
 
 		if err := loop.Step(ctx, stepPrompt); err != nil {
 			_ = loop.EmitRunError("wake-synthesis", err.Error())
@@ -1638,18 +1641,13 @@ func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Reg
 	return reg
 }
 
-func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskStep, carryContext string) string {
+func buildStepPrompt(promptBaseDir string, task *config.WakeTask, stepIndex int, step config.WakeTaskStep, carryContext string) (string, error) {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
-	// Resolve external prompt_path if set, falling back to inline Prompt.
-	// On read failure, fall back silently to inline so a missing file does not
-	// break wake execution — the runtime warning is left to the caller.
-	stepText := step.Prompt
-	if resolved, err := step.ResolvePrompt(config.XDGConfigDir()); err == nil && resolved != "" {
-		stepText = resolved
-	} else if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: %v (falling back to inline prompt)\n", err)
+	stepText, err := step.ResolvePrompt(promptBaseDir)
+	if err != nil {
+		return "", err
 	}
 	fmt.Fprintf(&b, "%s\n\n", stepText)
 
@@ -1667,7 +1665,7 @@ func buildStepPrompt(task *config.WakeTask, stepIndex int, step config.WakeTaskS
 		b.WriteString("\nEnd your response with:\nSYNTHESIS:\n<your final output>\n")
 	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 func resolveWakeModel(cfg *config.Config, providerName string) string {

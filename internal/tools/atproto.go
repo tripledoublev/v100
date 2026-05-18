@@ -350,7 +350,7 @@ func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, arg
 		CID string `json:"cid"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return ToolResult{OK: true, Output: string(data)}, nil
+		return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 	}
 	result, _ := json.Marshal(map[string]any{
 		"ok":         true,
@@ -359,7 +359,7 @@ func (t *atprotoCreateRecordTool) Exec(_ context.Context, _ ToolCallContext, arg
 		"collection": in.Collection,
 		"repo":       cli.session.DID,
 	})
-	return ToolResult{OK: true, Output: string(result)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: string(result)}), nil
 }
 
 func (t *atprotoPostTool) InputSchema() json.RawMessage {
@@ -444,9 +444,9 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 			CID string `json:"cid"`
 		}
 		if err := json.Unmarshal(data, &out); err != nil {
-			return ToolResult{OK: true, Output: string(data)}, nil
+			return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 		}
-		return ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}, nil
+		return CapToolResult(ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}), nil
 	}
 
 	if in.Text == "" && len(in.Images) == 0 {
@@ -540,9 +540,9 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		CID string `json:"cid"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return ToolResult{OK: true, Output: string(data)}, nil
+		return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
 	}
-	return ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}, nil
+	return CapToolResult(ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}), nil
 }
 
 // ---------------------------------------------------------------------------

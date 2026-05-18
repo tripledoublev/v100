@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,5 +53,40 @@ func TestAgentsCmdListsDefaultRoles(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("agents output missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestResolveAgentSystemPromptUsesConfigSourceDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte("from file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.SourceDir = dir
+	role := config.AgentConfig{
+		SystemPrompt:     "inline",
+		SystemPromptPath: "agent.md",
+	}
+
+	got, err := resolveAgentSystemPrompt(cfg, role)
+	if err != nil {
+		t.Fatalf("resolveAgentSystemPrompt() error = %v", err)
+	}
+	if got != "from file" {
+		t.Fatalf("resolveAgentSystemPrompt() = %q, want file prompt", got)
+	}
+}
+
+func TestResolveAgentSystemPromptFailsOnMissingPromptPath(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SourceDir = t.TempDir()
+	role := config.AgentConfig{
+		SystemPrompt:     "inline",
+		SystemPromptPath: "missing.md",
+	}
+
+	_, err := resolveAgentSystemPrompt(cfg, role)
+	if err == nil {
+		t.Fatal("expected error for missing system_prompt_path")
 	}
 }

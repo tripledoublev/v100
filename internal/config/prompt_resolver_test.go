@@ -84,6 +84,23 @@ func TestWakeTaskStep_ResolvePrompt_FromPath(t *testing.T) {
 	}
 }
 
+func TestConfigPromptBaseDirFromLoadedConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[defaults]
+provider = "codex"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.PromptBaseDir(); got != dir {
+		t.Fatalf("PromptBaseDir() = %q, want %q", got, dir)
+	}
+}
+
 func TestLoadAgentFile(t *testing.T) {
 	dir := t.TempDir()
 	agentPath := filepath.Join(dir, "researcher.toml")

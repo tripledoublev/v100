@@ -98,35 +98,24 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 		return failResult(start, "exec error: "+err.Error()), nil
 	}
 
-	// Apply tool-layer cap to stdout/stderr before serializing.
-	// The policy's MaxToolResultChars will still apply at the loop level;
-	// this prevents pathological shell output from blowing up memory.
-	cappedStdout := TruncateOutput(res.Stdout, DefaultToolResultChars)
-	cappedStderr := TruncateOutput(res.Stderr, DefaultToolResultChars)
-
-	payload := map[string]any{
-		"stdout":    cappedStdout,
-		"stderr":    cappedStderr,
-		"exit_code": res.ExitCode,
-	}
-	if lines := outputLines(cappedStdout); len(lines) > 0 {
-		payload["stdout_lines"] = lines
-	}
-	if lines := outputLines(cappedStderr); len(lines) > 0 {
-		payload["stderr_lines"] = lines
+	stdout := res.Stdout
+	stderr := res.Stderr
+	if call.Mapper != nil {
+		stdout = call.Mapper.SanitizeText(stdout)
+		stderr = call.Mapper.SanitizeText(stderr)
 	}
 
-	out, err := json.Marshal(payload)
+	out, cappedStdout, cappedStderr, err := marshalShellResult(stdout, stderr, res.ExitCode)
 	if err != nil {
 		return failResult(start, "marshal result: "+err.Error()), nil
 	}
-	return sanitizeToolResult(call, ToolResult{
+	return ToolResult{
 		OK:         res.ExitCode == 0,
 		Output:     string(out),
 		Stdout:     cappedStdout,
 		Stderr:     cappedStderr,
 		DurationMS: time.Since(start).Milliseconds(),
-	}), nil
+	}, nil
 }
 
 func outputLines(s string) []string {
@@ -136,6 +125,71 @@ func outputLines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+func marshalShellResult(stdout, stderr string, exitCode int) ([]byte, string, string, error) {
+	streamBudget := DefaultToolResultChars - 2048
+	if streamBudget < 1024 {
+		streamBudget = DefaultToolResultChars / 2
+	}
+	stdoutBudget, stderrBudget := splitShellStreamBudget(len(stdout), len(stderr), streamBudget)
+	includeLines := len(stdout)+len(stderr) <= 4096
+
+	for {
+		cappedStdout := TruncateOutput(stdout, stdoutBudget)
+		cappedStderr := TruncateOutput(stderr, stderrBudget)
+		payload := map[string]any{
+			"stdout":    cappedStdout,
+			"stderr":    cappedStderr,
+			"exit_code": exitCode,
+		}
+		if includeLines {
+			if lines := outputLines(cappedStdout); len(lines) > 0 {
+				payload["stdout_lines"] = lines
+			}
+			if lines := outputLines(cappedStderr); len(lines) > 0 {
+				payload["stderr_lines"] = lines
+			}
+		}
+
+		out, err := json.Marshal(payload)
+		if err != nil {
+			return nil, "", "", err
+		}
+		if len(out) <= DefaultToolResultChars {
+			return out, cappedStdout, cappedStderr, nil
+		}
+		if includeLines {
+			includeLines = false
+			continue
+		}
+		if stdoutBudget <= 128 && stderrBudget <= 128 {
+			return out, cappedStdout, cappedStderr, nil
+		}
+		stdoutBudget = shrinkShellStreamBudget(stdoutBudget)
+		stderrBudget = shrinkShellStreamBudget(stderrBudget)
+	}
+}
+
+func splitShellStreamBudget(stdoutLen, stderrLen, budget int) (int, int) {
+	if stdoutLen == 0 {
+		return 0, budget
+	}
+	if stderrLen == 0 {
+		return budget, 0
+	}
+	return budget / 2, budget - budget/2
+}
+
+func shrinkShellStreamBudget(budget int) int {
+	if budget <= 128 {
+		return budget
+	}
+	next := budget / 2
+	if next < 128 {
+		return 128
+	}
+	return next
 }
 
 const sanitizedShellWrapperScript = `

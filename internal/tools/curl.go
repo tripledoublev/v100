@@ -41,14 +41,14 @@ func (t *curlFetchTool) Effects() ToolEffects {
 }
 
 func (t *curlFetchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{
+	return json.RawMessage(fmt.Sprintf(`{
 		"type": "object",
 		"required": ["url"],
 		"properties": {
 			"url": {"type": "string", "description": "HTTP or HTTPS URL to fetch."},
-			"max_bytes": {"type": "integer", "description": "Maximum bytes to read from response body.", "default": 131072}
+			"max_bytes": {"type": "integer", "description": "Maximum bytes to read from response body.", "default": %d}
 		}
-	}`)
+	}`, DefaultFetchBytes))
 }
 
 func (t *curlFetchTool) OutputSchema() json.RawMessage {
