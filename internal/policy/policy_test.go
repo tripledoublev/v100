@@ -68,6 +68,40 @@ func TestLoadFallbackToDefault(t *testing.T) {
 	}
 }
 
+func TestLoadInlineSystemPrompt(t *testing.T) {
+	p, err := Load("inline", config.PolicyConfig{
+		SystemPrompt:        "inline policy",
+		MaxToolCallsPerStep: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SystemPrompt != "inline policy" {
+		t.Fatalf("SystemPrompt = %q, want inline policy", p.SystemPrompt)
+	}
+	if p.MaxToolCallsPerStep != 9 {
+		t.Fatalf("MaxToolCallsPerStep = %d, want 9", p.MaxToolCallsPerStep)
+	}
+}
+
+func TestLoadRelativePromptFromPolicySourceDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "policy.md"), []byte("source-dir policy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := Load("source-dir", config.PolicyConfig{
+		SourceDir:        dir,
+		SystemPromptPath: "policy.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SystemPrompt != "source-dir policy" {
+		t.Fatalf("SystemPrompt = %q, want source-dir policy", p.SystemPrompt)
+	}
+}
+
 func TestLoadDefaultMaxToolCalls(t *testing.T) {
 	p, err := Load("zero", config.PolicyConfig{
 		MaxToolCallsPerStep: 0,

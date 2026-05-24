@@ -588,6 +588,59 @@ func TestBuildStepPromptUsesConfigRelativePromptPath(t *testing.T) {
 	}
 }
 
+func TestBuildStepPromptUsesTaskSourceDir(t *testing.T) {
+	configDir := t.TempDir()
+	taskDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(taskDir, "step.md"), []byte("from task dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	task := &config.WakeTask{
+		SourceDir: taskDir,
+		Name:      "daily",
+		Steps:     []config.WakeTaskStep{{Name: "read"}},
+	}
+	step := config.WakeTaskStep{Name: "read", PromptPath: "step.md"}
+
+	got, err := buildStepPrompt(configDir, task, 0, step, "")
+	if err != nil {
+		t.Fatalf("buildStepPrompt() error = %v", err)
+	}
+	if !strings.Contains(got, "from task dir") {
+		t.Fatalf("prompt missing task-dir file content: %q", got)
+	}
+}
+
+func TestLoadConfigDiscoversWakeTaskDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[defaults]
+provider = "codex"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskDir := filepath.Join(dir, "tasks", "directory-task")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "step.md"), []byte("directory task prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "task.toml"), []byte(`[[steps]]
+name = "read"
+prompt_path = "step.md"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if !strings.Contains(wakeTaskNames(cfg), "directory-task") {
+		t.Fatalf("wakeTaskNames() missing directory-task: %s", wakeTaskNames(cfg))
+	}
+}
+
 func TestBuildStepPromptFailsOnMissingPromptPath(t *testing.T) {
 	task := &config.WakeTask{Name: "daily", Steps: []config.WakeTaskStep{{Name: "read"}}}
 	step := config.WakeTaskStep{

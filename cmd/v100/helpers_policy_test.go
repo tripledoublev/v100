@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -48,6 +50,35 @@ func TestLoadPolicyPreservesStaleToolElideDisabled(t *testing.T) {
 	p := loadPolicy(cfg, "default")
 	if p.StaleToolElideSteps != -1 {
 		t.Fatalf("StaleToolElideSteps = %d, want -1 (disabled)", p.StaleToolElideSteps)
+	}
+}
+
+func TestLoadPolicyUsesDiscoveredPolicyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[defaults]
+provider = "codex"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policiesDir := filepath.Join(dir, "policies")
+	if err := os.MkdirAll(policiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policiesDir, "review.md"), []byte("review policy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	p := loadPolicy(cfg, "review")
+	if p.Name != "review" {
+		t.Fatalf("policy name = %q, want review", p.Name)
+	}
+	if p.SystemPrompt != "review policy" {
+		t.Fatalf("policy prompt = %q, want discovered markdown policy", p.SystemPrompt)
 	}
 }
 

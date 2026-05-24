@@ -1645,7 +1645,7 @@ func buildStepPrompt(promptBaseDir string, task *config.WakeTask, stepIndex int,
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Task: %s — Step %d of %d: %s\n", task.Name, stepIndex+1, len(task.Steps), step.Name)
-	stepText, err := step.ResolvePrompt(promptBaseDir)
+	stepText, err := step.ResolvePrompt(task.PromptBaseDir(promptBaseDir))
 	if err != nil {
 		return "", err
 	}
