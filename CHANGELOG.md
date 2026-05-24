@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.32 — 2026-05-24
+
+**Router Model Routing and Dogfood Fixes**
+
+### Fixes
+
+- Corrected structured-data token estimation to use a more conservative characters-per-token ratio.
+- Fixed router and smartrouter runs so provider-specific model overrides are only sent to the matching active provider, letting other router tiers use their configured defaults.
+- Preserved explicit solver display names so `--solver router` reports `router` while automatic smart routing still reports `smartrouter`.
+- Avoided false automatic build-verification alerts after read-only `sh` commands while keeping verification for mutating shell commands and other workspace-mutating tools.
+
+### Maintenance
+
+- Removed accidentally tracked home-directory artifacts from the repository.
+- Added regression coverage for router model propagation and shell-triggered build verification.
+
 ## v0.2.31 — 2026-05-24
 
 **Prompt Resolution, Tool Output Discipline, and README Refresh**
