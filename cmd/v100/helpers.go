@@ -393,7 +393,7 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 		if err != nil {
 			return nil, fmt.Errorf("build smart provider %q: %w", smartProvName, err)
 		}
-		return &core.RouterSolver{Cheap: cheap, Smart: smart}, nil
+		return &core.RouterSolver{Cheap: cheap, Smart: smart, DisplayName: solverName}, nil
 	case "miniglm":
 		minimax, err := buildProvider(cfg, "minimax")
 		if err != nil {
@@ -426,16 +426,10 @@ func buildSolver(cfg *config.Config, solverName string) (core.Solver, error) {
 }
 
 func solverDisplayName(s core.Solver) string {
-	switch s.(type) {
-	case *core.PlanExecuteSolver:
-		return "plan_execute"
-	case *core.RouterSolver:
-		return "smartrouter"
-	case *core.MiniGLMSolver:
-		return "miniglm"
-	default:
+	if s == nil {
 		return "react"
 	}
+	return s.Name()
 }
 
 func buildToolRegistry(cfg *config.Config) *tools.Registry {

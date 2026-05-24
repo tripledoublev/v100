@@ -43,6 +43,13 @@ func newRouterTestLoop(t *testing.T, cheap, smart providers.Provider, enabledToo
 	}
 }
 
+type namedRouterProvider struct {
+	MockProvider
+	name string
+}
+
+func (p *namedRouterProvider) Name() string { return p.name }
+
 func TestRouterSolverKeepsFSMkdirOnCheapTier(t *testing.T) {
 	ctx := context.Background()
 	cheap := &MockProvider{
@@ -74,6 +81,50 @@ func TestRouterSolverKeepsFSMkdirOnCheapTier(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(loop.Run.Dir, "subdir")); err != nil {
 		t.Fatalf("expected fs_mkdir to run on cheap tier: %v", err)
+	}
+}
+
+func TestRouterSolverUsesActiveModelOnlyForMatchingProvider(t *testing.T) {
+	ctx := context.Background()
+	cheap := &namedRouterProvider{
+		name: "cheap",
+		MockProvider: MockProvider{
+			Responses: []providers.CompleteResponse{{
+				AssistantText: "Escalate unknown tool.",
+				ToolCalls: []providers.ToolCall{
+					{ID: "call_1", Name: "unknown_tool", Args: json.RawMessage(`{}`)},
+				},
+			}},
+		},
+	}
+	smart := &namedRouterProvider{
+		name: "smart",
+		MockProvider: MockProvider{
+			Responses: []providers.CompleteResponse{{AssistantText: "Smart answer."}},
+		},
+	}
+	loop := newRouterTestLoop(t, cheap, smart, nil)
+	loop.Provider = smart
+	loop.Model = "smart-model"
+
+	res, err := loop.Solver.Solve(ctx, loop, "Handle the issue")
+	if err != nil {
+		t.Fatalf("Solve() error = %v", err)
+	}
+	if res.FinalText != "Smart answer." {
+		t.Fatalf("FinalText = %q, want smart answer", res.FinalText)
+	}
+	if len(cheap.Requests) != 1 {
+		t.Fatalf("cheap requests = %d, want 1", len(cheap.Requests))
+	}
+	if cheap.Requests[0].Model != "" {
+		t.Fatalf("cheap request model = %q, want empty provider default", cheap.Requests[0].Model)
+	}
+	if len(smart.Requests) != 1 {
+		t.Fatalf("smart requests = %d, want 1", len(smart.Requests))
+	}
+	if smart.Requests[0].Model != "smart-model" {
+		t.Fatalf("smart request model = %q, want active model", smart.Requests[0].Model)
 	}
 }
 
