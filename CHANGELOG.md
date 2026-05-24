@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.31 — 2026-05-24
+
+**Prompt Resolution, Tool Output Discipline, and README Refresh**
+
+### Features
+
+- Externalized prompt resolution for configurable agent prompts, with path handling that works from config-relative locations.
+- Added stale tool-result eliding so repeated or oversized tool observations can be reduced before they dominate the context window.
+- Added richer README visuals, including the TUI screenshot and refreshed project logo.
+
+### Fixes
+
+- Standardized tool output caps across shell, curl, web extraction, news, wiki, and ATProto tools.
+- Improved token estimation accuracy and GLM compression targeting.
+- Made bulk-pass cutoff handling more robust and bounded generated summary length.
+- Hardened unreadable prompt-file handling and fetch-schema defaults.
+
+### Docs
+
+- Refined README positioning so the project is described through its active capabilities rather than corrective contrasts.
+
 ## v0.2.30 — 2026-05-06
 
 **Trace Provenance, ATProto Intelligence, and Run Steering**

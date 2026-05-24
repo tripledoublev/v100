@@ -2,9 +2,9 @@
 
 # v100: Engine for Agentic Research
 
-v100 is my engine for building, running, studying, and evolving autonomous coding agents under real constraints. 
+v100 is my engine for building, running, studying, and evolving autonomous coding agents under real constraints.
 
-It is not a framework in the abstract. It is a concrete Go-based agent runtime featuring a CLI, Bubble Tea TUI, tool safety controls, durable memory, trace replay, benchmarking, evaluation, policy evolution, and long-running execution paths.
+It is a concrete Go-based agent runtime with a CLI, Bubble Tea TUI, tool safety controls, durable memory, trace replay, benchmarking, evaluation, policy evolution, and long-running execution paths.
 
 I built v100 to close the loop between idea, execution, observation, and iteration.
 
@@ -12,10 +12,10 @@ I built v100 to close the loop between idea, execution, observation, and iterati
 
 ## 🧠 Core Capabilities
 
-v100 operates on a fundamental principle: **autonomy requires visibility, not hidden magic**. Every agent action is trackable, replayable, and inspectable.
+v100 operates on a fundamental principle: **autonomy requires visibility**. Every agent action is trackable, replayable, and inspectable.
 
 ### 1. Advanced Solvers & Routing
-Instead of a rigid prompt loop, v100 implements multiple reasoning strategies (`Solvers`) that can be swapped or combined:
+v100 implements multiple reasoning strategies (`Solvers`) that can be swapped or combined:
 - **`react`**: The classic reasoning loop, enhanced with watchdogs for tool denial and stall recovery.
 - **`plan_execute`**: A two-phase strategy where the agent previews a plan and executes it, with automatic replanning on failure.
 - **`smartrouter`**: Cost-performance escalation. It routes "trivial" idempotent tool calls (like reading files) to cheap models (e.g., Gemini Flash or local Ollama) and escalates to frontier models (e.g., MiniMax, Claude Opus) when a dangerous or complex mutation is required.
@@ -31,15 +31,15 @@ v100 is designed for long-running, unattended execution:
 Tools are a first-class part of the runtime. The model interacts with the world through explicitly registered, schema-bound tools (40+ currently available):
 - **Safety boundaries**: Tools are marked `Safe` or `Dangerous`. Dangerous tools can require explicit operator confirmation, trigger mandatory "Reflection" turns (`Policy.ReflectOnDangerous`) to assess confidence, or be blocked entirely.
 - **Sandboxing**: Runs can be executed inside isolated Docker containers with strict **Network Tiers** to prevent unauthorized data exfiltration.
-- **Semantic analysis**: Includes tools like `sem_diff`, `sem_impact`, and `sem_blame` that understand code entities (functions, classes) instead of just text lines.
+- **Semantic analysis**: Includes tools like `sem_diff`, `sem_impact`, and `sem_blame` that understand code entities such as functions and classes.
 
 ### 4. Memory & External Context
-v100 treats memory as runtime infrastructure, not just prompt stuffing:
+v100 treats memory as runtime infrastructure:
 - **Durable Blackboard**: A shared workspace for agents to read and write ongoing findings.
 - **ATProto Integration**: Deep Bluesky integration (`atproto_index`, `atproto_recall`, `atproto_vibe_check`, `atproto_daily_digest`, `atproto_graph_explorer`). It indexes social feeds and profiles into vector embeddings for semantic RAG, summarizes feed activity, and explores follow graphs for real-time external context.
 
 ### 5. Observability & Trace Replay
-If an agent does something surprising, you shouldn't have to guess why.
+v100 keeps surprising behavior explainable after the fact:
 - Every run emits a structured `trace.jsonl`.
 - `v100 replay <run_id>` lets you step through an agent's reasoning turn-by-turn after the fact.
 - Checkpoints allow you to resume interrupted runs seamlessly.
@@ -129,9 +129,9 @@ research/          research configs and artifacts
 
 ## 📝 Notes on tone and scope
 
-This is not meant to be a polished general-purpose framework in the abstract. It is my working engine for agentic research. I use it to try ideas quickly, keep the sharp edges visible, and evolve the system in public through actual use. 
+v100 is my working engine for agentic research. I use it to try ideas quickly, keep the sharp edges visible, and evolve the system in public through actual use.
 
-That means the repo carries a mix of serious runtime infrastructure, rough-edged experimental features, and bespoke tooling. It is built for researchers and power users who want deep control over their autonomous systems.
+The repo carries a mix of serious runtime infrastructure, rough-edged experimental features, and bespoke tooling. It is built for researchers and power users who want deep control over their autonomous systems.
 
 ## 📄 License
 
