@@ -1063,8 +1063,9 @@ func (l *Loop) toolResultCharLimit(stepID string) int {
 	tokenBudget := remaining - reserve
 	dynamicLimit := 400 // always preserve enough signal for head+tail truncation
 	if tokenBudget > 0 {
-		// estimateTokensSingle uses ~3.3 chars/token; round down conservatively.
-		dynamicLimit = tokenBudget * 3
+		// estimateTokensSingle uses a conservative ~2.7 chars/token
+		// heuristic; round down to preserve provider headroom.
+		dynamicLimit = tokenBudget * 2
 		if dynamicLimit < 400 {
 			dynamicLimit = 400
 		}
@@ -1086,14 +1087,18 @@ func (l *Loop) providerAwareEvidenceThreshold() int {
 	return 0
 }
 
+const (
+	tokenEstimateCharsPerTokenNumerator   = 27
+	tokenEstimateCharsPerTokenDenominator = 10
+)
+
 // charsToTokens converts a byte length to an estimated token count using
-// the ~3.3 chars/token heuristic with ceiling division.
+// a conservative ~2.7 chars/token heuristic with ceiling division.
 func charsToTokens(charLen int) int {
 	if charLen <= 0 {
 		return 0
 	}
-	// Ceiling division: (charLen + 3.3 - 1) / 3.3 ≈ (charLen*10 + 32) / 33
-	return (charLen*10 + 32) / 33
+	return (charLen*tokenEstimateCharsPerTokenDenominator + tokenEstimateCharsPerTokenNumerator - 1) / tokenEstimateCharsPerTokenNumerator
 }
 
 // estimateTokensSingle returns the estimated token count for a single message.
@@ -1123,7 +1128,7 @@ func estimateTokensSingle(m providers.Message) int {
 }
 
 // EstimateTokens returns an estimated token count for a message slice.
-// Uses ~3.3 chars/token with ceiling division, plus per-message framing
+// Uses ~2.7 chars/token with ceiling division, plus per-message framing
 // overhead, tool call structure tokens, and image attachment estimates.
 func EstimateTokens(msgs []providers.Message) int {
 	n := 0
