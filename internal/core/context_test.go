@@ -135,12 +135,12 @@ func TestCharsToTokens(t *testing.T) {
 	}{
 		{0, 0},
 		{-1, 0},
-		{1, 1},    // (10+32)/33 = 1
-		{3, 1},    // (30+32)/33 = 1
-		{4, 2},    // (40+32)/33 = 2 → actually (72)/33 = 2
-		{33, 10},  // (330+32)/33 = 10
-		{100, 31}, // (1000+32)/33 = 31
-		{330, 100},// (3300+32)/33 = 101 → hmm, let me recalc: 3332/33 = 100.96 → 100
+		{1, 1},
+		{2, 1},
+		{3, 2},
+		{27, 10},
+		{100, 38},
+		{270, 100},
 	}
 	for _, tt := range tests {
 		got := charsToTokens(tt.input)
@@ -246,12 +246,21 @@ func TestEstimateTokens(t *testing.T) {
 
 func TestEstimateTokensConsistency(t *testing.T) {
 	// Verify that the ceiling-division formula is consistent: for a given string,
-	// the result should be >= floor(len/3.3) and <= ceil(len/3.3).
-	for _, length := range []int{1, 10, 33, 50, 100, 500, 1000} {
+	// the result should be near ceil(len/2.7), matching the structured-data ratio.
+	for _, length := range []int{1, 10, 27, 50, 100, 500, 1000} {
 		tokens := charsToTokens(length)
-		lower := float64(length) / 3.3
+		lower := float64(length) / 2.7
 		if float64(tokens) < lower-1 || float64(tokens) > lower+1 {
 			t.Errorf("charsToTokens(%d) = %d, expected near %.1f", length, tokens, lower)
 		}
+	}
+}
+
+func TestCharsToTokensStructuredDataRatio(t *testing.T) {
+	if got := charsToTokens(2700); got != 1000 {
+		t.Fatalf("charsToTokens(2700) = %d, want 1000 for 2.7 chars/token", got)
+	}
+	if got := charsToTokens(3300); got <= 1000 {
+		t.Fatalf("charsToTokens(3300) = %d, want > 1000 to avoid old 3.3 chars/token under-estimate", got)
 	}
 }

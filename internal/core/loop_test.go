@@ -501,6 +501,7 @@ func TestLoopInspectionWatchdogInjectsSynthesisMessage(t *testing.T) {
 	}
 	loop, trace := newTestLoop(t, prov, []string{"fs_list"})
 	defer func() { _ = trace.Close() }()
+	loop.Budget = core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 1_000_000})
 
 	if err := loop.Step(context.Background(), "inspect"); err != nil {
 		t.Fatal(err)
