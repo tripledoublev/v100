@@ -592,14 +592,45 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		Name:       tc.Name,
 	})
 
-	// Feedback Loop: Auto-verify build if tool mutated workspace
-	if result.OK && tool.Effects().MutatesWorkspace {
+	// Feedback Loop: Auto-verify build if tool likely mutated workspace.
+	// The sh tool is conservatively marked mutating because it can edit files,
+	// but many shell invocations are read-only; avoid false compile alerts for
+	// commands such as `seq`, `true`, or `grep`.
+	if result.OK && shouldVerifyBuildAfterTool(tool, tc.Args) {
 		// verifyBuild handles its own event emission and message injection.
 		// Ignore the returned error so the loop can continue with the injected alert context.
 		_ = l.verifyBuild(ctx, stepID)
 	}
 
 	return false, nil
+}
+
+func shouldVerifyBuildAfterTool(tool tools.Tool, args json.RawMessage) bool {
+	if tool == nil || !tool.Effects().MutatesWorkspace {
+		return false
+	}
+	if tool.Name() != "sh" {
+		return true
+	}
+	var payload struct {
+		Cmd string `json:"cmd"`
+	}
+	if err := json.Unmarshal(args, &payload); err != nil {
+		return true
+	}
+	cmd := strings.ToLower(payload.Cmd)
+	mutatingMarkers := []string{
+		">", "tee ", "touch ", "mkdir ", "mv ", "cp ", "rm ",
+		"sed -i", "perl -pi", "git apply", "git checkout", "git merge",
+		"git cherry-pick", "go generate", "npm install", "pnpm install",
+		"yarn install", "cargo update",
+	}
+	for _, marker := range mutatingMarkers {
+		if strings.Contains(cmd, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func toolRequiresNetworkGate(tool tools.Tool, session executor.Session) bool {
@@ -628,11 +659,17 @@ func (l *Loop) verifyBuild(ctx context.Context, stepID string) error {
 
 	// Run go build ./...
 	args, _ := json.Marshal(map[string]string{"cmd": "go build ./..."})
+	hostWorkspaceDir := l.Run.Dir
+	if l.Mapper != nil && strings.TrimSpace(l.Mapper.HostRoot) != "" {
+		hostWorkspaceDir = l.Mapper.HostRoot
+	}
 	res, err := sh.Exec(ctx, tools.ToolCallContext{
-		RunID:        l.Run.ID,
-		StepID:       stepID,
-		WorkspaceDir: l.Run.Dir,
-		Mapper:       l.Mapper,
+		RunID:            l.Run.ID,
+		StepID:           stepID,
+		WorkspaceDir:     l.Run.Dir,
+		HostWorkspaceDir: hostWorkspaceDir,
+		Session:          l.Session,
+		Mapper:           l.Mapper,
 	}, args)
 
 	if err == nil && !res.OK {

@@ -37,11 +37,27 @@ func routerToolNeedsEscalation(l *Loop, toolName string) bool {
 
 // RouterSolver dynamically switches between a cheap and a smart provider.
 type RouterSolver struct {
-	Cheap providers.Provider
-	Smart providers.Provider
+	Cheap       providers.Provider
+	Smart       providers.Provider
+	DisplayName string
 }
 
-func (s *RouterSolver) Name() string { return "router" }
+func (s *RouterSolver) Name() string {
+	if strings.TrimSpace(s.DisplayName) != "" {
+		return s.DisplayName
+	}
+	return "router"
+}
+
+func routerRequestModel(l *Loop, p providers.Provider) string {
+	if l == nil || p == nil || l.Provider == nil {
+		return ""
+	}
+	if p.Name() == l.Provider.Name() {
+		return l.Model
+	}
+	return ""
+}
 
 func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (SolveResult, error) {
 	stepID := newID()
@@ -109,7 +125,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 			StepID:    stepID,
 			Messages:  msgs,
 			Tools:     toolSpecs,
-			Model:     l.Model,
+			Model:     routerRequestModel(l, currentProv),
 			GenParams: l.GenParams,
 			Hints: providers.Hints{
 				MaxToolCalls: maxToolCalls - toolCallsUsed,
@@ -147,7 +163,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 				StepID:    stepID,
 				Messages:  msgs,
 				Tools:     toolSpecs,
-				Model:     l.Model,
+				Model:     routerRequestModel(l, currentProv),
 				GenParams: l.GenParams,
 				Hints: providers.Hints{
 					MaxToolCalls: maxToolCalls - toolCallsUsed,

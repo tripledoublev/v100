@@ -120,6 +120,9 @@ func TestBuildSolverAutoUsesSmartRouterWhenProviderDefaultIsSmartRouter(t *testi
 	if _, ok := solver.(*core.RouterSolver); !ok {
 		t.Fatalf("solver type = %T, want *core.RouterSolver", solver)
 	}
+	if solver.Name() != "smartrouter" {
+		t.Fatalf("solver name = %q, want smartrouter", solver.Name())
+	}
 }
 
 func TestBuildSolverRouterUsesConfiguredCheapProvider(t *testing.T) {
@@ -144,6 +147,9 @@ func TestBuildSolverRouterUsesConfiguredCheapProvider(t *testing.T) {
 	}
 	if router.Cheap.Name() != "glm" {
 		t.Fatalf("cheap provider = %q, want glm", router.Cheap.Name())
+	}
+	if router.Name() != "router" {
+		t.Fatalf("router name = %q, want router", router.Name())
 	}
 }
 
