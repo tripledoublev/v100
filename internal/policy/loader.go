@@ -25,7 +25,7 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 	}
 
 	if cfg.SystemPromptPath != "" {
-		promptPath := expandHome(cfg.SystemPromptPath)
+		promptPath := config.ResolvePromptFilePath(cfg.SystemPromptPath, cfg.SourceDir)
 		data, err := os.ReadFile(promptPath)
 		if err == nil {
 			prompt := string(data)
@@ -40,6 +40,10 @@ func Load(name string, cfg config.PolicyConfig) (*Policy, error) {
 			return nil, fmt.Errorf("policy %s: read prompt %s: %w", name, promptPath, err)
 		}
 		// File doesn't exist — use default
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) != "" {
+		p.SystemPrompt = cfg.SystemPrompt
+		return p, nil
 	}
 
 	p.SystemPrompt = DefaultSystemPrompt
@@ -72,14 +76,6 @@ func WriteDefaultPrompt() error {
 	}
 	path := filepath.Join(dir, "default.md")
 	return os.WriteFile(path, []byte(DefaultSystemPrompt), 0o644)
-}
-
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
-	}
-	return path
 }
 
 func migrateLegacyDefaultPrompt(prompt string) (string, bool) {

@@ -27,10 +27,28 @@ func loadConfig(cfgPath string) (*config.Config, error) {
 	if cfgPath == "" {
 		cfgPath = config.XDGConfigPath()
 	}
+	cfgPath = expandHomePath(cfgPath)
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		return config.DefaultConfig(), nil
+		cfg := config.DefaultConfig()
+		sourcePath := cfgPath
+		if abs, err := filepath.Abs(sourcePath); err == nil {
+			sourcePath = abs
+		}
+		cfg.SourceDir = filepath.Dir(sourcePath)
+		if err := config.LoadBehaviorDirectories(cfg); err != nil {
+			return nil, err
+		}
+		return cfg, nil
 	}
 	return config.Load(cfgPath)
+}
+
+func expandHomePath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 func configuredAgentNames(cfg *config.Config) []string {

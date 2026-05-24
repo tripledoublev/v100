@@ -78,6 +78,9 @@ type WakeConfig struct {
 
 // WakeTask defines a named multi-step task for synthesis wake mode.
 type WakeTask struct {
+	// SourceDir is the directory containing the standalone task definition.
+	// It is runtime metadata, not a TOML setting.
+	SourceDir   string         `toml:"-"`
 	Name        string         `toml:"name"`
 	Description string         `toml:"description"`
 	Schedule    string         `toml:"schedule"` // e.g. "24h"
@@ -130,6 +133,9 @@ type ToolsConfig struct {
 
 // PolicyConfig holds specific named policies.
 type PolicyConfig struct {
+	// SourceDir is the directory containing the standalone policy definition.
+	// It is runtime metadata, not a TOML setting.
+	SourceDir           string `toml:"-"`
 	SystemPromptPath    string `toml:"system_prompt_path"`
 	SystemPrompt        string `toml:"system_prompt"` // inline prompt override
 	MaxToolCallsPerStep int    `toml:"max_tool_calls_per_step"`
@@ -139,6 +145,9 @@ type PolicyConfig struct {
 
 // AgentConfig holds sub-agent persona definitions.
 type AgentConfig struct {
+	// SourceDir is the directory containing the standalone agent definition.
+	// It is runtime metadata, not a TOML setting.
+	SourceDir        string   `toml:"-"`
 	SystemPrompt     string   `toml:"system_prompt"`
 	SystemPromptPath string   `toml:"system_prompt_path"` // optional path to .md/.txt file containing the system prompt
 	Tools            []string `toml:"tools"`
@@ -327,6 +336,11 @@ func DefaultConfig() *Config {
 // DefaultTOML returns the default config as a TOML string.
 func DefaultTOML() string {
 	return `# v100 configuration
+#
+# Behavioral definitions can live beside this file:
+# - agents/*.toml
+# - tasks/*.toml or tasks/<name>/task.toml
+# - policies/*.md, policies/*.txt, policies/*.toml, or policies/<name>/policy.toml
 
 [providers.smartrouter]
 type = "smartrouter"
@@ -520,6 +534,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Embedding.Model == "" {
 		cfg.Embedding.Model = DefaultConfig().Embedding.Model
+	}
+	if err := LoadBehaviorDirectories(&cfg); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }

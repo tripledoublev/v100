@@ -146,7 +146,7 @@ tools = ["fs_read"]
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	prompt, err := agent.ResolvePrompt(dir)
+	prompt, err := agent.ResolvePrompt("")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -193,6 +193,214 @@ func TestLoadAgentsDirectory_MissingDir(t *testing.T) {
 	if len(agents) != 0 {
 		t.Errorf("expected empty map, got %d agents", len(agents))
 	}
+}
+
+func TestLoadTasksDirectorySupportsFilesAndTaskDirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "single.toml"), []byte(`description = "single file"
+[[steps]]
+name = "read"
+prompt = "inline"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskDir := filepath.Join(dir, "complex")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "draft.md"), []byte("prompt from task dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "task.toml"), []byte(`description = "directory task"
+[[steps]]
+name = "draft"
+prompt_path = "draft.md"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := LoadTasksDirectory(dir)
+	if err != nil {
+		t.Fatalf("LoadTasksDirectory() error = %v", err)
+	}
+	if tasks["single"].Name != "single" {
+		t.Fatalf("single task name = %q, want single", tasks["single"].Name)
+	}
+	complex := tasks["complex"]
+	if complex.Name != "complex" {
+		t.Fatalf("complex task name = %q, want complex", complex.Name)
+	}
+	got, err := complex.Steps[0].ResolvePrompt(complex.PromptBaseDir(""))
+	if err != nil {
+		t.Fatalf("ResolvePrompt() error = %v", err)
+	}
+	if got != "prompt from task dir" {
+		t.Fatalf("directory task prompt = %q", got)
+	}
+}
+
+func TestLoadPoliciesDirectorySupportsMarkdownTomlAndDirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "direct.md"), []byte("direct prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "review.toml"), []byte(`system_prompt = "review prompt"
+max_tool_calls_per_step = 12
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policyDir := filepath.Join(dir, "complex")
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "prompt.md"), []byte("complex prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "policy.toml"), []byte(`system_prompt_path = "prompt.md"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	policies, err := LoadPoliciesDirectory(dir)
+	if err != nil {
+		t.Fatalf("LoadPoliciesDirectory() error = %v", err)
+	}
+	directPrompt, err := policies["direct"].ResolvePrompt("")
+	if err != nil {
+		t.Fatalf("direct ResolvePrompt() error = %v", err)
+	}
+	if directPrompt != "direct prompt" {
+		t.Fatalf("direct prompt = %q", directPrompt)
+	}
+	if policies["review"].MaxToolCallsPerStep != 12 {
+		t.Fatalf("review max calls = %d, want 12", policies["review"].MaxToolCallsPerStep)
+	}
+	complexPrompt, err := policies["complex"].ResolvePrompt("")
+	if err != nil {
+		t.Fatalf("complex ResolvePrompt() error = %v", err)
+	}
+	if complexPrompt != "complex prompt" {
+		t.Fatalf("complex prompt = %q", complexPrompt)
+	}
+}
+
+func TestLoadPoliciesDirectoryLetsTomlOverrideSameNameMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "default.md"), []byte("default markdown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "default.toml"), []byte(`system_prompt_path = "default.md"
+max_tool_calls_per_step = 77
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	policies, err := LoadPoliciesDirectory(dir)
+	if err != nil {
+		t.Fatalf("LoadPoliciesDirectory() error = %v", err)
+	}
+	if policies["default"].MaxToolCallsPerStep != 77 {
+		t.Fatalf("MaxToolCallsPerStep = %d, want 77", policies["default"].MaxToolCallsPerStep)
+	}
+	got, err := policies["default"].ResolvePrompt("")
+	if err != nil {
+		t.Fatalf("ResolvePrompt() error = %v", err)
+	}
+	if got != "default markdown" {
+		t.Fatalf("prompt = %q, want default markdown", got)
+	}
+}
+
+func TestLoadMergesBehaviorDirectories(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`[defaults]
+provider = "codex"
+
+[agents.inline]
+system_prompt = "inline"
+
+[[wake.tasks]]
+name = "inline-task"
+[[wake.tasks.steps]]
+name = "inline"
+prompt = "inline task"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentsDir := filepath.Join(dir, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, "file-agent.md"), []byte("agent prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, "file-agent.toml"), []byte(`system_prompt_path = "file-agent.md"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tasksDir := filepath.Join(dir, "tasks", "file-task")
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tasksDir, "step.md"), []byte("task prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tasksDir, "task.toml"), []byte(`[[steps]]
+name = "step"
+prompt_path = "step.md"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policiesDir := filepath.Join(dir, "policies")
+	if err := os.MkdirAll(policiesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(policiesDir, "file-policy.md"), []byte("policy prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agentPrompt, err := cfg.Agents["file-agent"].ResolvePrompt("")
+	if err != nil {
+		t.Fatalf("agent ResolvePrompt() error = %v", err)
+	}
+	if agentPrompt != "agent prompt" {
+		t.Fatalf("agent prompt = %q", agentPrompt)
+	}
+	if cfg.Agents["inline"].SystemPrompt != "inline" {
+		t.Fatal("inline agent should remain available")
+	}
+	fileTask := findTaskForTest(cfg.Wake.Tasks, "file-task")
+	if fileTask == nil {
+		t.Fatal("file-task not loaded")
+	}
+	taskPrompt, err := fileTask.Steps[0].ResolvePrompt(fileTask.PromptBaseDir(cfg.PromptBaseDir()))
+	if err != nil {
+		t.Fatalf("task ResolvePrompt() error = %v", err)
+	}
+	if taskPrompt != "task prompt" {
+		t.Fatalf("task prompt = %q", taskPrompt)
+	}
+	if findTaskForTest(cfg.Wake.Tasks, "inline-task") == nil {
+		t.Fatal("inline task should remain available")
+	}
+	policyPrompt, err := cfg.Policies["file-policy"].ResolvePrompt("")
+	if err != nil {
+		t.Fatalf("policy ResolvePrompt() error = %v", err)
+	}
+	if policyPrompt != "policy prompt" {
+		t.Fatalf("policy prompt = %q", policyPrompt)
+	}
+}
+
+func findTaskForTest(tasks []WakeTask, name string) *WakeTask {
+	for i := range tasks {
+		if tasks[i].Name == name {
+			return &tasks[i]
+		}
+	}
+	return nil
 }
 
 func TestAgentConfig_ResolvePrompt_TildeExpansion(t *testing.T) {

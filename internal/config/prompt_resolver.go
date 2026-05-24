@@ -9,9 +9,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// resolvePromptPath reads a prompt from the given path, applying ~ expansion
-// and resolving relative paths against baseDir.
-func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
+// ResolvePromptFilePath applies ~ expansion and resolves relative prompt paths
+// against baseDir.
+func ResolvePromptFilePath(rawPath, baseDir string) string {
 	path := expandHome(rawPath)
 	if !filepath.IsAbs(path) {
 		if strings.TrimSpace(baseDir) == "" {
@@ -19,11 +19,25 @@ func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
 		}
 		path = filepath.Join(baseDir, path)
 	}
+	return path
+}
+
+// resolvePromptPath reads a prompt from the given path, applying ~ expansion
+// and resolving relative paths against baseDir.
+func resolvePromptPath(rawPath, baseDir, field string) (string, error) {
+	path := ResolvePromptFilePath(rawPath, baseDir)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s %q: %w", field, path, err)
 	}
 	return string(data), nil
+}
+
+func sourceBaseDir(sourceDir, fallbackBaseDir string) string {
+	if strings.TrimSpace(sourceDir) != "" {
+		return sourceDir
+	}
+	return fallbackBaseDir
 }
 
 // PromptBaseDir returns the directory relative prompt paths should resolve
@@ -54,7 +68,13 @@ func (a AgentConfig) ResolvePrompt(baseDir string) (string, error) {
 	if strings.TrimSpace(a.SystemPromptPath) == "" {
 		return a.SystemPrompt, nil
 	}
-	return resolvePromptPath(a.SystemPromptPath, baseDir, "system_prompt_path")
+	return resolvePromptPath(a.SystemPromptPath, sourceBaseDir(a.SourceDir, baseDir), "system_prompt_path")
+}
+
+// PromptBaseDir returns the base directory for resolving this task's step
+// prompt paths.
+func (t WakeTask) PromptBaseDir(baseDir string) string {
+	return sourceBaseDir(t.SourceDir, baseDir)
 }
 
 // ResolvePrompt returns the resolved prompt for a wake task step.
@@ -66,6 +86,14 @@ func (s WakeTaskStep) ResolvePrompt(baseDir string) (string, error) {
 		return s.Prompt, nil
 	}
 	return resolvePromptPath(s.PromptPath, baseDir, "prompt_path")
+}
+
+// ResolvePrompt returns the resolved system prompt for a policy config.
+func (p PolicyConfig) ResolvePrompt(baseDir string) (string, error) {
+	if strings.TrimSpace(p.SystemPromptPath) == "" {
+		return p.SystemPrompt, nil
+	}
+	return resolvePromptPath(p.SystemPromptPath, sourceBaseDir(p.SourceDir, baseDir), "system_prompt_path")
 }
 
 // XDGConfigDir returns the directory containing the user's v100 config file.
@@ -86,6 +114,7 @@ func LoadAgentFile(path string) (AgentConfig, error) {
 	if _, err := toml.Decode(string(data), &agent); err != nil {
 		return agent, fmt.Errorf("parse agent file %q: %w", path, err)
 	}
+	agent.SourceDir = configSourceDir(path)
 	return agent, nil
 }
 
