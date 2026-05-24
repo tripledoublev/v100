@@ -1,4 +1,4 @@
-<img width="555" height="198" alt="v100" src="https://github.com/user-attachments/assets/6dfa090c-f0a1-4167-a40e-d08ab9a1cf99" />
+<img width="542" height="413" alt="v100-logo" src="https://github.com/user-attachments/assets/95a21844-e8a7-4232-8b4c-be268e160875" />
 
 # v100: Engine for Agentic Research
 
