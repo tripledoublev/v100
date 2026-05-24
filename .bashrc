@@ -1,1 +1,0 @@
-export MISTRAL_API_KEY="8PikdcB2aTf8Du6PFydeCZCU5HtsrdF6"
