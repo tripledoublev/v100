@@ -512,6 +512,7 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		CallID:           tc.ID,
 		WorkspaceDir:     l.Run.Dir,
 		HostWorkspaceDir: hostWorkspaceDir,
+		StateDir:         l.Run.StateDir,
 		TimeoutMS:        timeout,
 		Provider:         l.Provider,
 		EmbedProvider:    l.EmbedProvider,
@@ -670,6 +671,7 @@ func (l *Loop) verifyBuild(ctx context.Context, stepID string) error {
 		StepID:           stepID,
 		WorkspaceDir:     l.Run.Dir,
 		HostWorkspaceDir: hostWorkspaceDir,
+		StateDir:         l.Run.StateDir,
 		Session:          l.Session,
 		Mapper:           l.Mapper,
 	}, args)

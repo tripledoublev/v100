@@ -77,6 +77,53 @@ func TestBlackboardReadWriteShareWorkspaceAcrossRuns(t *testing.T) {
 	}
 }
 
+func TestBlackboardUsesRunStateDirWhenPresent(t *testing.T) {
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "blackboard.md"), []byte("stale workspace corpus"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args, err := json.Marshal(map[string]any{
+		"content": "fresh run corpus",
+		"append":  false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRes, err := BlackboardWrite().Exec(context.Background(), ToolCallContext{
+		RunID:            "run-1",
+		WorkspaceDir:     workspace,
+		HostWorkspaceDir: workspace,
+		StateDir:         stateDir,
+	}, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !writeRes.OK {
+		t.Fatalf("blackboard_write failed: %s", writeRes.Output)
+	}
+
+	readRes, err := BlackboardRead().Exec(context.Background(), ToolCallContext{
+		RunID:            "run-1",
+		WorkspaceDir:     workspace,
+		HostWorkspaceDir: workspace,
+		StateDir:         stateDir,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readRes.OK {
+		t.Fatalf("blackboard_read failed: %s", readRes.Output)
+	}
+	if strings.Contains(readRes.Output, "stale workspace corpus") {
+		t.Fatalf("blackboard_read leaked workspace state: %q", readRes.Output)
+	}
+	if !strings.Contains(readRes.Output, "fresh run corpus") {
+		t.Fatalf("blackboard_read output = %q, want run state", readRes.Output)
+	}
+}
+
 func TestAppendBlackboardDispatchUsesWorkspaceBlackboard(t *testing.T) {
 	workspace := t.TempDir()
 

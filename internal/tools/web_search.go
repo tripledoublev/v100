@@ -16,6 +16,8 @@ type webSearchTool struct{}
 
 func WebSearch() Tool { return &webSearchTool{} }
 
+var braveSearchEndpoint = "https://api.search.brave.com/res/v1/web/search"
+
 func (t *webSearchTool) Name() string { return "web_search" }
 func (t *webSearchTool) Description() string {
 	return "Search the web using Brave Search. Returns a list of results with title, URL, and description for each match."
@@ -114,12 +116,16 @@ func braveSearch(ctx context.Context, call ToolCallContext, query string, count 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	u := fmt.Sprintf("https://api.search.brave.com/res/v1/web/search?q=%s&count=%d",
-		url.QueryEscape(query),
-		count,
-	)
+	endpoint, err := url.Parse(braveSearchEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("parse Brave endpoint: %w", err)
+	}
+	q := endpoint.Query()
+	q.Set("q", query)
+	q.Set("count", fmt.Sprintf("%d", count))
+	endpoint.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

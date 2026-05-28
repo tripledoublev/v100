@@ -1554,6 +1554,7 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 			Run: &core.Run{
 				ID:        runID,
 				Dir:       workspace,
+				StateDir:  runDir,
 				TraceFile: trace.Path(),
 				Budget: core.Budget{
 					MaxSteps:   10,
@@ -1578,6 +1579,10 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 		}
 
 		if err := loop.Step(ctx, stepPrompt); err != nil {
+			_ = loop.EmitRunError("wake-synthesis", err.Error())
+			return runID, nil, fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
+		}
+		if err := validateWakeStepRequiredToolCalls(stepPrompt, step, loop.Messages); err != nil {
 			_ = loop.EmitRunError("wake-synthesis", err.Error())
 			return runID, nil, fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
 		}
@@ -1615,6 +1620,7 @@ func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Reg
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.WebExtract())
 	reg.Register(tools.WebSearch())
+	reg.Register(tools.NewDeepResearch(nil))
 	reg.Register(tools.NewsFetch())
 	reg.Register(tools.Wiki())
 	reg.Register(tools.ProjectSearch())
@@ -1666,6 +1672,38 @@ func buildStepPrompt(promptBaseDir string, task *config.WakeTask, stepIndex int,
 	}
 
 	return b.String(), nil
+}
+
+func validateWakeStepRequiredToolCalls(stepPrompt string, step config.WakeTaskStep, messages []providers.Message) error {
+	for _, toolName := range step.EnabledTools() {
+		if !wakeStepPromptRequiresTool(stepPrompt, toolName) {
+			continue
+		}
+		if wakeMessagesIncludeToolResult(messages, toolName) {
+			continue
+		}
+		return fmt.Errorf("required tool %q was not called", toolName)
+	}
+	return nil
+}
+
+func wakeStepPromptRequiresTool(stepPrompt, toolName string) bool {
+	prompt := strings.ToLower(stepPrompt)
+	toolName = strings.ToLower(strings.TrimSpace(toolName))
+	if toolName == "" {
+		return false
+	}
+	return strings.Contains(prompt, "call "+toolName) ||
+		strings.Contains(prompt, "call `"+toolName+"`")
+}
+
+func wakeMessagesIncludeToolResult(messages []providers.Message, toolName string) bool {
+	for _, msg := range messages {
+		if msg.Role == "tool" && msg.Name == toolName {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveWakeModel(cfg *config.Config, providerName string) string {

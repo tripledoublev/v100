@@ -32,6 +32,7 @@ type ToolCallContext struct {
 	CallID           string
 	WorkspaceDir     string // host path to active workspace (sandbox if enabled)
 	HostWorkspaceDir string // original source workspace for shared state across runs
+	StateDir         string // host path for run-scoped mutable state
 	TimeoutMS        int
 	Provider         providers.Provider
 	EmbedProvider    providers.Provider // dedicated embedding provider; falls back to Provider if nil

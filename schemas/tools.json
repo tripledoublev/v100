@@ -89,6 +89,16 @@
       "input":  { "required": ["url"], "properties": { "url": { "type": "string" }, "max_bytes": { "type": "integer" } } },
       "output": { "properties": { "status": { "type": "integer" }, "extract": { "type": "string" } } }
     },
+    "web_search": {
+      "dangerous": false,
+      "input":  { "required": ["query"], "properties": { "query": { "type": "string" }, "count": { "type": "integer" } } },
+      "output": { "properties": { "results": { "type": "array" } } }
+    },
+    "deep_research": {
+      "dangerous": false,
+      "input":  { "required": ["topic"], "properties": { "topic": { "type": "string" }, "queries": { "type": "array", "items": { "type": "string" } }, "max_queries": { "type": "integer" }, "results_per_query": { "type": "integer" }, "max_sources": { "type": "integer" }, "perspectives": { "type": "boolean" }, "primary_providers": { "type": "array", "items": { "type": "string" } }, "review_providers": { "type": "array", "items": { "type": "string" } } } },
+      "output": { "properties": { "report": { "type": "string" }, "verification": { "type": "string" }, "sources": { "type": "array" }, "perspectives": { "type": "array" } } }
+    },
     "wiki": {
       "dangerous": false,
       "input":  { "required": ["action"], "properties": { "action": { "type": "string", "enum": ["read", "search", "update"] }, "title": { "type": "string" }, "query": { "type": "string" }, "lang": { "type": "string" }, "sentences": { "type": "integer" }, "max_results": { "type": "integer" } } },
@@ -96,17 +106,17 @@
     },
     "agent": {
       "dangerous": true,
-      "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "budget_steps": { "type": "integer" }, "budget_tokens": { "type": "integer" } } },
+      "input":  { "required": ["task"], "properties": { "task": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "tools": { "type": "array" }, "max_steps": { "type": "integer" } } },
       "output": { "properties": { "result": { "type": "string" } } }
     },
     "dispatch": {
       "dangerous": true,
-      "input":  { "required": ["agent","task"], "properties": { "agent": { "type": "string" }, "task": { "type": "string" } } },
+      "input":  { "required": ["agent","task"], "properties": { "agent": { "type": "string" }, "task": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "max_steps": { "type": "integer" } } },
       "output": { "properties": { "result": { "type": "string" } } }
     },
     "orchestrate": {
       "dangerous": true,
-      "input":  { "required": ["pattern","tasks"], "properties": { "pattern": { "type": "string", "enum": ["fanout","pipeline"] }, "tasks": { "type": "array" } } },
+      "input":  { "required": ["pattern","tasks"], "properties": { "pattern": { "type": "string", "enum": ["fanout","pipeline"] }, "tasks": { "type": "array", "items": { "type": "object", "properties": { "agent": { "type": "string" }, "task": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "max_steps": { "type": "integer" } } } } } },
       "output": { "properties": { "results": { "type": "array" } } }
     },
     "blackboard_read": {

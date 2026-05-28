@@ -19,10 +19,12 @@ type AgentRunParams struct {
 	Agent        string
 	Pattern      string
 	Task         string
+	Provider     string
 	Model        string
 	Tools        []string
 	MaxSteps     int
 	WorkspaceDir string
+	StateDir     string
 }
 
 // AgentRunResult holds the sub-agent's outcome.
@@ -62,7 +64,8 @@ func (t *agentTool) InputSchema() json.RawMessage {
 		"required": ["task"],
 		"properties": {
 			"task":      {"type": "string", "description": "Prompt/task for the sub-agent."},
-			"model":     {"type": "string", "description": "Model override (e.g. gpt-5.4). Empty = reuse parent model."},
+			"provider":  {"type": "string", "description": "Provider override (e.g. glm, minimax, gemini, codex). Empty = reuse parent provider."},
+			"model":     {"type": "string", "description": "Model override for the selected provider. Empty = provider default."},
 			"tools":     {"type": "array", "items": {"type": "string"}, "description": "Tool subset for the sub-agent. Default = all parent tools except agent."},
 			"max_steps": {"type": "integer", "description": "Step limit for the sub-agent (default 10)."}
 		}
@@ -84,6 +87,7 @@ func (t *agentTool) Exec(ctx context.Context, call ToolCallContext, args json.Ra
 
 	var a struct {
 		Task     string   `json:"task"`
+		Provider string   `json:"provider"`
 		Model    string   `json:"model"`
 		Tools    []string `json:"tools"`
 		MaxSteps int      `json:"max_steps"`
@@ -107,10 +111,12 @@ func (t *agentTool) Exec(ctx context.Context, call ToolCallContext, args json.Ra
 		RunID:        call.RunID,
 		StepID:       call.StepID,
 		Task:         a.Task,
+		Provider:     a.Provider,
 		Model:        a.Model,
 		Tools:        a.Tools,
 		MaxSteps:     a.MaxSteps,
 		WorkspaceDir: call.WorkspaceDir,
+		StateDir:     call.StateDir,
 	})
 
 	output := res.Result

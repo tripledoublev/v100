@@ -469,6 +469,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.WebExtract())
 	reg.Register(tools.WebSearch())
+	reg.Register(tools.NewDeepResearch(nil))
 	reg.Register(tools.NewsFetch())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
@@ -664,10 +665,15 @@ func sandboxFinalizeMessage(result core.SandboxFinalizeResult) string {
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
 	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
 
-	providerBuilder := func(model string) (providers.Provider, string, error) {
-		pc, ok := cfg.Providers[cfg.Defaults.Provider]
+	providerBuilder := func(providerName, model string) (providers.Provider, string, string, error) {
+		providerName = strings.TrimSpace(providerName)
+		if providerName == "" {
+			providerName = cfg.Defaults.Provider
+		}
+		ensureProviderConfig(cfg, providerName)
+		pc, ok := cfg.Providers[providerName]
 		if !ok {
-			return nil, "", fmt.Errorf("provider %q not configured", cfg.Defaults.Provider)
+			return nil, "", "", fmt.Errorf("provider %q not configured", providerName)
 		}
 		if model != "" {
 			normalized, changed := normalizeModelOverride(pc.Type, model)
@@ -677,8 +683,16 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 				pc.DefaultModel = model
 			}
 		}
-		prov, err := buildProviderFromConfig(cfg, pc)
-		return prov, pc.DefaultModel, err
+		var (
+			prov providers.Provider
+			err  error
+		)
+		if pc.Type == "smartrouter" {
+			prov, err = buildSmartRouterProvider(cfg, strings.TrimSpace(model))
+		} else {
+			prov, err = buildProviderFromConfig(cfg, pc)
+		}
+		return prov, providerName, pc.DefaultModel, err
 	}
 
 	runFn := func(ctx context.Context, params tools.AgentRunParams) tools.AgentRunResult {
@@ -697,7 +711,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 
 		// Build provider
-		prov, effectiveModel, err := providerBuilder(modelOverride)
+		prov, effectiveProvider, effectiveModel, err := providerBuilder(params.Provider, modelOverride)
 		if err != nil {
 			return tools.AgentRunResult{OK: false, Result: "build provider: " + err.Error()}
 		}
@@ -780,8 +794,9 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		}
 		childRunID := fmt.Sprintf("agent-%s", callIDForRun)
 		childRun := &core.Run{
-			ID:  childRunID,
-			Dir: workspace,
+			ID:       childRunID,
+			Dir:      workspace,
+			StateDir: params.StateDir,
 		}
 
 		systemPrompt, err := resolveAgentSystemPrompt(cfg, roleCfg)
@@ -821,6 +836,9 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		modelName := strings.TrimSpace(effectiveModel)
 		if modelName == "" {
 			modelName = prov.Name()
+		}
+		if effectiveProvider != "" {
+			modelName = effectiveProvider + ":" + modelName
 		}
 		startPayload := core.AgentStartPayload{
 			Agent:        params.Agent,
@@ -936,6 +954,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 		sort.Strings(names)
 		return names
 	}))
+	reg.Register(tools.NewDeepResearch(runFn))
 }
 
 func buildSubAgentTask(agent, task, priorOutput string, attempt int) string {

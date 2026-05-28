@@ -253,6 +253,9 @@ func (t *blackboardStoreTool) Exec(ctx context.Context, call ToolCallContext, ar
 }
 
 func blackboardWorkspaceDir(call ToolCallContext) string {
+	if root := strings.TrimSpace(call.StateDir); root != "" {
+		return root
+	}
 	if root := strings.TrimSpace(call.HostWorkspaceDir); root != "" {
 		return root
 	}

@@ -46,6 +46,7 @@ func (t *orchestrateTool) InputSchema() json.RawMessage {
 				"properties":{
 					"agent":{"type":"string"},
 					"task":{"type":"string"},
+					"provider":{"type":"string"},
 					"model":{"type":"string"},
 					"max_steps":{"type":"integer"}
 				}
@@ -72,6 +73,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 		Tasks       []struct {
 			Agent    string `json:"agent"`
 			Task     string `json:"task"`
+			Provider string `json:"provider"`
 			Model    string `json:"model"`
 			MaxSteps int    `json:"max_steps"`
 		} `json:"tasks"`
@@ -104,9 +106,11 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 				Agent:        strings.TrimSpace(task.Agent),
 				Pattern:      a.Pattern,
 				Task:         task.Task,
+				Provider:     task.Provider,
 				Model:        task.Model,
 				MaxSteps:     task.MaxSteps,
 				WorkspaceDir: call.WorkspaceDir,
+				StateDir:     call.StateDir,
 			})
 			results[i] = res
 			if !res.OK {
@@ -131,9 +135,11 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 					Agent:        strings.TrimSpace(task.Agent),
 					Pattern:      a.Pattern,
 					Task:         task.Task,
+					Provider:     task.Provider,
 					Model:        task.Model,
 					MaxSteps:     task.MaxSteps,
 					WorkspaceDir: call.WorkspaceDir,
+					StateDir:     call.StateDir,
 				})
 				results[i] = res
 				_ = appendBlackboardDispatch(blackboardWorkspaceDir(call), a.Pattern, task.Agent, task.Task, res)

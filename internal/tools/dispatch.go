@@ -53,6 +53,7 @@ func (t *dispatchTool) InputSchema() json.RawMessage {
 		"properties": {
 			"agent":     {"type": "string"%s, "description": "Named agent role from config [agents.<name>]."},
 			"task":      {"type": "string", "description": "Task for the dispatched specialist."},
+			"provider":  {"type": "string", "description": "Optional provider override for this dispatch."},
 			"model":     {"type": "string", "description": "Optional model override for this dispatch."},
 			"max_steps": {"type": "integer", "description": "Optional step cap override for this dispatch."}
 		}
@@ -75,6 +76,7 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 	var a struct {
 		Agent    string `json:"agent"`
 		Task     string `json:"task"`
+		Provider string `json:"provider"`
 		Model    string `json:"model"`
 		MaxSteps int    `json:"max_steps"`
 	}
@@ -98,9 +100,11 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 		StepID:       call.StepID,
 		Agent:        a.Agent,
 		Task:         a.Task,
+		Provider:     a.Provider,
 		Model:        a.Model,
 		MaxSteps:     a.MaxSteps,
 		WorkspaceDir: call.WorkspaceDir,
+		StateDir:     call.StateDir,
 	})
 
 	output := res.Result

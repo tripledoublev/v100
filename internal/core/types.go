@@ -139,7 +139,8 @@ type Budget struct {
 // Run holds runtime state for a single agent run.
 type Run struct {
 	ID        string
-	Dir       string // runs/<run_id>/
+	Dir       string // active workspace directory for tools
+	StateDir  string // run-scoped mutable state directory
 	TraceFile string // runs/<run_id>/trace.jsonl
 	Budget    Budget
 }

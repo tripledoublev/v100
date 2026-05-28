@@ -655,6 +655,41 @@ func TestBuildStepPromptFailsOnMissingPromptPath(t *testing.T) {
 	}
 }
 
+func TestValidateWakeStepRequiredToolCallsCatchesSkippedBlackboardWrite(t *testing.T) {
+	step := config.WakeTaskStep{
+		Name:  "gather",
+		Tools: []string{"atproto_anon_synth", "blackboard_write"},
+	}
+	prompt := "Call atproto_anon_synth with limit=100. After the tool returns, call blackboard_write."
+	messages := []providers.Message{
+		{Role: "tool", Name: "atproto_anon_synth", Content: `{"corpus":"fresh"}`},
+	}
+
+	err := validateWakeStepRequiredToolCalls(prompt, step, messages)
+	if err == nil {
+		t.Fatal("expected missing blackboard_write to fail validation")
+	}
+	if !strings.Contains(err.Error(), "blackboard_write") {
+		t.Fatalf("error = %v, want blackboard_write", err)
+	}
+}
+
+func TestValidateWakeStepRequiredToolCallsAcceptsRequiredTools(t *testing.T) {
+	step := config.WakeTaskStep{
+		Name:  "gather",
+		Tools: []string{"atproto_anon_synth", "blackboard_write"},
+	}
+	prompt := "Call atproto_anon_synth with limit=100. After the tool returns, call blackboard_write."
+	messages := []providers.Message{
+		{Role: "tool", Name: "atproto_anon_synth", Content: `{"corpus":"fresh"}`},
+		{Role: "tool", Name: "blackboard_write", Content: `{"bytes_written":12}`},
+	}
+
+	if err := validateWakeStepRequiredToolCalls(prompt, step, messages); err != nil {
+		t.Fatalf("validateWakeStepRequiredToolCalls() error = %v", err)
+	}
+}
+
 func TestRunHeadlessIssueWorkerPassesWakeBudgetsAndToolCeiling(t *testing.T) {
 	oldExec := wakeExecCommand
 	defer func() { wakeExecCommand = oldExec }()
