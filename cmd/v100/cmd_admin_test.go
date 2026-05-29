@@ -144,3 +144,35 @@ func TestConfigInitDoesNotWritePlaintextOAuthTemplate(t *testing.T) {
 		t.Fatalf("config init output missing secure guidance:\n%s", out)
 	}
 }
+
+func TestDoctorDryRunValidatesWithoutWritingRunsDir(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[defaults]
+provider = "codex"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := withWorkingDir(root, func() error {
+		out, err := captureStdout(func() error {
+			cmd := doctorCmd(&cfgPath)
+			cmd.SetArgs([]string{"--dry-run"})
+			return cmd.Execute()
+		})
+		if err != nil {
+			return err
+		}
+		for _, want := range []string{"Config validation: ok", "Dry run: skipped provider authentication"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("doctor --dry-run output missing %q in:\n%s", want, out)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, "runs")); !os.IsNotExist(err) {
+			t.Fatalf("doctor --dry-run created runs dir or stat failed: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

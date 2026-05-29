@@ -458,7 +458,10 @@ check_interval = "24h"
 func Load(path string) (*Config, error) {
 	// Try loading .env first if it exists in the current directory or parent
 	_ = LoadDotEnv(".env")
+	return loadConfigFile(path)
+}
 
+func loadConfigFile(path string) (*Config, error) {
 	path = expandHome(path)
 	sourceDir := configSourceDir(path)
 	data, err := os.ReadFile(path)
