@@ -70,6 +70,13 @@ Bootstrap your configuration and check your environment:
 ./v100 doctor
 ```
 
+`v100 doctor` validates `config.toml` plus behavior directories next to it
+(`agents/`, `policies/`, and `tasks/`). It reports malformed TOML, unknown or
+deprecated keys, missing prompt files, missing referenced providers/tasks, and
+provider fallback cycles before doing provider auth, tool binary, sandbox, and
+`runs/` write checks. Use `./v100 doctor --dry-run` to run only the config and
+behavior-dir validation without network probes or filesystem write checks.
+
 ### 2. Interactive & Unattended Runs
 
 Start a standard interactive run using MiniMax (the preferred provider):

@@ -330,9 +330,10 @@ func logoutCmd() *cobra.Command {
 }
 
 func doctorCmd(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Check provider auth, tool availability, and run dir",
+		Short: "Check config, provider auth, tool availability, and run dir",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fmt.Println(ui.Header("v100 doctor"))
 			fmt.Println()
@@ -348,6 +349,21 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			} else {
 				fmt.Println(ui.Fail("Config not found at " + cfgFile + " — run: v100 config init"))
 				ok = false
+			}
+			validation := config.ValidateConfigPath(cfgFile)
+			printConfigValidation(validation)
+			if validation.HasErrors() {
+				ok = false
+			}
+			if dryRun {
+				fmt.Println(ui.Info("Dry run: skipped provider authentication, network probes, tool binary probes, and runs/ write check."))
+				fmt.Println()
+				if ok {
+					fmt.Println(ui.OK(ui.Bold("All validation checks passed")))
+				} else {
+					fmt.Println(ui.Fail(ui.Bold("Validation checks failed — fix issues above before running")))
+				}
+				return nil
 			}
 
 			cfg, err := loadConfig(*cfgPath)
@@ -618,6 +634,38 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate config and behavior dirs without provider/network/write checks")
+	return cmd
+}
+
+func printConfigValidation(result *config.ValidationResult) {
+	if result == nil {
+		return
+	}
+	for _, finding := range result.Findings {
+		msg := finding.Message
+		if strings.TrimSpace(finding.Path) != "" {
+			msg = finding.Path + ": " + msg
+		}
+		switch finding.Severity {
+		case config.ValidationError:
+			fmt.Println(ui.Fail(msg))
+		case config.ValidationWarning:
+			fmt.Println(ui.Warn(msg))
+		case config.ValidationInfo:
+			fmt.Println(ui.Dim(msg))
+		}
+	}
+	errors, warnings, _ := result.Counts()
+	if errors > 0 {
+		fmt.Println(ui.Fail(fmt.Sprintf("Config validation: %d error(s), %d warning(s)", errors, warnings)))
+		return
+	}
+	if warnings > 0 {
+		fmt.Println(ui.Warn(fmt.Sprintf("Config validation: 0 error(s), %d warning(s)", warnings)))
+		return
+	}
+	fmt.Println(ui.OK("Config validation: ok"))
 }
 
 func executorResourceStatusLine() (string, bool, bool) {
