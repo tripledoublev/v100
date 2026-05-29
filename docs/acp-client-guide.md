@@ -35,7 +35,7 @@ Request:
     "clientInfo": { "name": "example-client", "version": "0.1.0" },
     "clientCapabilities": {
       "terminal": true,
-      "fs": { "read": true, "write": true }
+      "fs": { "readTextFile": true, "writeTextFile": true }
     }
   }
 }
@@ -58,8 +58,9 @@ Response:
 }
 ```
 
-If the client sends a nonzero protocol version other than `1`, v100 returns
-`-32010` (`unsupported protocol version`).
+If the client sends a protocol version v100 does not support, v100 responds with
+its latest supported protocol version. Clients that cannot speak that version
+should close the connection.
 
 ### set_suggested_prompts
 
@@ -166,7 +167,8 @@ Response:
 ```
 
 `finalize` cancels active sessions, closes inactive sessions immediately, clears
-server lifecycle state, and returns the number of sessions it shut down.
+server lifecycle state, returns the number of sessions it shut down, and then
+terminates the ACP server process.
 
 ## Error Codes
 
@@ -181,5 +183,4 @@ server lifecycle state, and returns the number of sessions it shut down.
 | `-32002` | Session already exists |
 | `-32003` | Session busy |
 | `-32004` | Session closing |
-| `-32010` | Unsupported protocol version |
 | `-32020` | Provider configuration error |

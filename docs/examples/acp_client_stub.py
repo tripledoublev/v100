@@ -53,7 +53,10 @@ def main() -> int:
                 "params": {
                     "protocolVersion": 1,
                     "clientInfo": {"name": "v100-acp-stub", "version": "0.1.0"},
-                    "clientCapabilities": {"terminal": True, "fs": {"read": True}},
+                    "clientCapabilities": {
+                        "terminal": True,
+                        "fs": {"readTextFile": True},
+                    },
                 },
             },
         )
