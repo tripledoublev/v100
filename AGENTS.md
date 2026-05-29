@@ -45,3 +45,18 @@ items beyond the per-scope cap, and trims oldest records when the JSON store
 exceeds the configured size cap. Use `VectorStore.WithOptions` in tests or
 specialized stores when a different TTL, per-scope item cap, or store-size cap
 is required.
+
+## Roadmap & Current Priorities
+
+`ROADMAP.md` is the working plan toward 1.0. The active phase is the
+`v0.3 — Safety & Reliability` milestone (issues #218–#224): tool-safety
+rate-limits/circuit-breakers, executor hardening, delta snapshots, ACP
+completion, secrets hardening, memory TTL/eviction, and config validation.
+
+When picking work, prefer the highest-priority open issue in that milestone
+(`P0: Critical` > `P1: High` > `P2: Strategic`) and keep the change scoped to
+that issue — each has a Definition of Done. Do not start descoped v1.1+ work
+(multi-workspace, fine-tuning export, custom solver DSL, music-player TUI,
+GEO tooling, Sprites/Modal). 1.0 means reliable, safe, observable, and
+documented — not feature-complete; the bar is total test coverage ≥70%
+(currently 46.5%, v0.3 target 55%+).
