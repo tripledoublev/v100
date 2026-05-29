@@ -1,10 +1,12 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -113,12 +115,31 @@ func DefaultClaudeTokenPath() string {
 	return filepath.Join(home, ".config", "v100", "anthropic_auth.json")
 }
 
-// LoadClaude reads a ClaudeToken from path.
+// LoadClaude reads a ClaudeToken from env, secrets manager, or a plaintext fallback file.
 func LoadClaude(path string) (*ClaudeToken, error) {
+	return LoadClaudeWithEnv(path, "ANTHROPIC_API_KEY")
+}
+
+// LoadClaudeWithEnv reads a ClaudeToken using authEnv before secrets manager and file fallback.
+func LoadClaudeWithEnv(path, authEnv string) (*ClaudeToken, error) {
+	if strings.TrimSpace(authEnv) == "" {
+		authEnv = "ANTHROPIC_API_KEY"
+	}
+	if value := strings.TrimSpace(os.Getenv(authEnv)); value != "" {
+		return &ClaudeToken{APIKey: value}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if secret, err := LookupSecret(ctx, "provider_anthropic_api_key", defaultSecretManagers()); err == nil {
+		return &ClaudeToken{APIKey: secret.Value}, nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("auth: read %s: %w", path, err)
+		return nil, fmt.Errorf("auth: read %s: %w\n  → set %s, store secret provider_anthropic_api_key in 1Password/pass/system keyring, or run 'v100 login --provider anthropic'", path, err, authEnv)
 	}
+	warnPlaintextFallback("Anthropic API key", path)
 	var t ClaudeToken
 	if err := json.Unmarshal(data, &t); err != nil {
 		return nil, fmt.Errorf("auth: parse %s: %w", path, err)

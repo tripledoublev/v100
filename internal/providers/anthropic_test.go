@@ -353,7 +353,7 @@ func TestAnthropicParseResponse(t *testing.T) {
 	}
 }
 
-func TestResolveAnthropicKeyFromFile(t *testing.T) {
+func TestResolveAnthropicKeyPrefersEnvOverFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -365,12 +365,30 @@ func TestResolveAnthropicKeyFromFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(authDir, "anthropic_auth.json"), []byte(`{"api_key":"sk-ant-stored"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Also set env var — stored key should take priority
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-envvar")
 
 	key := resolveAnthropicKey("ANTHROPIC_API_KEY")
+	if key != "sk-ant-envvar" {
+		t.Errorf("expected env key, got %q", key)
+	}
+}
+
+func TestResolveAnthropicKeyFromFileFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("PATH", "")
+
+	authDir := filepath.Join(dir, "v100")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(authDir, "anthropic_auth.json"), []byte(`{"api_key":"sk-ant-stored"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	key := resolveAnthropicKey("ANTHROPIC_API_KEY")
 	if key != "sk-ant-stored" {
-		t.Errorf("expected stored key, got %q", key)
+		t.Errorf("expected file fallback key, got %q", key)
 	}
 }
 
@@ -389,6 +407,7 @@ func TestResolveAnthropicKeyEmpty(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("PATH", "")
 
 	key := resolveAnthropicKey("ANTHROPIC_API_KEY")
 	if key != "" {

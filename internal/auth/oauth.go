@@ -39,6 +39,15 @@ const (
 	MiniMaxDefaultClientID = "78257093-7e40-4613-99e0-527b14b39113"
 )
 
+var (
+	codexTokenURL          = CodexTokenURL
+	geminiTokenURL         = GeminiTokenURL
+	miniMaxCodeURL         = MiniMaxCodeURL
+	miniMaxTokenURL        = MiniMaxTokenURL
+	miniMaxMinPollInterval = 2 * time.Second
+	openBrowser            = openBrowserOS
+)
+
 // OAuthCredentials holds client credentials loaded from disk.
 type OAuthCredentials struct {
 	CodexClientID      string `json:"codex_client_id"`
@@ -74,35 +83,134 @@ func LoadGeminiCredentials() (*OAuthCredentials, error) {
 // LoadMiniMaxCredentials reads and validates the MiniMax OAuth client config.
 // Falls back to MiniMaxDefaultClientID if missing from config.
 func LoadMiniMaxCredentials() (*OAuthCredentials, error) {
-	c, err := loadCredentials() // try loading with no required fields
-	if err != nil {
-		// If file is missing or unreadable, just use the default
-		return &OAuthCredentials{MiniMaxClientID: MiniMaxDefaultClientID}, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if secret, err := resolveOAuthCredentialField(ctx, "minimax_client_id"); err == nil {
+		return &OAuthCredentials{MiniMaxClientID: secret.Value}, nil
 	}
-	if strings.TrimSpace(c.MiniMaxClientID) == "" {
-		c.MiniMaxClientID = MiniMaxDefaultClientID
+
+	c, found, err := loadPlaintextOAuthCredentials(DefaultCredentialsPath())
+	if err == nil && found {
+		warnPlaintextFallback("OAuth credentials", DefaultCredentialsPath())
+		if strings.TrimSpace(c.MiniMaxClientID) != "" {
+			return c, nil
+		}
 	}
-	return c, nil
+	return &OAuthCredentials{MiniMaxClientID: MiniMaxDefaultClientID}, nil
 }
 
 func loadCredentials(requiredFields ...string) (*OAuthCredentials, error) {
 	path := DefaultCredentialsPath()
+	c := &OAuthCredentials{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var missing []string
+	for _, field := range requiredFields {
+		secret, err := resolveOAuthCredentialField(ctx, field)
+		if err == nil {
+			setCredentialValue(c, field, secret.Value)
+			continue
+		}
+		missing = append(missing, field)
+	}
+
+	if len(missing) > 0 {
+		fileCreds, found, err := loadPlaintextOAuthCredentials(path)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			warnPlaintextFallback("OAuth credentials", path)
+			for _, field := range missing {
+				if value := strings.TrimSpace(credentialValue(fileCreds, field)); value != "" {
+					setCredentialValue(c, field, value)
+				}
+			}
+		}
+	}
+
+	missing = missingCredentialFields(c, requiredFields...)
+	if len(missing) > 0 {
+		return nil, missingOAuthCredentialsError(missing, path)
+	}
+	return c, nil
+}
+
+type oauthCredentialSpec struct {
+	SecretKey string
+	EnvNames  []string
+	Set       func(*OAuthCredentials, string)
+	Get       func(*OAuthCredentials) string
+}
+
+var oauthCredentialSpecs = map[string]oauthCredentialSpec{
+	"codex_client_id": {
+		SecretKey: "oauth_codex_client_id",
+		EnvNames:  []string{"V100_CODEX_CLIENT_ID", "CODEX_CLIENT_ID", "OPENAI_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID"},
+		Set:       func(c *OAuthCredentials, value string) { c.CodexClientID = value },
+		Get:       func(c *OAuthCredentials) string { return c.CodexClientID },
+	},
+	"gemini_client_id": {
+		SecretKey: "oauth_gemini_client_id",
+		EnvNames:  []string{"V100_GEMINI_CLIENT_ID", "GEMINI_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID"},
+		Set:       func(c *OAuthCredentials, value string) { c.GeminiClientID = value },
+		Get:       func(c *OAuthCredentials) string { return c.GeminiClientID },
+	},
+	"gemini_client_secret": {
+		SecretKey: "oauth_gemini_client_secret",
+		EnvNames:  []string{"V100_GEMINI_CLIENT_SECRET", "GEMINI_CLIENT_SECRET", "GOOGLE_OAUTH_CLIENT_SECRET"},
+		Set:       func(c *OAuthCredentials, value string) { c.GeminiClientSecret = value },
+		Get:       func(c *OAuthCredentials) string { return c.GeminiClientSecret },
+	},
+	"minimax_client_id": {
+		SecretKey: "oauth_minimax_client_id",
+		EnvNames:  []string{"V100_MINIMAX_CLIENT_ID", "MINIMAX_CLIENT_ID"},
+		Set:       func(c *OAuthCredentials, value string) { c.MiniMaxClientID = value },
+		Get:       func(c *OAuthCredentials) string { return c.MiniMaxClientID },
+	},
+}
+
+func resolveOAuthCredentialField(ctx context.Context, field string) (SecretValue, error) {
+	spec, ok := oauthCredentialSpecs[field]
+	if !ok {
+		return SecretValue{}, fmt.Errorf("%w: unknown OAuth credential field %s", ErrSecretUnavailable, field)
+	}
+	return ResolveSecret(ctx, spec.SecretKey, spec.EnvNames...)
+}
+
+func setCredentialValue(c *OAuthCredentials, field, value string) {
+	if spec, ok := oauthCredentialSpecs[field]; ok {
+		spec.Set(c, strings.TrimSpace(value))
+	}
+}
+
+func loadPlaintextOAuthCredentials(path string) (*OAuthCredentials, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if len(requiredFields) == 0 {
-			return &OAuthCredentials{}, nil
+		if os.IsNotExist(err) {
+			return nil, false, nil
 		}
-		return nil, fmt.Errorf("auth: read %s: %w\n  → create it with JSON keys: %s\n  → see: v100 doctor", path, err, strings.Join(requiredFields, ", "))
+		return nil, false, fmt.Errorf("auth: read plaintext OAuth credentials %s: %w", path, err)
 	}
 	var c OAuthCredentials
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("auth: parse %s: %w", path, err)
+		return nil, true, fmt.Errorf("auth: parse plaintext OAuth credentials %s: %w", path, err)
 	}
-	missing := missingCredentialFields(&c, requiredFields...)
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("auth: missing %s in %s\n  → fill the required OAuth client values and retry\n  → see: v100 doctor", strings.Join(missing, ", "), path)
+	return &c, true, nil
+}
+
+func missingOAuthCredentialsError(missing []string, path string) error {
+	var hints []string
+	for _, field := range missing {
+		spec, ok := oauthCredentialSpecs[field]
+		if !ok {
+			hints = append(hints, field)
+			continue
+		}
+		hints = append(hints, fmt.Sprintf("%s (env: %s; secret: %s)", field, strings.Join(spec.EnvNames, "/"), spec.SecretKey))
 	}
-	return &c, nil
+	return fmt.Errorf("auth: missing OAuth credentials: %s\n  → set env vars, store secrets in 1Password/pass/system keyring, or use plaintext fallback at %s\n  → see: v100 doctor", strings.Join(hints, ", "), path)
 }
 
 func missingCredentialFields(c *OAuthCredentials, requiredFields ...string) []string {
@@ -116,18 +224,10 @@ func missingCredentialFields(c *OAuthCredentials, requiredFields ...string) []st
 }
 
 func credentialValue(c *OAuthCredentials, field string) string {
-	switch field {
-	case "codex_client_id":
-		return c.CodexClientID
-	case "gemini_client_id":
-		return c.GeminiClientID
-	case "gemini_client_secret":
-		return c.GeminiClientSecret
-	case "minimax_client_id":
-		return c.MiniMaxClientID
-	default:
-		return ""
+	if spec, ok := oauthCredentialSpecs[field]; ok {
+		return spec.Get(c)
 	}
+	return ""
 }
 
 // OAuthConfig describes parameters for a PKCE OAuth authorization code flow.
@@ -281,7 +381,7 @@ func Refresh(ctx context.Context, refreshToken string) (*Token, error) {
 		"refresh_token": {refreshToken},
 		"client_id":     {creds.CodexClientID},
 	}
-	return postTokenRequest(ctx, CodexTokenURL, form)
+	return postTokenRequest(ctx, codexTokenURL, form)
 }
 
 // RefreshGemini exchanges a refresh token for a new access token (Gemini).
@@ -296,7 +396,7 @@ func RefreshGemini(ctx context.Context, refreshToken string) (*Token, error) {
 		"client_id":     {creds.GeminiClientID},
 		"client_secret": {creds.GeminiClientSecret},
 	}
-	return postTokenRequest(ctx, GeminiTokenURL, form)
+	return postTokenRequest(ctx, geminiTokenURL, form)
 }
 
 // AccountIDFromJWT decodes the JWT payload and extracts chatgpt_account_id.
@@ -424,7 +524,7 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 		"code_challenge_method": {"S256"},
 		"state":                 {state},
 	}
-	codeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxCodeURL, strings.NewReader(codeForm.Encode()))
+	codeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, miniMaxCodeURL, strings.NewReader(codeForm.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("auth: build code request: %w", err)
 	}
@@ -465,8 +565,8 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 
 	// Step 2: Poll for token (form-urlencoded)
 	interval := time.Duration(codeResult.Interval) * time.Millisecond
-	if interval < 2*time.Second {
-		interval = 2 * time.Second
+	if interval < miniMaxMinPollInterval {
+		interval = miniMaxMinPollInterval
 	}
 	// expired_in is a unix timestamp (seconds)
 	deadline := time.Unix(codeResult.ExpiredIn, 0)
@@ -484,7 +584,7 @@ func LoginMiniMax(ctx context.Context) (*MiniMaxToken, error) {
 			"user_code":     {codeResult.UserCode},
 			"code_verifier": {verifier},
 		}
-		tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, strings.NewReader(tokenForm.Encode()))
+		tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, miniMaxTokenURL, strings.NewReader(tokenForm.Encode()))
 		if err != nil {
 			return nil, fmt.Errorf("auth: build token request: %w", err)
 		}
@@ -536,7 +636,7 @@ func RefreshMiniMax(ctx context.Context, creds *OAuthCredentials, refreshToken s
 		"client_id":     {creds.MiniMaxClientID},
 		"refresh_token": {refreshToken},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, MiniMaxTokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, miniMaxTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("auth: build refresh request: %w", err)
 	}
@@ -579,8 +679,8 @@ func RefreshMiniMax(ctx context.Context, creds *OAuthCredentials, refreshToken s
 	return t, nil
 }
 
-// openBrowser attempts to open the URL in the default browser.
-func openBrowser(u string) {
+// openBrowserOS attempts to open the URL in the default browser.
+func openBrowserOS(u string) {
 	var cmd string
 	var args []string
 	switch runtime.GOOS {

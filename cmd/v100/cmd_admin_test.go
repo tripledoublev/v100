@@ -122,3 +122,25 @@ func TestMemoryListCmdShowsAuditMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestConfigInitDoesNotWritePlaintextOAuthTemplate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+
+	out, err := captureStdout(func() error {
+		cmd := configInitCmd()
+		return cmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("config init error = %v", err)
+	}
+
+	credsPath := filepath.Join(root, "v100", "oauth_credentials.json")
+	if _, err := os.Stat(credsPath); !os.IsNotExist(err) {
+		t.Fatalf("oauth credentials file exists or stat failed: %v", err)
+	}
+	if !strings.Contains(out, "OAuth client secrets not written to disk by default") {
+		t.Fatalf("config init output missing secure guidance:\n%s", out)
+	}
+}

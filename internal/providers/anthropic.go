@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/tripledoublev/v100/internal/auth"
 )
 
 const (
@@ -27,9 +28,8 @@ type AnthropicProvider struct {
 	client       *http.Client
 }
 
-// NewAnthropicProvider creates a provider. It checks for a stored API key at
-// storedKeyPath first (empty string uses the default path), then falls back to
-// the environment variable authEnv.
+// NewAnthropicProvider creates a provider using env, secrets manager, or a
+// plaintext fallback API key.
 func NewAnthropicProvider(authEnv, defaultModel string) (*AnthropicProvider, error) {
 	if authEnv == "" {
 		authEnv = "ANTHROPIC_API_KEY"
@@ -53,26 +53,11 @@ func NewAnthropicProvider(authEnv, defaultModel string) (*AnthropicProvider, err
 
 // resolveAnthropicKey returns the API key from the stored auth file or env var.
 func resolveAnthropicKey(authEnv string) string {
-	// 1. Check stored auth file.
-	path := defaultClaudeTokenPath()
-	if data, err := os.ReadFile(path); err == nil {
-		var stored struct {
-			APIKey string `json:"api_key"`
-		}
-		if json.Unmarshal(data, &stored) == nil && stored.APIKey != "" {
-			return stored.APIKey
-		}
+	token, err := auth.LoadClaudeWithEnv(auth.DefaultClaudeTokenPath(), authEnv)
+	if err != nil || token == nil {
+		return ""
 	}
-	// 2. Fall back to env var.
-	return os.Getenv(authEnv)
-}
-
-func defaultClaudeTokenPath() string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return xdg + "/v100/anthropic_auth.json"
-	}
-	home, _ := os.UserHomeDir()
-	return home + "/.config/v100/anthropic_auth.json"
+	return strings.TrimSpace(token.APIKey)
 }
 
 func (p *AnthropicProvider) Name() string { return "anthropic" }
