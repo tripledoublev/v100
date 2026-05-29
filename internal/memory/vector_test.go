@@ -1,8 +1,13 @@
 package memory
 
 import (
+	"context"
+	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -155,9 +160,6 @@ func TestVectorStore_Prune(t *testing.T) {
 			{ID: "future", Content: "not yet", Category: "note", ExpiresAt: &future},
 		},
 	}
-	if err := s.Save(); err != nil {
-		t.Fatal(err)
-	}
 	removed := s.Prune()
 	if removed != 1 {
 		t.Fatalf("expected 1 removed, got %d", removed)
@@ -170,6 +172,171 @@ func TestVectorStore_Prune(t *testing.T) {
 	}
 }
 
+func TestVectorStore_DefaultTTLAndDuplicateEmbedding(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := NewWorkspaceVectorStore(tmpDir)
+
+	item := MemoryItem{
+		ID:        "ttl",
+		Content:   "expires by default",
+		Embedding: []float32{1, 0, 0},
+		TS:        time.Now().UTC(),
+	}
+	if err := s.Add(item); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if len(s.items) != 1 || s.items[0].ExpiresAt == nil {
+		t.Fatalf("default TTL not applied: %+v", s.items)
+	}
+	if got, want := s.items[0].ExpiresAt.Sub(item.TS), DefaultVectorStoreTTL; got != want {
+		t.Fatalf("ttl = %s, want %s", got, want)
+	}
+
+	err := s.Add(MemoryItem{
+		ID:        "dupe",
+		Content:   "same embedding",
+		Embedding: []float32{1, 0, 0},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate embedding error")
+	}
+}
+
+func TestVectorStore_EvictsByScopeAndStoreSize(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := NewWorkspaceVectorStore(tmpDir).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: 2,
+		MaxStoreBytes:    -1,
+	})
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		if err := s.Add(MemoryItem{
+			ID:      fmt.Sprintf("%c", 'a'+i),
+			Content: "scoped memory",
+			Metadata: Metadata{Tags: map[string]string{
+				"scope": "workspace",
+			}},
+			TS: base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("Add(%d) error = %v", i, err)
+		}
+	}
+	if got := len(s.items); got != 2 {
+		t.Fatalf("items after scope eviction = %d, want 2", got)
+	}
+	if s.items[0].ID != "c" || s.items[1].ID != "d" {
+		t.Fatalf("scope eviction kept %+v, want c/d", s.items)
+	}
+
+	s = NewWorkspaceVectorStore(filepath.Join(tmpDir, "size")).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    380,
+	})
+	for i := 0; i < 8; i++ {
+		if err := s.Add(MemoryItem{
+			ID:      fmt.Sprintf("%c", 'a'+i),
+			Content: "large memory payload " + fmt.Sprintf("%c", 'a'+i) + " " + strings.Repeat("x", 80),
+			TS:      base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("size Add(%d) error = %v", i, err)
+		}
+	}
+	info, err := os.Stat(s.runPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > s.options().MaxStoreBytes {
+		t.Fatalf("persisted size = %d, max = %d", info.Size(), s.options().MaxStoreBytes)
+	}
+	if len(s.items) == 0 || s.items[len(s.items)-1].ID != "h" {
+		t.Fatalf("size eviction should keep newest item, got %+v", s.items)
+	}
+}
+
+func TestVectorStore_StartCompactionPrunesInBackground(t *testing.T) {
+	tmpDir := t.TempDir()
+	past := time.Now().Add(-time.Hour)
+	s := NewWorkspaceVectorStore(tmpDir)
+	s.items = []MemoryItem{
+		{ID: "expired", Content: "old", ExpiresAt: &past},
+		{ID: "live", Content: "new"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := s.StartCompaction(ctx, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+	if len(s.items) != 1 || s.items[0].ID != "live" {
+		t.Fatalf("compaction did not prune expired item: %+v", s.items)
+	}
+}
+
+func TestVectorStore_ConcurrentCompactionOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := NewWorkspaceVectorStore(tmpDir).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    -1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := s.StartCompaction(ctx, time.Millisecond)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.Add(MemoryItem{
+				ID:      fmt.Sprintf("item-%02d", i),
+				Content: fmt.Sprintf("memory %02d", i),
+				TS:      time.Now().UTC().Add(time.Duration(i) * time.Millisecond),
+			}); err != nil {
+				t.Errorf("Add(%d) error = %v", i, err)
+			}
+			_ = s.Items()
+			_ = s.Search([]float32{1, 2, 3}, 3)
+		}()
+	}
+	wg.Wait()
+	cancel()
+	<-done
+
+	reloaded := NewWorkspaceVectorStore(tmpDir).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    -1,
+	})
+	if err := reloaded.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Items()) != 40 {
+		t.Fatalf("persisted items = %d, want 40", len(reloaded.Items()))
+	}
+}
+
+func TestVectorStore_SearchScaleThousandItems(t *testing.T) {
+	s := NewWorkspaceVectorStore(t.TempDir())
+	for i := 0; i < 1500; i++ {
+		s.items = append(s.items, MemoryItem{
+			ID:        fmt.Sprintf("item-%04d", i),
+			Content:   "scale memory",
+			Embedding: []float32{float32(i % 17), float32((i * 7) % 31), 1},
+			TS:        time.Now().Add(time.Duration(i) * time.Millisecond),
+		})
+	}
+	start := time.Now()
+	results := s.Search([]float32{1, 1, 1}, 5)
+	if len(results) != 5 {
+		t.Fatalf("results = %d, want 5", len(results))
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("search over 1500 items took %s", elapsed)
+	}
+}
+
 func TestVectorStore_CategoryPersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	s := &VectorStore{
@@ -178,9 +345,9 @@ func TestVectorStore_CategoryPersistence(t *testing.T) {
 	}
 	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	item := MemoryItem{
-		ID:       "cat-1",
-		Content:  "prefer postgres",
-		Category: "preference",
+		ID:        "cat-1",
+		Content:   "prefer postgres",
+		Category:  "preference",
 		ExpiresAt: &exp,
 	}
 	if err := s.Add(item); err != nil {

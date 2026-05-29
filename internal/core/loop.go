@@ -251,6 +251,8 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 		}
 	}
 	l.pendingUserImages = append([]providers.ImageAttachment(nil), images...)
+	stopMemoryCompaction := l.startMemoryCompaction(ctx)
+	defer stopMemoryCompaction()
 
 	solver := l.Solver
 	if solver == nil {

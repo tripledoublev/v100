@@ -21,7 +21,7 @@ func TestLoadAuditEntriesIncludesManualAndWorkspaceMemory(t *testing.T) {
 		Metadata: Metadata{
 			Tags: map[string]string{"scope": "workspace", "origin": "manual-promote", "confidence": "high"},
 		},
-		TS: time.Date(2026, 3, 24, 4, 0, 0, 0, time.UTC),
+		TS: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
