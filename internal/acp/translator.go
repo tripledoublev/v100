@@ -15,7 +15,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 				Text string `json:"text"`
 			}
 			if err := json.Unmarshal(ev.Payload, &p); err == nil {
-				_ = conn.SendNotification("session/update", SessionUpdateParams{
+				_ = conn.SendNotification(MethodSessionUpdate, SessionUpdateParams{
 					SessionID: sessionID,
 					Update: Update{
 						Type: "agent_message_chunk",
@@ -30,7 +30,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 		case core.EventSolverPlan:
 			var plan string
 			if err := json.Unmarshal(ev.Payload, &plan); err == nil {
-				_ = conn.SendNotification("session/update", SessionUpdateParams{
+				_ = conn.SendNotification(MethodSessionUpdate, SessionUpdateParams{
 					SessionID: sessionID,
 					Update: Update{
 						Type: "agent_thought_chunk",
@@ -49,7 +49,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 				if text == "" {
 					text = p.Error
 				}
-				_ = conn.SendNotification("session/update", SessionUpdateParams{
+				_ = conn.SendNotification(MethodSessionUpdate, SessionUpdateParams{
 					SessionID: sessionID,
 					Update: Update{
 						Type: "agent_thought_chunk",
@@ -81,7 +81,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 					rawInput = json.RawMessage(marshaled)
 				}
 
-				_ = conn.SendNotification("session/update", SessionUpdateParams{
+				_ = conn.SendNotification(MethodSessionUpdate, SessionUpdateParams{
 					SessionID: sessionID,
 					Update: Update{
 						Type:       "tool_call",
@@ -105,7 +105,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 					Output string `json:"output"`
 				}{Output: p.Output})
 
-				_ = conn.SendNotification("session/update", SessionUpdateParams{
+				_ = conn.SendNotification(MethodSessionUpdate, SessionUpdateParams{
 					SessionID: sessionID,
 					Update: Update{
 						Type:       "tool_call_update",
