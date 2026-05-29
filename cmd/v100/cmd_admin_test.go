@@ -35,7 +35,7 @@ func TestMemoryListCmdShowsAuditMetadata(t *testing.T) {
 		Metadata: memory.Metadata{
 			Tags: map[string]string{"scope": "workspace", "origin": "tool:blackboard_store", "confidence": "stored"},
 		},
-		TS: time.Date(2026, 3, 24, 4, 0, 0, 0, time.UTC),
+		TS: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}

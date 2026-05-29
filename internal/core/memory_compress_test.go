@@ -609,8 +609,8 @@ func TestBulkCompressionSanitizesMalformedGLMPayloads(t *testing.T) {
 	}
 	for _, req := range compressProv.requests {
 		for _, msg := range req.Messages {
-		if strings.Contains(msg.Content, "</arg_") || strings.Contains(msg.Content, "<arg_") {
-			t.Fatalf("compression request still contained malformed tool markers: %q", msg.Content)
+			if strings.Contains(msg.Content, "</arg_") || strings.Contains(msg.Content, "<arg_") {
+				t.Fatalf("compression request still contained malformed tool markers: %q", msg.Content)
 			}
 		}
 	}
@@ -829,7 +829,7 @@ func TestMemoryRetrievalIncludesWorkspaceVectorEntries(t *testing.T) {
 		Metadata: memory.Metadata{
 			Tags: map[string]string{"scope": "workspace", "topic": "replay"},
 		},
-		TS: time.Date(2026, 3, 24, 3, 0, 0, 0, time.UTC),
+		TS: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
