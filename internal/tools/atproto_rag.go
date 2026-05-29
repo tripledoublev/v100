@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +15,8 @@ import (
 )
 
 const atprotoStoreName = "atproto"
+
+var atprotoResolverHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // embedProvider returns the embedding provider from the call context,
 // preferring EmbedProvider over the chat Provider.
@@ -37,7 +38,7 @@ func ATProtoIndex(cfg *config.Config) Tool { return &atprotoIndexTool{cfg: cfg} 
 
 func (t *atprotoIndexTool) Name() string { return "atproto_index" }
 func (t *atprotoIndexTool) Description() string {
-	return "Fetch ATProto/Bluesky records (feed, notifications, a user profile, or a user's posts directly from their PDS) and store them as vector embeddings for later semantic retrieval with atproto_recall."
+	return "Fetch ATProto/Bluesky records (feed, notifications, a user profile, or a user's posts directly from their PDS) and store them as vector embeddings for later semantic retrieval with atproto_recall. Requests are capped at 100 records and protected by per-endpoint rate limits plus a circuit breaker."
 }
 func (t *atprotoIndexTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoIndexTool) Effects() ToolEffects {
@@ -80,12 +81,7 @@ func (t *atprotoIndexTool) Exec(ctx context.Context, call ToolCallContext, args 
 	if err := json.Unmarshal(args, &in); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
 	}
-	if in.Limit <= 0 {
-		in.Limit = 20
-	}
-	if in.Limit > 100 {
-		in.Limit = 100
-	}
+	in.Limit = clampExternalPageLimit(in.Limit, 20)
 	ep := embedProvider(call)
 	if ep == nil {
 		return failResult(start, "no embedding provider available; use --embedding <provider>"), nil
@@ -177,6 +173,7 @@ func fetchUserPostsPDS(handle string, limit int) ([]indexRecord, error) {
 	if handle == "" {
 		return nil, fmt.Errorf("handle is required for source=user_posts")
 	}
+	limit = clampExternalPageLimit(limit, 20)
 
 	// 1. Resolve handle → DID (try appview first, then PLC/handle well-known)
 	did, err := resolveHandleToDID(handle)
@@ -198,14 +195,13 @@ func fetchUserPostsPDS(handle string, limit int) ([]indexRecord, error) {
 	}
 	u := pdsURL + "/xrpc/com.atproto.repo.listRecords?" + params.Encode()
 
-	resp, err := http.Get(u) //nolint:gosec // PDS URL is constructed from PLC directory
+	fetched, err := guardedExternalHTTPGetBody(atprotoResolverHTTPClient, atprotoSafetyEndpoint("com.atproto.repo.listRecords"), u)
 	if err != nil {
-		return nil, fmt.Errorf("fetch posts from PDS: %w", err)
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("PDS listRecords (%d): %s", resp.StatusCode, string(data))
+	data := fetched.Body
+	if fetched.Status != http.StatusOK {
+		return nil, fmt.Errorf("PDS listRecords (%d): %s", fetched.Status, string(data))
 	}
 
 	var listResp struct {
@@ -240,52 +236,52 @@ func fetchUserPostsPDS(handle string, limit int) ([]indexRecord, error) {
 // resolveHandleToDID resolves a Bluesky handle to its DID, trying multiple
 // methods: appview XRPC, PLC directory, and handle well-known.
 func resolveHandleToDID(handle string) (string, error) {
-	hc := &http.Client{Timeout: 10 * time.Second}
-
 	// Try appview resolveHandle
 	u := "https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=" + url.QueryEscape(handle)
-	resp, err := hc.Get(u)
-	if err == nil {
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == http.StatusOK {
-			var out struct {
-				DID string `json:"did"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&out); err == nil && out.DID != "" {
-				return out.DID, nil
-			}
+	resp, err := guardedExternalHTTPGetBody(atprotoResolverHTTPClient, atprotoSafetyEndpoint("com.atproto.identity.resolveHandle"), u)
+	if err != nil {
+		if _, ok := toolSafetyErrorOutput(err); ok {
+			return "", err
+		}
+	} else if resp.Status == http.StatusOK {
+		var out struct {
+			DID string `json:"did"`
+		}
+		if err := json.Unmarshal(resp.Body, &out); err == nil && out.DID != "" {
+			return out.DID, nil
 		}
 	}
 
 	// Try handle well-known
-	resp2, err := hc.Get("https://" + handle + "/.well-known/atproto-did")
-	if err == nil {
-		defer func() { _ = resp2.Body.Close() }()
-		if resp2.StatusCode == http.StatusOK {
-			body, _ := io.ReadAll(resp2.Body)
-			did := strings.TrimSpace(string(body))
-			if strings.HasPrefix(did, "did:") {
-				return did, nil
-			}
+	resp, err = guardedExternalHTTPGetBody(atprotoResolverHTTPClient, atprotoSafetyEndpoint("identity.well-known"), "https://"+handle+"/.well-known/atproto-did")
+	if err != nil {
+		if _, ok := toolSafetyErrorOutput(err); ok {
+			return "", err
+		}
+	} else if resp.Status == http.StatusOK {
+		did := strings.TrimSpace(string(resp.Body))
+		if strings.HasPrefix(did, "did:") {
+			return did, nil
 		}
 	}
 
 	// Try DNS TXT record via DNS-over-HTTPS
-	resp3, err := hc.Get("https://dns.google/resolve?name=_atproto." + handle + "&type=TXT")
-	if err == nil {
-		defer func() { _ = resp3.Body.Close() }()
-		if resp3.StatusCode == http.StatusOK {
-			var dnsResp struct {
-				Answer []struct {
-					Data string `json:"data"`
-				} `json:"Answer"`
-			}
-			if err := json.NewDecoder(resp3.Body).Decode(&dnsResp); err == nil {
-				for _, a := range dnsResp.Answer {
-					d := strings.Trim(a.Data, `"`)
-					if strings.HasPrefix(d, "did=") {
-						return strings.TrimPrefix(d, "did="), nil
-					}
+	resp, err = guardedExternalHTTPGetBody(atprotoResolverHTTPClient, atprotoSafetyEndpoint("dns.google.resolve"), "https://dns.google/resolve?name=_atproto."+handle+"&type=TXT")
+	if err != nil {
+		if _, ok := toolSafetyErrorOutput(err); ok {
+			return "", err
+		}
+	} else if resp.Status == http.StatusOK {
+		var dnsResp struct {
+			Answer []struct {
+				Data string `json:"data"`
+			} `json:"Answer"`
+		}
+		if err := json.Unmarshal(resp.Body, &dnsResp); err == nil {
+			for _, a := range dnsResp.Answer {
+				d := strings.Trim(a.Data, `"`)
+				if strings.HasPrefix(d, "did=") {
+					return strings.TrimPrefix(d, "did="), nil
 				}
 			}
 		}
@@ -300,14 +296,13 @@ func resolvePDSEndpoint(did string) (string, error) {
 		return "", fmt.Errorf("unsupported DID method: %s (only did:plc is supported)", did)
 	}
 	u := "https://plc.directory/" + did
-	resp, err := http.Get(u) //nolint:gosec // PLC directory URL is well-known
+	resp, err := guardedExternalHTTPGetBody(atprotoResolverHTTPClient, atprotoSafetyEndpoint("plc.directory.resolveDID"), u)
 	if err != nil {
-		return "", fmt.Errorf("PLC directory lookup: %w", err)
+		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("PLC directory (%d): %s", resp.StatusCode, string(data))
+	data := resp.Body
+	if resp.Status != http.StatusOK {
+		return "", fmt.Errorf("PLC directory (%d): %s", resp.Status, string(data))
 	}
 
 	var doc struct {

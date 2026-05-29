@@ -81,19 +81,29 @@ func (c *atProtoClient) login() error {
 		"identifier": c.cfg.Handle,
 		"password":   pw,
 	})
+	endpoint := atprotoSafetyEndpoint("com.atproto.server.createSession")
+	if safetyErr := defaultExternalAPISafety.before(endpoint); safetyErr != nil {
+		return safetyErr
+	}
 	resp, err := c.httpCli.Post(
 		c.baseURL+"/xrpc/com.atproto.server.createSession",
 		"application/json",
 		bytes.NewReader(body),
 	)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return fmt.Errorf("atproto: login request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("atproto: login failed (%d): %s", resp.StatusCode, string(data))
+		cause := fmt.Errorf("atproto: login failed (%d): %s", resp.StatusCode, string(data))
+		if safetyErr := defaultExternalAPISafety.after(endpoint, isHTTPRateLimitStatus(resp.StatusCode), cause); safetyErr != nil {
+			return safetyErr
+		}
+		return cause
 	}
+	_ = defaultExternalAPISafety.after(endpoint, false, nil)
 	if err := json.Unmarshal(data, &c.session); err != nil {
 		return fmt.Errorf("atproto: parse session: %w", err)
 	}
@@ -102,12 +112,17 @@ func (c *atProtoClient) login() error {
 
 // xrpcGet performs a GET XRPC query.
 func (c *atProtoClient) xrpcGet(nsid string, params url.Values) ([]byte, error) {
+	endpoint := atprotoSafetyEndpoint(nsid)
+	if safetyErr := defaultExternalAPISafety.before(endpoint); safetyErr != nil {
+		return nil, safetyErr
+	}
 	u := c.baseURL + "/xrpc/" + nsid
 	if len(params) > 0 {
 		u += "?" + params.Encode()
 	}
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, err
 	}
 	if c.session.AccessJwt != "" {
@@ -115,37 +130,55 @@ func (c *atProtoClient) xrpcGet(nsid string, params url.Values) ([]byte, error) 
 	}
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, fmt.Errorf("atproto: GET %s: %w", nsid, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("atproto: GET %s (%d): %s", nsid, resp.StatusCode, string(data))
+		cause := fmt.Errorf("atproto: GET %s (%d): %s", nsid, resp.StatusCode, string(data))
+		if safetyErr := defaultExternalAPISafety.after(endpoint, isHTTPRateLimitStatus(resp.StatusCode), cause); safetyErr != nil {
+			return nil, safetyErr
+		}
+		return nil, cause
 	}
+	_ = defaultExternalAPISafety.after(endpoint, false, nil)
 	return data, nil
 }
 
 // xrpcPost performs a POST XRPC procedure.
 func (c *atProtoClient) xrpcPost(nsid string, payload any) ([]byte, error) {
+	endpoint := atprotoSafetyEndpoint(nsid)
+	if safetyErr := defaultExternalAPISafety.before(endpoint); safetyErr != nil {
+		return nil, safetyErr
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, err
 	}
 	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/xrpc/"+nsid, bytes.NewReader(body))
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.session.AccessJwt)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, fmt.Errorf("atproto: POST %s: %w", nsid, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("atproto: POST %s (%d): %s", nsid, resp.StatusCode, string(data))
+		cause := fmt.Errorf("atproto: POST %s (%d): %s", nsid, resp.StatusCode, string(data))
+		if safetyErr := defaultExternalAPISafety.after(endpoint, isHTTPRateLimitStatus(resp.StatusCode), cause); safetyErr != nil {
+			return nil, safetyErr
+		}
+		return nil, cause
 	}
+	_ = defaultExternalAPISafety.after(endpoint, false, nil)
 	return data, nil
 }
 
@@ -160,8 +193,13 @@ type BlobInfo struct {
 // xrpcUploadBlob uploads a file to the PDS via com.atproto.repo.uploadBlob and
 // returns the resulting blob's CID, MIME type, and size.
 func (c *atProtoClient) xrpcUploadBlob(filename, mimeType string, data []byte) (BlobInfo, error) {
+	endpoint := atprotoSafetyEndpoint("com.atproto.repo.uploadBlob")
+	if safetyErr := defaultExternalAPISafety.before(endpoint); safetyErr != nil {
+		return BlobInfo{}, safetyErr
+	}
 	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/xrpc/com.atproto.repo.uploadBlob", bytes.NewReader(data))
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return BlobInfo{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.session.AccessJwt)
@@ -170,14 +208,20 @@ func (c *atProtoClient) xrpcUploadBlob(filename, mimeType string, data []byte) (
 
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return BlobInfo{}, fmt.Errorf("atproto: upload blob: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respData, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return BlobInfo{}, fmt.Errorf("atproto: uploadBlob status %d: %s", resp.StatusCode, string(respData))
+		cause := fmt.Errorf("atproto: uploadBlob status %d: %s", resp.StatusCode, string(respData))
+		if safetyErr := defaultExternalAPISafety.after(endpoint, isHTTPRateLimitStatus(resp.StatusCode), cause); safetyErr != nil {
+			return BlobInfo{}, safetyErr
+		}
+		return BlobInfo{}, cause
 	}
+	_ = defaultExternalAPISafety.after(endpoint, false, nil)
 
 	var out struct {
 		Blob struct {

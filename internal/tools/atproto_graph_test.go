@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 )
@@ -119,6 +120,84 @@ func TestATProtoCommunityDetectClustersBySharedFollows(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "Xavier (@x.bsky.social) (2)") {
 		t.Fatalf("expected shared follow evidence: %s", res.Output)
+	}
+}
+
+func TestATProtoGraphExplorerReturnsSafetyAlertForSampleRateLimit(t *testing.T) {
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	replaceDefaultExternalAPISafetyForTest(t, newExternalAPISafety(func() time.Time { return now }, externalAPISafetyPolicy{
+		RatePerSecond:      100,
+		Burst:              100,
+		BreakerThreshold:   3,
+		BreakerBaseBackoff: time.Second,
+		BreakerMaxBackoff:  time.Minute,
+	}))
+
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	mux.HandleFunc("/xrpc/app.bsky.graph.getFollows", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("actor") {
+		case "did:plc:test123":
+			_ = json.NewEncoder(w).Encode(map[string]any{"follows": []map[string]string{
+				{"did": "did:plc:a", "handle": "a.bsky.social", "displayName": "Alice"},
+			}})
+		case "did:plc:a":
+			http.Error(w, `{"error":"RateLimitExceeded"}`, http.StatusTooManyRequests)
+		default:
+			t.Fatalf("unexpected actor: %s", r.URL.Query().Get("actor"))
+		}
+	})
+
+	tool := ATProtoGraphExplorer(&config.Config{ATProto: cfg})
+	args, _ := json.Marshal(map[string]int{"sample_size": 1, "follows_limit": 10})
+	res, err := tool.Exec(t.Context(), ToolCallContext{}, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("rate-limited sample fetch should fail with an alert, got: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, `"kind":"remote_rate_limit"`) {
+		t.Fatalf("expected structured remote_rate_limit alert, got: %s", res.Output)
+	}
+}
+
+func TestATProtoCommunityDetectReturnsSafetyAlertForSampleRateLimit(t *testing.T) {
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	replaceDefaultExternalAPISafetyForTest(t, newExternalAPISafety(func() time.Time { return now }, externalAPISafetyPolicy{
+		RatePerSecond:      100,
+		Burst:              100,
+		BreakerThreshold:   3,
+		BreakerBaseBackoff: time.Second,
+		BreakerMaxBackoff:  time.Minute,
+	}))
+
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	mux.HandleFunc("/xrpc/app.bsky.graph.getFollows", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("actor") {
+		case "did:plc:test123":
+			_ = json.NewEncoder(w).Encode(map[string]any{"follows": []map[string]string{
+				{"did": "did:plc:a", "handle": "a.bsky.social", "displayName": "Alice"},
+			}})
+		case "did:plc:a":
+			http.Error(w, `{"error":"RateLimitExceeded"}`, http.StatusTooManyRequests)
+		default:
+			t.Fatalf("unexpected actor: %s", r.URL.Query().Get("actor"))
+		}
+	})
+
+	tool := ATProtoCommunityDetect(&config.Config{ATProto: cfg})
+	args, _ := json.Marshal(map[string]int{"sample_size": 1, "follows_limit": 10})
+	res, err := tool.Exec(t.Context(), ToolCallContext{}, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("rate-limited sample fetch should fail with an alert, got: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, `"kind":"remote_rate_limit"`) {
+		t.Fatalf("expected structured remote_rate_limit alert, got: %s", res.Output)
 	}
 }
 

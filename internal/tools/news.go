@@ -42,10 +42,11 @@ type newsItem struct {
 }
 
 type newsFailure struct {
-	Source string `json:"source"`
-	URL    string `json:"url"`
-	Error  string `json:"error"`
-	Status int    `json:"status,omitempty"`
+	Source string           `json:"source"`
+	URL    string           `json:"url"`
+	Error  string           `json:"error"`
+	Status int              `json:"status,omitempty"`
+	Alert  *toolSafetyAlert `json:"alert,omitempty"`
 }
 
 type newsFetchOutput struct {
@@ -166,7 +167,7 @@ func NewsFetch() Tool { return &newsFetchTool{} }
 
 func (t *newsFetchTool) Name() string { return "news_fetch" }
 func (t *newsFetchTool) Description() string {
-	return "Fetch current news as normalized headline items. Uses feeds first when available, then source-aware headline extraction, and reports blocked or thin sources explicitly."
+	return "Fetch current news as normalized headline items. Uses feeds first when available, then source-aware headline extraction, and reports blocked or thin sources explicitly. max_items is capped at 100 per call; each source is protected by per-endpoint rate limits plus a circuit breaker."
 }
 func (t *newsFetchTool) DangerLevel() DangerLevel { return Safe }
 func (t *newsFetchTool) Effects() ToolEffects {
@@ -181,7 +182,7 @@ func (t *newsFetchTool) InputSchema() json.RawMessage {
 			"topic": {"type": "string", "description": "Optional topic hint such as general, politics, business, markets, or tech."},
 			"language": {"type": "string", "description": "Preferred language: en, fr, or any.", "default": "any"},
 			"sources": {"type": "array", "items": {"type": "string"}, "description": "Optional explicit source names or URLs. If omitted, sensible defaults are chosen for the region/topic."},
-			"max_items": {"type": "integer", "description": "Maximum number of headlines to return.", "default": 8},
+			"max_items": {"type": "integer", "description": "Maximum number of headlines to return (1-100, default 8).", "default": 8},
 			"fresh_hours": {"type": "integer", "description": "If positive, prefer items published within this many hours when timestamps are available.", "default": 24},
 			"fresh": {"type": "boolean", "description": "Force a fresh fetch, bypassing intermediate caches.", "default": false}
 		}
@@ -223,7 +224,8 @@ func (t *newsFetchTool) OutputSchema() json.RawMessage {
 						"source": {"type": "string"},
 						"url": {"type": "string"},
 						"error": {"type": "string"},
-						"status": {"type": "integer"}
+						"status": {"type": "integer"},
+						"alert": {"type": "object", "description": "Structured rate-limit or circuit-breaker alert when present."}
 					}
 				}
 			},
@@ -247,9 +249,7 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 	a.Region = normalizeNewsToken(a.Region, "general")
 	a.Topic = normalizeNewsToken(a.Topic, "general")
 	a.Language = normalizeNewsLanguage(a.Language)
-	if a.MaxItems <= 0 || a.MaxItems > 20 {
-		a.MaxItems = 8
-	}
+	a.MaxItems = clampExternalPageLimit(a.MaxItems, 8)
 	if a.FreshHours < 0 || a.FreshHours > 24*14 {
 		a.FreshHours = 24
 	}
@@ -358,15 +358,31 @@ func (t *newsFetchTool) Exec(ctx context.Context, call ToolCallContext, args jso
 
 func fetchNewsSource(ctx context.Context, call ToolCallContext, req newsSourceRequest, freshHours int, fresh bool) ([]newsItem, newsFailure) {
 	start := time.Now()
+	endpoint := newsSafetyEndpoint(req.URL)
+	if safetyErr := defaultExternalAPISafety.before(endpoint); safetyErr != nil {
+		return nil, newsFailure{Source: req.Name, URL: req.URL, Error: safetyErr.alert.Message, Alert: &safetyErr.alert}
+	}
 	resp, fail, err := fetchHTTP(ctx, call, start, req.URL, 256*1024, fresh)
 	if err != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, newsFailure{Source: req.Name, URL: req.URL, Error: err.Error()}
 	}
 	if fail != nil {
+		_ = defaultExternalAPISafety.after(endpoint, false, nil)
 		return nil, newsFailure{Source: req.Name, URL: req.URL, Error: fail.Output}
 	}
 
 	if resp.status < 200 || resp.status >= 400 {
+		cause := fmt.Errorf("news_fetch: %s returned HTTP %d: %s", req.Name, resp.status, classifyNewsHTTPFailure(resp))
+		if safetyErr := defaultExternalAPISafety.after(endpoint, isHTTPRateLimitStatus(resp.status), cause); safetyErr != nil {
+			return nil, newsFailure{
+				Source: req.Name,
+				URL:    req.URL,
+				Status: resp.status,
+				Error:  safetyErr.alert.Message,
+				Alert:  &safetyErr.alert,
+			}
+		}
 		return nil, newsFailure{
 			Source: req.Name,
 			URL:    req.URL,
@@ -374,6 +390,7 @@ func fetchNewsSource(ctx context.Context, call ToolCallContext, req newsSourceRe
 			Error:  classifyNewsHTTPFailure(resp),
 		}
 	}
+	_ = defaultExternalAPISafety.after(endpoint, false, nil)
 
 	bodyText := string(resp.body)
 	var (
