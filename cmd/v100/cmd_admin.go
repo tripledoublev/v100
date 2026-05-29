@@ -695,6 +695,12 @@ func exportCmd() *cobra.Command {
 					return fmt.Errorf("add snapshot: %w", err)
 				}
 			}
+			snapshotDir := filepath.Join(runDir, "snapshots")
+			if _, err := os.Stat(snapshotDir); err == nil {
+				if err := addPathToTar(tw, snapshotDir, "snapshots"); err != nil {
+					return fmt.Errorf("add snapshots: %w", err)
+				}
+			}
 
 			fmt.Printf("Run %s exported to: %s\n", ui.Info(runID), ui.OK(exportPath))
 			return nil
@@ -726,6 +732,54 @@ func addFileToTar(tw *tar.Writer, srcPath, tarPath string) error {
 
 	_, err = io.Copy(tw, f)
 	return err
+}
+
+func addPathToTar(tw *tar.Writer, srcPath, tarPath string) error {
+	return filepath.WalkDir(srcPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcPath, path)
+		if err != nil {
+			return err
+		}
+		name := tarPath
+		if rel != "." {
+			name = filepath.ToSlash(filepath.Join(tarPath, rel))
+		}
+		link := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+		header, err := tar.FileInfoHeader(info, link)
+		if err != nil {
+			return err
+		}
+		header.Name = name
+		if d.IsDir() && !strings.HasSuffix(header.Name, "/") {
+			header.Name += "/"
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		_, err = io.Copy(tw, f)
+		return err
+	})
 }
 
 func sandboxBackendNeedsDocker(cfg *config.Config) bool {

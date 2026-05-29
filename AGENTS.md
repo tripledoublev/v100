@@ -21,6 +21,12 @@ Use standard Go formatting: run `gofmt`/`go test` before submitting changes. Kee
 
 Place Go tests beside the package they cover using `*_test.go`. Use focused table tests for command flags, solver behavior, tool handling, and policy edge cases. Run `make test` for normal validation; use targeted runs such as `go test ./internal/core -run TestName` while iterating. Keep benchmark scenarios in TOML files under `benchmarks/`, `tests/benchmarks/`, or `dogfood/`.
 
+## Workspace Snapshots
+
+Workspace snapshots default to delta mode. Each snapshot stores a manifest plus content-addressed blobs under the run's `snapshots/content/` directory; unchanged files reuse prior digests and identical file contents are stored once. Full-copy mode remains available through `WorkspaceSnapshotOptions{Mode: SnapshotModeFullCopy}` for comparison and compatibility testing.
+
+Delta restore rebuilds the workspace from the manifest and blob store, so tests should verify restored workspace state instead of assuming every snapshot directory is a full materialized tree. `CaptureAsync` is available for non-preimage backups where callers can wait on the returned `Done` channel before restore; normal pre-mutation snapshots remain synchronous so the captured state is stable before a mutating tool runs.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses short imperative summaries, often with `feat:` or `fix:` prefixes, for example `fix: enable tool execution in synthesis tasks`. Keep commits narrowly scoped and mention affected subsystems when useful. Pull requests should include a concise description, the commands run, linked issues when applicable, and screenshots or terminal output for TUI-facing changes. Call out configuration, provider, network, or sandbox behavior changes explicitly.

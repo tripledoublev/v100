@@ -98,10 +98,11 @@ func TestCheckpointSnapshotSkipsCacheDirectories(t *testing.T) {
 	defer func() { _ = trace.Close() }()
 
 	snapshotRoot := filepath.Join(filepath.Dir(workspace), "snapshots")
+	snapshots := core.NewWorkspaceSnapshotManager(workspace, snapshotRoot)
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "cp-run", Dir: workspace, TraceFile: tracePath},
 		Trace:     trace,
-		Snapshots: core.NewWorkspaceSnapshotManager(workspace, snapshotRoot),
+		Snapshots: snapshots,
 	}
 
 	cp, err := loop.CheckpointWithContext(context.Background())
@@ -109,12 +110,20 @@ func TestCheckpointSnapshotSkipsCacheDirectories(t *testing.T) {
 		t.Fatalf("CheckpointWithContext returned error: %v", err)
 	}
 
-	snapPath := filepath.Join(snapshotRoot, cp.SnapshotID)
-	if _, err := os.Stat(filepath.Join(snapPath, ".cache")); !os.IsNotExist(err) {
-		t.Fatalf("expected .cache to be excluded from snapshot, stat err=%v", err)
+	if err := os.RemoveAll(filepath.Join(workspace, ".cache")); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(snapPath, "state.txt")); err != nil {
-		t.Fatalf("expected state.txt in snapshot: %v", err)
+	if err := os.Remove(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshots.Restore(context.Background(), core.RestoreRequest{SnapshotID: cp.SnapshotID}); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".cache")); !os.IsNotExist(err) {
+		t.Fatalf("expected .cache to be excluded from restored snapshot, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatalf("expected state.txt after restore: %v", err)
 	}
 }
 
@@ -140,10 +149,11 @@ func TestCheckpointSnapshotSkipsGoTelemetry(t *testing.T) {
 	defer func() { _ = trace.Close() }()
 
 	snapshotRoot := filepath.Join(filepath.Dir(workspace), "snapshots")
+	snapshots := core.NewWorkspaceSnapshotManager(workspace, snapshotRoot)
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "cp-run-tel", Dir: workspace, TraceFile: tracePath},
 		Trace:     trace,
-		Snapshots: core.NewWorkspaceSnapshotManager(workspace, snapshotRoot),
+		Snapshots: snapshots,
 	}
 
 	cp, err := loop.CheckpointWithContext(context.Background())
@@ -151,12 +161,20 @@ func TestCheckpointSnapshotSkipsGoTelemetry(t *testing.T) {
 		t.Fatalf("CheckpointWithContext returned error: %v", err)
 	}
 
-	snapPath := filepath.Join(snapshotRoot, cp.SnapshotID)
-	if _, err := os.Stat(filepath.Join(snapPath, ".config", "go", "telemetry")); !os.IsNotExist(err) {
-		t.Fatalf("expected .config/go/telemetry to be excluded from snapshot, stat err=%v", err)
+	if err := os.RemoveAll(filepath.Join(workspace, ".config")); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(snapPath, "state.txt")); err != nil {
-		t.Fatalf("expected state.txt in snapshot: %v", err)
+	if err := os.Remove(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshots.Restore(context.Background(), core.RestoreRequest{SnapshotID: cp.SnapshotID}); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".config", "go", "telemetry")); !os.IsNotExist(err) {
+		t.Fatalf("expected .config/go/telemetry to be excluded from restored snapshot, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatalf("expected state.txt after restore: %v", err)
 	}
 }
 
@@ -184,10 +202,11 @@ func TestCheckpointSnapshotHonorsV100Ignore(t *testing.T) {
 	defer func() { _ = trace.Close() }()
 
 	snapshotRoot := filepath.Join(filepath.Dir(workspace), "snapshots")
+	snapshots := core.NewWorkspaceSnapshotManager(workspace, snapshotRoot)
 	loop := &core.Loop{
 		Run:       &core.Run{ID: "cp-run-ignore", Dir: workspace, TraceFile: tracePath},
 		Trace:     trace,
-		Snapshots: core.NewWorkspaceSnapshotManager(workspace, snapshotRoot),
+		Snapshots: snapshots,
 	}
 
 	cp, err := loop.CheckpointWithContext(context.Background())
@@ -195,12 +214,20 @@ func TestCheckpointSnapshotHonorsV100Ignore(t *testing.T) {
 		t.Fatalf("CheckpointWithContext returned error: %v", err)
 	}
 
-	snapPath := filepath.Join(snapshotRoot, cp.SnapshotID)
-	if _, err := os.Stat(filepath.Join(snapPath, "tmp")); !os.IsNotExist(err) {
-		t.Fatalf("expected tmp to be excluded from snapshot by .v100ignore, stat err=%v", err)
+	if err := os.RemoveAll(filepath.Join(workspace, "tmp")); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(snapPath, "state.txt")); err != nil {
-		t.Fatalf("expected state.txt in snapshot: %v", err)
+	if err := os.Remove(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshots.Restore(context.Background(), core.RestoreRequest{SnapshotID: cp.SnapshotID}); err != nil {
+		t.Fatalf("Restore returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "tmp")); !os.IsNotExist(err) {
+		t.Fatalf("expected tmp to be excluded from restored snapshot by .v100ignore, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "state.txt")); err != nil {
+		t.Fatalf("expected state.txt after restore: %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -56,6 +57,13 @@ func (NoopSnapshotManager) Capture(_ context.Context, req SnapshotRequest) (Snap
 	return SnapshotResult{ID: id, Method: "noop"}, nil
 }
 
+func (NoopSnapshotManager) CaptureAsync(_ context.Context, req SnapshotRequest) (AsyncSnapshot, error) {
+	result, err := NoopSnapshotManager{}.Capture(context.Background(), req)
+	done := make(chan error)
+	close(done)
+	return AsyncSnapshot{Result: result, Done: done}, err
+}
+
 func (NoopSnapshotManager) Restore(_ context.Context, req RestoreRequest) (RestoreResult, error) {
 	id := req.SnapshotID
 	if id == "" {
@@ -64,29 +72,118 @@ func (NoopSnapshotManager) Restore(_ context.Context, req RestoreRequest) (Resto
 	return RestoreResult{SnapshotID: id, Method: "noop"}, nil
 }
 
-// WorkspaceSnapshotManager stores full-copy snapshots of a workspace tree.
+// SnapshotMode selects how WorkspaceSnapshotManager persists workspace state.
+type SnapshotMode string
+
+const (
+	SnapshotModeDelta    SnapshotMode = "delta"
+	SnapshotModeFullCopy SnapshotMode = "full_copy"
+)
+
+// WorkspaceSnapshotOptions controls snapshot storage behavior.
+type WorkspaceSnapshotOptions struct {
+	Mode SnapshotMode
+}
+
+// AsyncSnapshot captures the result handle and completion channel for a background snapshot.
+type AsyncSnapshot struct {
+	Result SnapshotResult
+	Done   <-chan error
+}
+
+// WorkspaceSnapshotManager stores restorable snapshots of a workspace tree.
 type WorkspaceSnapshotManager struct {
 	WorkspaceDir string
 	SnapshotRoot string
+	Options      WorkspaceSnapshotOptions
+	mu           sync.Mutex
+	pendingMu    sync.Mutex
+	pending      map[string]<-chan error
+	lastManifest *snapshotManifest
 	seq          uint64
 }
 
 func NewWorkspaceSnapshotManager(workspaceDir, snapshotRoot string) *WorkspaceSnapshotManager {
+	return NewWorkspaceSnapshotManagerWithOptions(workspaceDir, snapshotRoot, WorkspaceSnapshotOptions{
+		Mode: SnapshotModeDelta,
+	})
+}
+
+func NewWorkspaceSnapshotManagerWithOptions(workspaceDir, snapshotRoot string, opts WorkspaceSnapshotOptions) *WorkspaceSnapshotManager {
+	if opts.Mode == "" {
+		opts.Mode = SnapshotModeDelta
+	}
 	return &WorkspaceSnapshotManager{
 		WorkspaceDir: filepath.Clean(workspaceDir),
 		SnapshotRoot: filepath.Clean(snapshotRoot),
+		Options:      opts,
 	}
 }
 
-func (m *WorkspaceSnapshotManager) Capture(_ context.Context, req SnapshotRequest) (SnapshotResult, error) {
-	if strings.TrimSpace(m.WorkspaceDir) == "" || strings.TrimSpace(m.SnapshotRoot) == "" {
-		return SnapshotResult{}, fmt.Errorf("workspace snapshot: workspace and snapshot root are required")
+func (m *WorkspaceSnapshotManager) Capture(ctx context.Context, req SnapshotRequest) (SnapshotResult, error) {
+	id := m.nextSnapshotID(req)
+	return m.captureWithID(ctx, req, id)
+}
+
+// CaptureAsync starts a snapshot in the background. It is intended for non-preimage
+// backups where callers can tolerate waiting on Done before restore.
+func (m *WorkspaceSnapshotManager) CaptureAsync(ctx context.Context, req SnapshotRequest) (AsyncSnapshot, error) {
+	if err := m.validate(); err != nil {
+		return AsyncSnapshot{}, err
+	}
+	id := m.nextSnapshotID(req)
+	done := make(chan error, 1)
+	m.registerPendingSnapshot(id, done)
+	go func() {
+		_, err := m.captureWithID(ctx, req, id)
+		done <- err
+		close(done)
+		m.clearPendingSnapshot(id, done)
+	}()
+	return AsyncSnapshot{
+		Result: SnapshotResult{ID: id, Method: string(m.snapshotMode()) + "_async"},
+		Done:   done,
+	}, nil
+}
+
+func (m *WorkspaceSnapshotManager) captureWithID(ctx context.Context, req SnapshotRequest, id string) (SnapshotResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.validate(); err != nil {
+		return SnapshotResult{}, err
+	}
+	if ctx.Err() != nil {
+		return SnapshotResult{}, ctx.Err()
 	}
 	if err := os.MkdirAll(m.SnapshotRoot, 0o755); err != nil {
 		return SnapshotResult{}, fmt.Errorf("workspace snapshot: mkdir root: %w", err)
 	}
+	if m.snapshotMode() == SnapshotModeFullCopy {
+		return m.captureFullCopy(ctx, id)
+	}
+	return m.captureDelta(ctx, id)
+}
 
-	id := m.nextSnapshotID(req)
+func (m *WorkspaceSnapshotManager) validate() error {
+	if strings.TrimSpace(m.WorkspaceDir) == "" || strings.TrimSpace(m.SnapshotRoot) == "" {
+		return fmt.Errorf("workspace snapshot: workspace and snapshot root are required")
+	}
+	return nil
+}
+
+func (m *WorkspaceSnapshotManager) snapshotMode() SnapshotMode {
+	switch m.Options.Mode {
+	case SnapshotModeFullCopy:
+		return SnapshotModeFullCopy
+	default:
+		return SnapshotModeDelta
+	}
+}
+
+func (m *WorkspaceSnapshotManager) captureFullCopy(ctx context.Context, id string) (SnapshotResult, error) {
+	if ctx.Err() != nil {
+		return SnapshotResult{}, ctx.Err()
+	}
 	dst := filepath.Join(m.SnapshotRoot, id)
 	if err := os.RemoveAll(dst); err != nil {
 		return SnapshotResult{}, fmt.Errorf("workspace snapshot: clear %s: %w", dst, err)
@@ -100,13 +197,28 @@ func (m *WorkspaceSnapshotManager) Capture(_ context.Context, req SnapshotReques
 	return SnapshotResult{ID: id, Method: "full_copy"}, nil
 }
 
-func (m *WorkspaceSnapshotManager) Restore(_ context.Context, req RestoreRequest) (RestoreResult, error) {
+func (m *WorkspaceSnapshotManager) Restore(ctx context.Context, req RestoreRequest) (RestoreResult, error) {
 	if strings.TrimSpace(req.SnapshotID) == "" {
 		return RestoreResult{}, fmt.Errorf("workspace snapshot restore: snapshot id is required")
 	}
+	if err := m.waitPendingSnapshot(ctx, req.SnapshotID); err != nil {
+		return RestoreResult{}, fmt.Errorf("workspace snapshot restore: wait for pending snapshot %s: %w", req.SnapshotID, err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	src := filepath.Join(m.SnapshotRoot, req.SnapshotID)
 	if _, err := os.Stat(src); err != nil {
 		return RestoreResult{}, fmt.Errorf("workspace snapshot restore: stat %s: %w", src, err)
+	}
+	if isDeltaSnapshotDir(src) {
+		manifest, err := readSnapshotManifest(src)
+		if err != nil {
+			return RestoreResult{}, fmt.Errorf("workspace snapshot restore: read manifest %s: %w", req.SnapshotID, err)
+		}
+		if err := m.restoreDelta(ctx, manifest); err != nil {
+			return RestoreResult{}, fmt.Errorf("workspace snapshot restore: restore %s: %w", req.SnapshotID, err)
+		}
+		return RestoreResult{SnapshotID: req.SnapshotID, Method: manifest.Method}, nil
 	}
 	if err := os.MkdirAll(m.WorkspaceDir, 0o755); err != nil {
 		return RestoreResult{}, fmt.Errorf("workspace snapshot restore: mkdir workspace: %w", err)
@@ -118,6 +230,39 @@ func (m *WorkspaceSnapshotManager) Restore(_ context.Context, req RestoreRequest
 		return RestoreResult{}, fmt.Errorf("workspace snapshot restore: restore %s: %w", req.SnapshotID, err)
 	}
 	return RestoreResult{SnapshotID: req.SnapshotID, Method: "full_copy"}, nil
+}
+
+func (m *WorkspaceSnapshotManager) registerPendingSnapshot(id string, done <-chan error) {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+	if m.pending == nil {
+		m.pending = map[string]<-chan error{}
+	}
+	m.pending[id] = done
+}
+
+func (m *WorkspaceSnapshotManager) clearPendingSnapshot(id string, done <-chan error) {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+	if m.pending[id] == done {
+		delete(m.pending, id)
+	}
+}
+
+func (m *WorkspaceSnapshotManager) waitPendingSnapshot(ctx context.Context, id string) error {
+	m.pendingMu.Lock()
+	done := m.pending[id]
+	m.pendingMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case err := <-done:
+		m.clearPendingSnapshot(id, done)
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *WorkspaceSnapshotManager) nextSnapshotID(req SnapshotRequest) string {
