@@ -1,6 +1,9 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +41,46 @@ func TestExecutorResourceStatusLineReportsResources(t *testing.T) {
 	}
 	if unhealthy || !unavailable || !strings.Contains(line, "Executor resources: unavailable") {
 		t.Fatalf("resource status = (%q, unhealthy=%v, unavailable=%v), want unavailable only", line, unhealthy, unavailable)
+	}
+}
+
+func TestAddPathToTarIncludesSnapshotTree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "snap-1", "content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "snap-1", ".v100snapshot.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "snap-1", "content", "blob"), []byte("data"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := addPathToTar(tw, root, "snapshots"); err != nil {
+		t.Fatalf("addPathToTar returned error: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[string]bool{}
+	tr := tar.NewReader(&buf)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[header.Name] = true
+	}
+	for _, want := range []string{"snapshots/", "snapshots/snap-1/", "snapshots/snap-1/.v100snapshot.json", "snapshots/snap-1/content/blob"} {
+		if !seen[want] {
+			t.Fatalf("tar missing %q; seen=%v", want, seen)
+		}
 	}
 }
 

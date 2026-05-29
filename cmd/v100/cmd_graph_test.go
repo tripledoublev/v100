@@ -61,6 +61,35 @@ func TestBuildTraceDAGMarksSnapshotAndRestore(t *testing.T) {
 	}
 }
 
+func TestSnapshotTreeSummaryReadsDeltaManifest(t *testing.T) {
+	runDir := t.TempDir()
+	snapshotDir := filepath.Join(runDir, "snapshots", "snap-1")
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"version": 1,
+		"method":  string(core.SnapshotModeDelta),
+		"dirs":    []map[string]any{{"path": "dir"}},
+		"links":   []map[string]any{{"path": "link.txt", "target": "target.txt"}},
+		"files":   []map[string]any{{"path": "dir/state.txt", "size": 5}},
+	}
+	b, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, ".v100snapshot.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	summary := snapshotTreeSummary(runDir, "snap-1")
+	for _, want := range []string{"dir/", "link.txt -> target.txt", "dir/state.txt  5 bytes"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q in:\n%s", want, summary)
+		}
+	}
+}
+
 func TestRenderTraceDAGHTMLContainsInteractivePanel(t *testing.T) {
 	doc, err := renderTraceDAGHTML("run-1", t.TempDir(), []core.Event{
 		graphEvent(t, core.EventRunStart, "s1", "e1", core.RunStartPayload{Provider: "test"}),

@@ -70,6 +70,22 @@ type dagEdge struct {
 	Kind string `json:"kind"`
 }
 
+type graphSnapshotManifest struct {
+	Version int `json:"version"`
+	Dirs    []struct {
+		Path string `json:"path"`
+	} `json:"dirs,omitempty"`
+	Files []struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	} `json:"files,omitempty"`
+	Links []struct {
+		Path   string `json:"path"`
+		Target string `json:"target"`
+	} `json:"links,omitempty"`
+	Method string `json:"method"`
+}
+
 func renderTraceDAGHTML(runID, runDir string, events []core.Event) (string, error) {
 	nodes, edges := buildTraceDAG(runDir, events)
 	payload, err := json.Marshal(struct {
@@ -157,6 +173,14 @@ func snapshotTreeSummary(runDir, snapshotID string) string {
 		return "No sandbox snapshot is associated with this point in the trace."
 	}
 	root := filepath.Join(runDir, "snapshots", snapshotID)
+	if entries, ok, err := collectDeltaSnapshotEntries(root, 250); err != nil {
+		return fmt.Sprintf("Snapshot %s is not available on disk: %v", snapshotID, err)
+	} else if ok {
+		if len(entries) == 0 {
+			return fmt.Sprintf("Snapshot %s is empty.", snapshotID)
+		}
+		return fmt.Sprintf("snapshot=%s\n%s", snapshotID, strings.Join(entries, "\n"))
+	}
 	entries, err := collectSnapshotEntries(root, 250)
 	if err != nil {
 		return fmt.Sprintf("Snapshot %s is not available on disk: %v", snapshotID, err)
@@ -165,6 +189,41 @@ func snapshotTreeSummary(runDir, snapshotID string) string {
 		return fmt.Sprintf("Snapshot %s is empty.", snapshotID)
 	}
 	return fmt.Sprintf("snapshot=%s\n%s", snapshotID, strings.Join(entries, "\n"))
+}
+
+func collectDeltaSnapshotEntries(root string, limit int) ([]string, bool, error) {
+	b, err := os.ReadFile(filepath.Join(root, ".v100snapshot.json"))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var manifest graphSnapshotManifest
+	if err := json.Unmarshal(b, &manifest); err != nil || manifest.Version == 0 || manifest.Method != string(core.SnapshotModeDelta) {
+		return nil, false, nil
+	}
+	entries := make([]string, 0, len(manifest.Dirs)+len(manifest.Files)+len(manifest.Links))
+	for _, dir := range manifest.Dirs {
+		if len(entries) >= limit {
+			break
+		}
+		entries = append(entries, strings.TrimSuffix(dir.Path, "/")+"/")
+	}
+	for _, link := range manifest.Links {
+		if len(entries) >= limit {
+			break
+		}
+		entries = append(entries, fmt.Sprintf("%s -> %s", link.Path, link.Target))
+	}
+	for _, file := range manifest.Files {
+		if len(entries) >= limit {
+			break
+		}
+		entries = append(entries, fmt.Sprintf("%s  %d bytes", file.Path, file.Size))
+	}
+	sort.Strings(entries)
+	return entries, true, nil
 }
 
 func collectSnapshotEntries(root string, limit int) ([]string, error) {
