@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -241,8 +243,12 @@ func TestVectorStore_EvictsByScopeAndStoreSize(t *testing.T) {
 			t.Fatalf("size Add(%d) error = %v", i, err)
 		}
 	}
-	if int64(s.encodedSize()) > s.options().MaxStoreBytes {
-		t.Fatalf("encoded size = %d, max = %d", s.encodedSize(), s.options().MaxStoreBytes)
+	info, err := os.Stat(s.runPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > s.options().MaxStoreBytes {
+		t.Fatalf("persisted size = %d, max = %d", info.Size(), s.options().MaxStoreBytes)
 	}
 	if len(s.items) == 0 || s.items[len(s.items)-1].ID != "h" {
 		t.Fatalf("size eviction should keep newest item, got %+v", s.items)
@@ -264,6 +270,50 @@ func TestVectorStore_StartCompactionPrunesInBackground(t *testing.T) {
 	<-done
 	if len(s.items) != 1 || s.items[0].ID != "live" {
 		t.Fatalf("compaction did not prune expired item: %+v", s.items)
+	}
+}
+
+func TestVectorStore_ConcurrentCompactionOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := NewWorkspaceVectorStore(tmpDir).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    -1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := s.StartCompaction(ctx, time.Millisecond)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.Add(MemoryItem{
+				ID:      fmt.Sprintf("item-%02d", i),
+				Content: fmt.Sprintf("memory %02d", i),
+				TS:      time.Now().UTC().Add(time.Duration(i) * time.Millisecond),
+			}); err != nil {
+				t.Errorf("Add(%d) error = %v", i, err)
+			}
+			_ = s.Items()
+			_ = s.Search([]float32{1, 2, 3}, 3)
+		}()
+	}
+	wg.Wait()
+	cancel()
+	<-done
+
+	reloaded := NewWorkspaceVectorStore(tmpDir).WithOptions(VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    -1,
+	})
+	if err := reloaded.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Items()) != 40 {
+		t.Fatalf("persisted items = %d, want 40", len(reloaded.Items()))
 	}
 }
 

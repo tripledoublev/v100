@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -27,10 +28,13 @@ const (
 	DefaultVectorStoreTTL              = 7 * 24 * time.Hour
 	DefaultVectorStoreMaxItemsPerScope = 1000
 	DefaultVectorStoreMaxBytes         = 4 * 1024 * 1024
+	DefaultVectorStoreCompactionEvery  = time.Minute
 	duplicateEmbeddingThreshold        = 0.999999
 )
 
 var ErrDuplicateEmbedding = errors.New("duplicate memory embedding")
+
+var vectorStoreFileLocks sync.Map
 
 // VectorStoreOptions bounds a vector store's lifecycle and disk footprint.
 type VectorStoreOptions struct {
@@ -63,6 +67,7 @@ type SearchResult struct {
 
 // VectorStore is a simple, local vector database for agent runs.
 type VectorStore struct {
+	mu      sync.RWMutex
 	runID   string
 	runPath string
 	items   []MemoryItem
@@ -100,13 +105,27 @@ func NewNamedVectorStore(workspaceDir, name string) *VectorStore {
 
 // WithOptions returns a copy of the store using normalized lifecycle options.
 func (s *VectorStore) WithOptions(opts VectorStoreOptions) *VectorStore {
-	cp := *s
-	cp.opts = normalizeOptions(opts)
-	return &cp
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return &VectorStore{
+		runID:   s.runID,
+		runPath: s.runPath,
+		items:   append([]MemoryItem(nil), s.items...),
+		opts:    normalizeOptions(opts),
+	}
 }
 
 // Load reads existing vectors from disk.
 func (s *VectorStore) Load() error {
+	unlock := s.lockFile()
+	defer unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadLocked()
+}
+
+func (s *VectorStore) loadLocked() error {
 	data, err := os.ReadFile(s.runPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -117,13 +136,24 @@ func (s *VectorStore) Load() error {
 	if err := json.Unmarshal(data, &s.items); err != nil {
 		return err
 	}
-	s.Prune()
+	if s.pruneExpiredLocked(time.Now()) > 0 {
+		return s.saveLocked()
+	}
 	return nil
 }
 
 // Save persists the current state to disk.
 func (s *VectorStore) Save() error {
-	s.enforceLimits()
+	unlock := s.lockFile()
+	defer unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enforceLimitsLocked()
+	return s.saveLocked()
+}
+
+func (s *VectorStore) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.runPath), 0755); err != nil {
 		return err
 	}
@@ -137,6 +167,10 @@ func (s *VectorStore) Save() error {
 // HasTag reports whether any item in the store has the given tag key=value pair.
 // Used for deduplication at indexing time.
 func (s *VectorStore) HasTag(key, value string) bool {
+	s.Prune()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	now := time.Now()
 	for _, item := range s.items {
 		if item.Expired(now) {
@@ -151,14 +185,22 @@ func (s *VectorStore) HasTag(key, value string) bool {
 
 // Add appends a new item and saves.
 func (s *VectorStore) Add(item MemoryItem) error {
-	s.Prune()
+	unlock := s.lockFile()
+	defer unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		return err
+	}
+	s.pruneExpiredLocked(time.Now())
 	item = s.prepareItem(item)
 	if duplicate := s.duplicateEmbedding(item); duplicate != nil {
 		return fmt.Errorf("%w: %s", ErrDuplicateEmbedding, duplicate.ID)
 	}
 	s.items = append(s.items, item)
-	s.enforceLimits()
-	return s.Save()
+	s.enforceLimitsLocked()
+	return s.saveLocked()
 }
 
 // Expired reports whether the item should no longer be surfaced.
@@ -169,6 +211,9 @@ func (m MemoryItem) Expired(now time.Time) bool {
 // Items returns a copy of the currently loaded items.
 func (s *VectorStore) Items() []MemoryItem {
 	s.Prune()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	now := time.Now()
 	out := make([]MemoryItem, 0, len(s.items))
 	for _, item := range s.items {
@@ -182,6 +227,14 @@ func (s *VectorStore) Items() []MemoryItem {
 
 // Remove deletes an item by ID and saves.
 func (s *VectorStore) Remove(id string) error {
+	unlock := s.lockFile()
+	defer unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		return err
+	}
 	kept := s.items[:0]
 	found := false
 	for _, item := range s.items {
@@ -195,12 +248,26 @@ func (s *VectorStore) Remove(id string) error {
 		return fmt.Errorf("memory entry %q not found", id)
 	}
 	s.items = append([]MemoryItem(nil), kept...)
-	return s.Save()
+	s.enforceLimitsLocked()
+	return s.saveLocked()
 }
 
 // Prune removes expired items and saves if any were removed.
 func (s *VectorStore) Prune() int {
-	now := time.Now()
+	unlock := s.lockFile()
+	defer unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.loadLocked()
+	removed := s.pruneExpiredLocked(time.Now())
+	if removed > 0 {
+		_ = s.saveLocked()
+	}
+	return removed
+}
+
+func (s *VectorStore) pruneExpiredLocked(now time.Time) int {
 	kept := s.items[:0]
 	removed := 0
 	for _, item := range s.items {
@@ -212,7 +279,6 @@ func (s *VectorStore) Prune() int {
 	}
 	if removed > 0 {
 		s.items = append([]MemoryItem(nil), kept...)
-		_ = s.Save()
 	}
 	return removed
 }
@@ -221,10 +287,11 @@ func (s *VectorStore) Prune() int {
 func (s *VectorStore) StartCompaction(ctx context.Context, interval time.Duration) <-chan struct{} {
 	done := make(chan struct{})
 	if interval <= 0 {
-		interval = time.Minute
+		interval = DefaultVectorStoreCompactionEvery
 	}
 	go func() {
 		defer close(done)
+		s.Prune()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -241,11 +308,17 @@ func (s *VectorStore) StartCompaction(ctx context.Context, interval time.Duratio
 
 // Search returns top-k items sorted by cosine similarity to the query embedding.
 func (s *VectorStore) Search(query []float32, k int) []SearchResult {
-	if k <= 0 || len(s.items) == 0 {
+	if k <= 0 {
 		return nil
 	}
 
 	s.Prune()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.items) == 0 {
+		return nil
+	}
+
 	results := make([]SearchResult, 0, len(s.items))
 	now := time.Now()
 	for _, item := range s.items {
@@ -300,8 +373,7 @@ func (s *VectorStore) duplicateEmbedding(item MemoryItem) *MemoryItem {
 	return nil
 }
 
-func (s *VectorStore) enforceLimits() {
-	s.Prune()
+func (s *VectorStore) enforceLimitsLocked() {
 	opts := s.options()
 	if opts.MaxItemsPerScope > 0 {
 		s.evictByScope(opts.MaxItemsPerScope)
@@ -335,7 +407,7 @@ func (s *VectorStore) evictByScope(maxItems int) {
 }
 
 func (s *VectorStore) evictBySize(maxBytes int64) {
-	for int64(s.encodedSize()) > maxBytes && len(s.items) > 0 {
+	for int64(s.encodedSizeLocked()) > maxBytes && len(s.items) > 0 {
 		oldest := 0
 		for i := 1; i < len(s.items); i++ {
 			if s.items[i].TS.Before(s.items[oldest].TS) {
@@ -346,8 +418,8 @@ func (s *VectorStore) evictBySize(maxBytes int64) {
 	}
 }
 
-func (s *VectorStore) encodedSize() int {
-	data, err := json.Marshal(s.items)
+func (s *VectorStore) encodedSizeLocked() int {
+	data, err := json.MarshalIndent(s.items, "", "  ")
 	if err != nil {
 		return 0
 	}
@@ -367,6 +439,13 @@ func (s *VectorStore) removeIndexes(remove map[int]struct{}) {
 
 func (s *VectorStore) options() VectorStoreOptions {
 	return normalizeOptions(s.opts)
+}
+
+func (s *VectorStore) lockFile() func() {
+	lockAny, _ := vectorStoreFileLocks.LoadOrStore(filepath.Clean(s.runPath), &sync.Mutex{})
+	lock := lockAny.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
 }
 
 func normalizeOptions(opts VectorStoreOptions) VectorStoreOptions {

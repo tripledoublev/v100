@@ -34,7 +34,7 @@ Do not commit secrets from `.env`, provider credentials, traces, or local run ar
 Workspace blackboard vectors live in `blackboard.vectors.json`. New memory
 items receive a default 7-day TTL unless an explicit `expires_at` is provided.
 The vector store prunes expired entries on load, search, item listing, and
-background compaction. It also rejects duplicate embeddings, evicts oldest
+background compaction started for agent steps. It also rejects duplicate embeddings, evicts oldest
 items beyond the per-scope cap, and trims oldest records when the JSON store
 exceeds the configured size cap. Use `VectorStore.WithOptions` in tests or
 specialized stores when a different TTL, per-scope item cap, or store-size cap

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,6 +85,22 @@ func (l *Loop) memoryWorkspaceDir() string {
 		return l.Run.Dir
 	}
 	return ""
+}
+
+func (l *Loop) startMemoryCompaction(ctx context.Context) func() {
+	if l.Policy == nil || strings.EqualFold(strings.TrimSpace(l.Policy.MemoryMode), "off") {
+		return func() {}
+	}
+	workspaceDir := l.memoryWorkspaceDir()
+	if workspaceDir == "" {
+		return func() {}
+	}
+	compactionCtx, cancel := context.WithCancel(ctx)
+	done := memory.NewWorkspaceVectorStore(workspaceDir).StartCompaction(compactionCtx, memory.DefaultVectorStoreCompactionEvery)
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func (l *Loop) memoryAlwaysEnabled() bool {

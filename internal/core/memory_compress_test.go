@@ -877,6 +877,62 @@ func TestMemoryRetrievalIncludesWorkspaceVectorEntries(t *testing.T) {
 	t.Fatal("expected workspace vector memory in provider request")
 }
 
+func TestLoopCompactsWorkspaceMemoryDuringStep(t *testing.T) {
+	dir := t.TempDir()
+	past := time.Now().Add(-time.Hour)
+	store := memory.NewWorkspaceVectorStore(dir).WithOptions(memory.VectorStoreOptions{
+		DefaultTTL:       -1,
+		MaxItemsPerScope: -1,
+		MaxStoreBytes:    -1,
+	})
+	if err := store.Add(memory.MemoryItem{
+		ID:        "expired",
+		Content:   "expired memory",
+		ExpiresAt: &past,
+		TS:        time.Now().Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &capturingProvider{
+		responses: []providers.CompleteResponse{{AssistantText: "ok"}},
+	}
+	tracePath := filepath.Join(dir, "trace.jsonl")
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	pol := policy.Default()
+	pol.MemoryMode = "auto"
+	loop := &core.Loop{
+		Run:       &core.Run{ID: "t", Dir: dir, TraceFile: tracePath},
+		Provider:  prov,
+		Tools:     tools.NewRegistry(nil),
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: 100_000}),
+		ConfirmFn: func(_, _ string) bool { return true },
+	}
+
+	if err := loop.Step(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "blackboard.vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted []memory.MemoryItem
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted) != 0 {
+		t.Fatalf("expired memories persisted after step compaction: %+v", persisted)
+	}
+}
+
 func TestMemorySkippedInAutoModeWhenTurnLooksUnrelated(t *testing.T) {
 	dir := t.TempDir()
 	memPath := filepath.Join(dir, "MEMORY.md")
