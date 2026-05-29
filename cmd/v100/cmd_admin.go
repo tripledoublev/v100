@@ -19,6 +19,7 @@ import (
 
 	"github.com/tripledoublev/v100/internal/auth"
 	"github.com/tripledoublev/v100/internal/config"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
 	"github.com/tripledoublev/v100/internal/tools"
@@ -388,6 +389,15 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			} else {
 				fmt.Println(ui.OK("Sandbox backend: host"))
 			}
+			line, unhealthy, unavailable := executorResourceStatusLine()
+			if unhealthy {
+				fmt.Println(ui.Fail(line))
+				ok = false
+			} else if unavailable {
+				fmt.Println(ui.Warn(line))
+			} else {
+				fmt.Println(ui.OK(line))
+			}
 
 			printOAuthConfigStatus := func(name string, err error) {
 				credsPath := auth.DefaultCredentialsPath()
@@ -613,6 +623,28 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func executorResourceStatusLine() (string, bool, bool) {
+	stats, err := executor.CurrentResourceStats()
+	if err != nil {
+		return "Executor resources: unavailable (" + err.Error() + ")", false, true
+	}
+	line := fmt.Sprintf(
+		"Executor resources: open_fds=%d subprocesses=%d zombies=%d process_pool=%d/%d",
+		stats.OpenFDs,
+		stats.RunningSubprocesses,
+		stats.ZombieSubprocesses,
+		stats.ProcessPoolUsed,
+		stats.ProcessPoolLimit,
+	)
+	if stats.FDSoftLimit > 0 {
+		line += fmt.Sprintf(" fd_soft_limit=%d", stats.FDSoftLimit)
+	}
+	if warning := stats.ExhaustionWarning(); warning != "" {
+		return line + " (" + warning + ")", true, false
+	}
+	return line, false, false
 }
 
 func exportCmd() *cobra.Command {

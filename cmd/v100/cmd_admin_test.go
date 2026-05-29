@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,24 @@ func TestSandboxBackendNeedsDocker(t *testing.T) {
 	cfg.Sandbox.Backend = "docker"
 	if !sandboxBackendNeedsDocker(cfg) {
 		t.Fatal("expected docker backend to require docker")
+	}
+}
+
+func TestExecutorResourceStatusLineReportsResources(t *testing.T) {
+	line, unhealthy, unavailable := executorResourceStatusLine()
+	if runtime.GOOS == "linux" {
+		if unavailable {
+			t.Fatalf("resource status reported unavailable: %q", line)
+		}
+		for _, want := range []string{"Executor resources:", "open_fds=", "subprocesses=", "zombies=", "process_pool=", "fd_soft_limit="} {
+			if !strings.Contains(line, want) {
+				t.Fatalf("resource status line missing %q in %q", want, line)
+			}
+		}
+		return
+	}
+	if unhealthy || !unavailable || !strings.Contains(line, "Executor resources: unavailable") {
+		t.Fatalf("resource status = (%q, unhealthy=%v, unavailable=%v), want unavailable only", line, unhealthy, unavailable)
 	}
 }
 
