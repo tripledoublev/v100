@@ -183,15 +183,13 @@ func configInitCmd() *cobra.Command {
 			credsPath := auth.DefaultCredentialsPath()
 			switch _, err := os.Stat(credsPath); {
 			case err == nil:
-				fmt.Println(ui.OK("OAuth client config found at " + credsPath))
+				fmt.Println(ui.Warn("Plaintext OAuth fallback exists at " + credsPath))
+				fmt.Println(ui.Dim("Prefer env vars or 1Password/pass/system keyring for OAuth client secrets."))
 			case os.IsNotExist(err):
-				if err := os.MkdirAll(filepath.Dir(credsPath), 0o700); err != nil {
-					return err
-				}
-				if err := os.WriteFile(credsPath, []byte(auth.CredentialsTemplate()), 0o600); err != nil {
-					return err
-				}
-				fmt.Println(ui.OK("OAuth client template written to " + credsPath))
+				fmt.Println(ui.OK("OAuth client secrets not written to disk by default"))
+				fmt.Println(ui.Dim("Set V100_CODEX_CLIENT_ID, V100_GEMINI_CLIENT_ID/V100_GEMINI_CLIENT_SECRET, or V100_MINIMAX_CLIENT_ID."))
+				fmt.Println(ui.Dim("Secret manager keys: oauth_codex_client_id, oauth_gemini_client_id, oauth_gemini_client_secret, oauth_minimax_client_id."))
+				fmt.Println(ui.Dim("Plaintext fallback remains supported with a warning at " + credsPath))
 			default:
 				return err
 			}
@@ -392,11 +390,12 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 			printOAuthConfigStatus := func(name string, err error) {
 				credsPath := auth.DefaultCredentialsPath()
 				if err == nil {
-					fmt.Println(ui.OK(fmt.Sprintf("Provider %s: OAuth client config at %s", name, credsPath)))
+					fmt.Println(ui.OK(fmt.Sprintf("Provider %s: OAuth client secrets resolved", name)))
 					return
 				}
-				fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: OAuth client config invalid at %s", name, credsPath)))
+				fmt.Println(ui.Fail(fmt.Sprintf("Provider %s: OAuth client secrets missing", name)))
 				fmt.Println(ui.Dim("  " + strings.ReplaceAll(err.Error(), "\n", "\n  ")))
+				fmt.Println(ui.Dim("  Plaintext fallback path: " + credsPath))
 				ok = false
 			}
 
@@ -508,21 +507,17 @@ func doctorCmd(cfgPath *string) *cobra.Command {
 					if authEnv == "" {
 						authEnv = "ANTHROPIC_API_KEY"
 					}
-					// Check stored key first, then env var
 					var anthropicKey string
 					tokenPath := auth.DefaultClaudeTokenPath()
-					if ct, err := auth.LoadClaude(tokenPath); err == nil && ct.Valid() {
+					if ct, err := auth.LoadClaudeWithEnv(tokenPath, authEnv); err == nil && ct.Valid() {
 						hint := ct.APIKey
 						anthropicKey = ct.APIKey
 						if len(hint) > 12 {
 							hint = hint[:8] + "..." + hint[len(hint)-4:]
 						}
-						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: stored key at %s (%s)", name, tokenPath, hint)))
-					} else if key := os.Getenv(authEnv); key != "" {
-						anthropicKey = key
-						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: %s set (%d chars)", name, authEnv, len(key))))
+						fmt.Println(ui.OK(fmt.Sprintf("Provider %s: API key resolved (%s)", name, hint)))
 					} else {
-						providerIssue(name, fmt.Sprintf("Provider %s: no key — run 'v100 login --provider anthropic' or set %s", name, authEnv))
+						providerIssue(name, fmt.Sprintf("Provider %s: no key — set %s, store provider_anthropic_api_key in a secret manager, or run 'v100 login --provider anthropic'", name, authEnv))
 					}
 					if anthropicKey != "" {
 						pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
