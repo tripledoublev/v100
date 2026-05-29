@@ -42,7 +42,7 @@ func (c *Conn) ReadMessage() ([]byte, error) {
 // SendResponse sends a JSON-RPC response.
 func (c *Conn) SendResponse(id any, result any) error {
 	res := Response{
-		JSONRPC: "2.0",
+		JSONRPC: JSONRPCVersion,
 		ID:      id,
 	}
 	if result != nil {
@@ -58,7 +58,7 @@ func (c *Conn) SendResponse(id any, result any) error {
 // SendError sends a JSON-RPC error response.
 func (c *Conn) SendError(id any, code int, message string) error {
 	res := Response{
-		JSONRPC: "2.0",
+		JSONRPC: JSONRPCVersion,
 		ID:      id,
 		Error: &Error{
 			Code:    code,
@@ -71,7 +71,7 @@ func (c *Conn) SendError(id any, code int, message string) error {
 // SendNotification sends a JSON-RPC notification.
 func (c *Conn) SendNotification(method string, params any) error {
 	notif := Notification{
-		JSONRPC: "2.0",
+		JSONRPC: JSONRPCVersion,
 		Method:  method,
 	}
 	if params != nil {

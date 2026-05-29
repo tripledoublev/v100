@@ -33,12 +33,64 @@ type Error struct {
 }
 
 const (
+	JSONRPCVersion  = "2.0"
+	ProtocolVersion = 1
+)
+
+const (
+	MethodInitialize          = "initialize"
+	MethodFinalize            = "finalize"
+	MethodSetSuggestedPrompts = "set_suggested_prompts"
+	MethodSessionNew          = "session/new"
+	MethodSessionPrompt       = "session/prompt"
+	MethodSessionClose        = "session/close"
+	MethodSessionCancel       = "session/cancel"
+	MethodSessionUpdate       = "session/update"
+)
+
+const (
 	ErrParse          = -32700
 	ErrInvalidRequest = -32600
 	ErrMethodNotFound = -32601
 	ErrInvalidParams  = -32602
 	ErrInternal       = -32603
+
+	ErrSessionNotFound            = -32001
+	ErrSessionAlreadyExists       = -32002
+	ErrSessionBusy                = -32003
+	ErrSessionClosing             = -32004
+	ErrUnsupportedProtocolVersion = -32010
+	ErrProviderConfiguration      = -32020
 )
+
+func ErrorMessage(code int) string {
+	switch code {
+	case ErrParse:
+		return "parse error"
+	case ErrInvalidRequest:
+		return "invalid request"
+	case ErrMethodNotFound:
+		return "method not found"
+	case ErrInvalidParams:
+		return "invalid params"
+	case ErrInternal:
+		return "internal error"
+	case ErrSessionNotFound:
+		return "session not found"
+	case ErrSessionAlreadyExists:
+		return "session already exists"
+	case ErrSessionBusy:
+		return "session busy"
+	case ErrSessionClosing:
+		return "session closing"
+	case ErrUnsupportedProtocolVersion:
+		return "unsupported protocol version"
+	case ErrProviderConfiguration:
+		return "provider configuration error"
+	default:
+		return "unknown error"
+	}
+}
 
 // ContentBlock Structures
 
@@ -80,6 +132,14 @@ type InitializeResult struct {
 	AgentInfo         AgentInfo         `json:"agentInfo"`
 }
 
+type FinalizeParams struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+type FinalizeResult struct {
+	ClosedSessions int `json:"closedSessions"`
+}
+
 type AgentInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -110,6 +170,23 @@ type SessionNewParams struct {
 
 type SessionNewResult struct {
 	SessionID string `json:"sessionId"`
+}
+
+type SuggestedPrompt struct {
+	ID          string   `json:"id,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Prompt      string   `json:"prompt"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+type SetSuggestedPromptsParams struct {
+	SessionID string            `json:"sessionId,omitempty"`
+	Prompts   []SuggestedPrompt `json:"prompts"`
+}
+
+type SetSuggestedPromptsResult struct {
+	Count int `json:"count"`
 }
 
 type SessionPromptParams struct {

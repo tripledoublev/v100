@@ -51,12 +51,18 @@ func acpCmd(cfgPath *string) *cobra.Command {
 }
 
 type acpServer struct {
-	conn     *acp.Conn
-	yolo     bool
-	sessions map[string]*acpSession
-	mu       sync.Mutex
-	cfgPath  string
-	cmd      *cobra.Command
+	conn             *acp.Conn
+	yolo             bool
+	sessions         map[string]*acpSession
+	suggestedPrompts []acp.SuggestedPrompt
+	initialized      bool
+	clientInfo       acp.ClientInfo
+	clientCaps       acp.ClientCapabilities
+	shutdown         chan struct{}
+	shutdownOnce     sync.Once
+	mu               sync.Mutex
+	cfgPath          string
+	cmd              *cobra.Command
 }
 
 type acpSession struct {
@@ -67,37 +73,75 @@ type acpSession struct {
 	promptActive bool
 	mu           sync.Mutex
 	closing      bool
+	prompts      []acp.SuggestedPrompt
+	cleanupDone  chan struct{}
+	cleanupOnce  sync.Once
 }
 
 func (s *acpServer) serve() error {
+	shutdown := s.shutdownChan()
+	messages := make(chan []byte)
+	readErrs := make(chan error, 1)
+
+	go func() {
+		for {
+			msg, err := s.conn.ReadMessage()
+			if err != nil {
+				select {
+				case readErrs <- err:
+				case <-shutdown:
+				}
+				return
+			}
+			msg = append([]byte(nil), msg...)
+			select {
+			case messages <- msg:
+			case <-shutdown:
+				return
+			}
+		}
+	}()
+
 	for {
-		msg, err := s.conn.ReadMessage()
-		if err != nil {
+		select {
+		case <-shutdown:
+			return nil
+		case err := <-readErrs:
 			if err == io.EOF {
 				return nil
 			}
 			return err
-		}
+		case msg := <-messages:
+			var req acp.Request
+			if err := json.Unmarshal(msg, &req); err != nil {
+				_ = s.conn.SendError(nil, acp.ErrParse, acp.ErrorMessage(acp.ErrParse))
+				continue
+			}
 
-		var req acp.Request
-		if err := json.Unmarshal(msg, &req); err != nil {
-			_ = s.conn.SendError(nil, acp.ErrParse, "parse error")
-			continue
-		}
-
-		if req.ID != nil {
-			go s.handleRequest(req)
-		} else {
-			go s.handleNotification(req)
+			if req.ID != nil {
+				go s.handleRequest(req)
+			} else {
+				go s.handleNotification(req)
+			}
 		}
 	}
 }
 
 func (s *acpServer) handleRequest(req acp.Request) {
+	if req.Method != acp.MethodFinalize && s.isShuttingDown() {
+		_ = s.conn.SendError(req.ID, acp.ErrInvalidRequest, "ACP server has finalized")
+		return
+	}
+
 	switch req.Method {
-	case "initialize":
+	case acp.MethodInitialize:
+		var params acp.InitializeParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
 		res := acp.InitializeResult{
-			ProtocolVersion: 1,
+			ProtocolVersion: acp.ProtocolVersion,
 			AgentCapabilities: acp.AgentCapabilities{
 				SessionCapabilities: acp.SessionCapabilities{
 					Close: &struct{}{},
@@ -114,16 +158,46 @@ func (s *acpServer) handleRequest(req acp.Request) {
 				res.AgentCapabilities.PromptCapabilities.Image = prov.Capabilities().Images
 			}
 		}
+		s.mu.Lock()
+		s.initialized = true
+		s.clientInfo = params.ClientInfo
+		s.clientCaps = params.ClientCapabilities
+		s.mu.Unlock()
 
 		_ = s.conn.SendResponse(req.ID, res)
 
-	case "session/new":
+	case acp.MethodFinalize:
+		var params acp.FinalizeParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		closed := s.finalize()
+		_ = s.conn.SendResponse(req.ID, acp.FinalizeResult{ClosedSessions: closed})
+		s.signalShutdown()
+
+	case acp.MethodSetSuggestedPrompts:
+		var params acp.SetSuggestedPromptsParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		if err := s.setSuggestedPrompts(params); err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
+		}
+		_ = s.conn.SendResponse(req.ID, acp.SetSuggestedPromptsResult{Count: len(params.Prompts)})
+
+	case acp.MethodSessionNew:
 		var params acp.SessionNewParams
-		_ = json.Unmarshal(req.Params, &params)
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
 
 		cfg, err := loadConfig(s.cfgPath)
 		if err != nil {
-			_ = s.conn.SendError(req.ID, acp.ErrInternal, err.Error())
+			_ = s.conn.SendError(req.ID, acp.ErrProviderConfiguration, err.Error())
 			return
 		}
 
@@ -140,7 +214,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 
 		comp, err := BuildRunComponents(cfg, opts)
 		if err != nil {
-			_ = s.conn.SendError(req.ID, acp.ErrInternal, err.Error())
+			_ = s.conn.SendError(req.ID, acp.ErrProviderConfiguration, err.Error())
 			return
 		}
 
@@ -189,16 +263,26 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		loop.Hooks = append(loop.Hooks, core.DeduplicationHook(2))
 
 		s.mu.Lock()
+		if _, exists := s.sessions[sessionID]; exists {
+			s.mu.Unlock()
+			cleanupRunComponents(comp)
+			_ = s.conn.SendError(req.ID, acp.ErrSessionAlreadyExists, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionAlreadyExists), sessionID))
+			return
+		}
+		if s.sessions == nil {
+			s.sessions = make(map[string]*acpSession)
+		}
 		s.sessions[sessionID] = &acpSession{
-			comp: comp,
-			loop: loop,
+			comp:    comp,
+			loop:    loop,
+			prompts: copySuggestedPrompts(s.suggestedPrompts),
 		}
 		s.mu.Unlock()
 
 		_ = s.conn.SendResponse(req.ID, acp.SessionNewResult{SessionID: sessionID})
 
 		// Advertise available slash commands to the client
-		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
 			SessionID: sessionID,
 			Update: acp.Update{
 				Type: "available_commands_update",
@@ -210,42 +294,38 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			},
 		})
 
-	case "session/prompt":
+	case acp.MethodSessionPrompt:
 		var params acp.SessionPromptParams
-		_ = json.Unmarshal(req.Params, &params)
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
 
 		s.mu.Lock()
 		session, ok := s.sessions[params.SessionID]
 		s.mu.Unlock()
 
 		if !ok {
-			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, "session not found")
+			_ = s.conn.SendError(req.ID, acp.ErrSessionNotFound, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), params.SessionID))
 			return
 		}
 
 		session.mu.Lock()
 		if session.closing {
 			session.mu.Unlock()
-			_ = s.conn.SendError(req.ID, acp.ErrInternal, "session is closing")
+			_ = s.conn.SendError(req.ID, acp.ErrSessionClosing, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionClosing), params.SessionID))
 			return
 		}
 		if session.promptActive {
 			session.mu.Unlock()
-			_ = s.conn.SendError(req.ID, acp.ErrInternal, "a prompt turn is already active for this session")
+			_ = s.conn.SendError(req.ID, acp.ErrSessionBusy, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionBusy), params.SessionID))
 			return
 		}
 		session.promptActive = true
 		session.mu.Unlock()
 
 		defer func() {
-			session.mu.Lock()
-			session.promptActive = false
-			closing := session.closing
-			session.mu.Unlock()
-
-			if closing {
-				session.cleanup()
-			}
+			session.finishPrompt()
 		}()
 
 		var promptText string
@@ -278,11 +358,14 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		stopReason := s.runPrompt(session, params.SessionID, promptText, images)
 		_ = s.conn.SendResponse(req.ID, acp.SessionPromptResult{StopReason: stopReason})
 
-	case "session/close":
+	case acp.MethodSessionClose:
 		var params struct {
 			SessionID string `json:"sessionId"`
 		}
-		_ = json.Unmarshal(req.Params, &params)
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
 
 		s.mu.Lock()
 		session, ok := s.sessions[params.SessionID]
@@ -291,31 +374,25 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		}
 		s.mu.Unlock()
 
-		if ok {
-			session.mu.Lock()
-			session.closing = true
-			if session.cancel != nil {
-				session.cancel()
-			}
-			active := session.promptActive
-			session.mu.Unlock()
-
-			if !active {
-				session.cleanup()
-			}
+		if !ok {
+			_ = s.conn.SendError(req.ID, acp.ErrSessionNotFound, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), params.SessionID))
+			return
 		}
+		closeACPSession(session)
 		_ = s.conn.SendResponse(req.ID, nil)
 
 	default:
-		_ = s.conn.SendError(req.ID, acp.ErrMethodNotFound, "method not found")
+		_ = s.conn.SendError(req.ID, acp.ErrMethodNotFound, acp.ErrorMessage(acp.ErrMethodNotFound))
 	}
 }
 
 func (s *acpServer) handleNotification(req acp.Request) {
 	switch req.Method {
-	case "session/cancel":
+	case acp.MethodSessionCancel:
 		var params acp.SessionCancelParams
-		_ = json.Unmarshal(req.Params, &params)
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			return
+		}
 
 		s.mu.Lock()
 		session, ok := s.sessions[params.SessionID]
@@ -329,6 +406,137 @@ func (s *acpServer) handleNotification(req acp.Request) {
 			session.mu.Unlock()
 		}
 	}
+}
+
+func decodeACPParams(raw json.RawMessage, dest any) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return json.Unmarshal(raw, dest)
+}
+
+func (s *acpServer) shutdownChan() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shutdown == nil {
+		s.shutdown = make(chan struct{})
+	}
+	return s.shutdown
+}
+
+func (s *acpServer) signalShutdown() {
+	ch := s.shutdownChan()
+	s.shutdownOnce.Do(func() {
+		close(ch)
+	})
+}
+
+func (s *acpServer) isShuttingDown() bool {
+	ch := s.shutdownChan()
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+type acpStatusError struct {
+	code int
+	msg  string
+}
+
+func (e acpStatusError) Error() string { return e.msg }
+
+func acpErrorCode(err error) int {
+	if e, ok := err.(acpStatusError); ok {
+		return e.code
+	}
+	return acp.ErrInternal
+}
+
+func (s *acpServer) setSuggestedPrompts(params acp.SetSuggestedPromptsParams) error {
+	prompts := copySuggestedPrompts(params.Prompts)
+	if params.SessionID == "" {
+		s.mu.Lock()
+		s.suggestedPrompts = prompts
+		s.mu.Unlock()
+		return nil
+	}
+
+	s.mu.Lock()
+	session, ok := s.sessions[params.SessionID]
+	s.mu.Unlock()
+	if !ok {
+		return acpStatusError{
+			code: acp.ErrSessionNotFound,
+			msg:  fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), params.SessionID),
+		}
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.closing {
+		return acpStatusError{
+			code: acp.ErrSessionClosing,
+			msg:  fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionClosing), params.SessionID),
+		}
+	}
+	session.prompts = prompts
+	return nil
+}
+
+func (s *acpServer) finalize() int {
+	s.mu.Lock()
+	sessions := s.sessions
+	s.sessions = make(map[string]*acpSession)
+	s.suggestedPrompts = nil
+	s.initialized = false
+	s.clientInfo = acp.ClientInfo{}
+	s.clientCaps = acp.ClientCapabilities{}
+	s.mu.Unlock()
+
+	closed := 0
+	for _, session := range sessions {
+		closeACPSession(session)
+		closed++
+	}
+	return closed
+}
+
+func closeACPSession(session *acpSession) {
+	if session == nil {
+		return
+	}
+	cleanupDone := session.cleanupDoneChan()
+	session.mu.Lock()
+	session.closing = true
+	if session.cancel != nil {
+		session.cancel()
+	}
+	active := session.promptActive
+	session.mu.Unlock()
+	if !active {
+		session.cleanup()
+		return
+	}
+
+	select {
+	case <-cleanupDone:
+	case <-time.After(5 * time.Second):
+	}
+}
+
+func copySuggestedPrompts(in []acp.SuggestedPrompt) []acp.SuggestedPrompt {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]acp.SuggestedPrompt, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].Tags = append([]string(nil), in[i].Tags...)
+	}
+	return out
 }
 
 func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt string, images []providers.ImageAttachment) string {
@@ -348,7 +556,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 
 	cfg, err := loadConfig(s.cfgPath)
 	if err != nil {
-		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
 			SessionID: sessionID,
 			Update: acp.Update{
 				Type: "agent_message_chunk",
@@ -362,7 +570,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 	}
 	rewritten, handled, err := applyInteractiveMode(ctx, cfg, session.loop, prompt, false)
 	if err != nil {
-		_ = s.conn.SendNotification("session/update", acp.SessionUpdateParams{
+		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
 			SessionID: sessionID,
 			Update: acp.Update{
 				Type: "agent_message_chunk",
@@ -401,15 +609,45 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 }
 
 func (s *acpSession) cleanup() {
+	cleanupDone := s.cleanupDoneChan()
+	s.cleanupOnce.Do(func() {
+		s.mu.Lock()
+		comp := s.comp
+		s.comp = nil
+		s.loop = nil
+		s.mu.Unlock()
+		cleanupRunComponents(comp)
+		close(cleanupDone)
+	})
+}
+
+func (s *acpSession) cleanupDoneChan() chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.cleanupDone == nil {
+		s.cleanupDone = make(chan struct{})
+	}
+	return s.cleanupDone
+}
 
-	if s.comp != nil {
-		if s.comp.Trace != nil {
-			_ = s.comp.Trace.Close()
-		}
-		if s.comp.Config != nil && s.comp.Config.Sandbox.Enabled && s.comp.Session != nil {
-			_ = s.comp.Session.Close()
-		}
+func (s *acpSession) finishPrompt() {
+	s.mu.Lock()
+	s.promptActive = false
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		s.cleanup()
+	}
+}
+
+func cleanupRunComponents(comp *RunComponents) {
+	if comp == nil {
+		return
+	}
+	if comp.Trace != nil {
+		_ = comp.Trace.Close()
+	}
+	if comp.Config != nil && comp.Config.Sandbox.Enabled && comp.Session != nil {
+		_ = comp.Session.Close()
 	}
 }
