@@ -1,12 +1,10 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -75,43 +73,20 @@ func (s *HostSession) Run(ctx context.Context, req RunRequest) (Result, error) {
 		fullDir = filepath.Join(baseDir, dir)
 	}
 
-	cmd := exec.CommandContext(ctx, req.Command, req.Args...)
-	cmd.Dir = fullDir
-	cmd.Env = append(os.Environ(), req.Env...)
+	var stdin io.Reader
 	if req.Stdin != "" {
-		cmd.Stdin = strings.NewReader(req.Stdin)
+		stdin = strings.NewReader(req.Stdin)
 	}
 
-	var stdout, stderr bytes.Buffer
-	var stdoutW io.Writer = &stdout
-	var stderrW io.Writer = &stderr
-
-	if req.StdoutWriter != nil {
-		stdoutW = io.MultiWriter(stdoutW, req.StdoutWriter)
-	}
-	if req.StderrWriter != nil {
-		stderrW = io.MultiWriter(stderrW, req.StderrWriter)
-	}
-
-	cmd.Stdout = stdoutW
-	cmd.Stderr = stderrW
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return Result{}, err
-		}
-	}
-
-	return Result{
-		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		Err:      err,
-	}, nil
+	return runProcess(ctx, processRequest{
+		Command:      req.Command,
+		Args:         req.Args,
+		Dir:          fullDir,
+		Env:          append(os.Environ(), req.Env...),
+		Stdin:        stdin,
+		StdoutWriter: req.StdoutWriter,
+		StderrWriter: req.StderrWriter,
+	})
 }
 
 func (s *HostSession) Workspace() string {

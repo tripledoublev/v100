@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -134,7 +133,11 @@ func (s *DockerSession) Run(ctx context.Context, req RunRequest) (Result, error)
 	if req.Stdin != "" {
 		stdin = strings.NewReader(req.Stdin)
 	}
-	return s.runDocker(ctx, stdin, req.StdoutWriter, req.StderrWriter, s.execArgs(req)...)
+	res, err := s.runDocker(ctx, stdin, req.StdoutWriter, req.StderrWriter, s.execArgs(req)...)
+	if ctx.Err() != nil {
+		s.terminateContainerAfterCanceledRun()
+	}
+	return res, err
 }
 
 func (s *DockerSession) Workspace() string { return s.sandboxDir }
@@ -202,38 +205,27 @@ func (s *DockerSession) defaultExecEnv() []string {
 }
 
 func (s *DockerSession) runDocker(ctx context.Context, stdin io.Reader, stdoutWriter, stderrWriter io.Writer, args ...string) (Result, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if stdin != nil {
-		cmd.Stdin = stdin
-	}
+	return runProcess(ctx, processRequest{
+		Command:      "docker",
+		Args:         args,
+		Stdin:        stdin,
+		StdoutWriter: stdoutWriter,
+		StderrWriter: stderrWriter,
+	})
+}
 
-	var stdout, stderr bytes.Buffer
-	var stdoutW io.Writer = &stdout
-	var stderrW io.Writer = &stderr
-	if stdoutWriter != nil {
-		stdoutW = io.MultiWriter(stdoutW, stdoutWriter)
+func (s *DockerSession) terminateContainerAfterCanceledRun() {
+	if strings.TrimSpace(s.containerName) == "" {
+		return
 	}
-	if stderrWriter != nil {
-		stderrW = io.MultiWriter(stderrW, stderrWriter)
+	runDockerKill := func(signal string) {
+		ctx, cancel := context.WithTimeout(context.Background(), dockerCommandTimeout)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "docker", "kill", "--signal", signal, s.containerName).Run()
 	}
-	cmd.Stdout = stdoutW
-	cmd.Stderr = stderrW
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return Result{}, err
-		}
-	}
-	return Result{
-		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		Err:      err,
-	}, nil
+	runDockerKill("TERM")
+	time.Sleep(processKillGrace)
+	runDockerKill("KILL")
 }
 
 func dockerContainerName(runID string) string {
