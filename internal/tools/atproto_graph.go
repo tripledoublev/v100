@@ -77,14 +77,16 @@ func (t *atprotoGetFollowsTool) Exec(_ context.Context, _ ToolCallContext, args 
 	if in.Actor == "" {
 		return ToolResult{OK: false, Output: "actor is required"}, nil
 	}
-	if in.Limit <= 0 {
-		in.Limit = 50
-	}
+	in.Limit = clampExternalPageLimit(in.Limit, 50)
 
 	cli := newATProtoClient(t.cfg)
 	// getFollows is public, but we might need login if the PDS is restrictive or for higher limits.
 	// For now, try authenticated if we have credentials.
-	_ = cli.login()
+	if err := cli.login(); err != nil {
+		if output, ok := toolSafetyErrorOutput(err); ok {
+			return ToolResult{OK: false, Output: output}, nil
+		}
+	}
 
 	params := url.Values{
 		"actor": {in.Actor},
@@ -152,12 +154,14 @@ func (t *atprotoGetFollowersTool) Exec(_ context.Context, _ ToolCallContext, arg
 	if in.Actor == "" {
 		return ToolResult{OK: false, Output: "actor is required"}, nil
 	}
-	if in.Limit <= 0 {
-		in.Limit = 50
-	}
+	in.Limit = clampExternalPageLimit(in.Limit, 50)
 
 	cli := newATProtoClient(t.cfg)
-	_ = cli.login()
+	if err := cli.login(); err != nil {
+		if output, ok := toolSafetyErrorOutput(err); ok {
+			return ToolResult{OK: false, Output: output}, nil
+		}
+	}
 
 	params := url.Values{
 		"actor": {in.Actor},
@@ -222,7 +226,11 @@ func (t *atprotoGetProfileTool) Exec(_ context.Context, _ ToolCallContext, args 
 	}
 
 	cli := newATProtoClient(t.cfg)
-	_ = cli.login()
+	if err := cli.login(); err != nil {
+		if output, ok := toolSafetyErrorOutput(err); ok {
+			return ToolResult{OK: false, Output: output}, nil
+		}
+	}
 
 	params := url.Values{"actor": {in.Actor}}
 	data, err := cli.xrpcGet("app.bsky.actor.getProfile", params)
@@ -246,7 +254,7 @@ func ATProtoGraphExplorer(cfg *config.Config) Tool {
 
 func (t *atprotoGraphExplorerTool) Name() string { return "atproto_graph_explorer" }
 func (t *atprotoGraphExplorerTool) Description() string {
-	return "Explore and map a Bluesky user's social graph. Samples the accounts they follow, fetches who those accounts follow, and surfaces the most-connected people in their 2nd-degree network. Use this when asked to graph someone, explore their network, find follow suggestions, or analyze social connections."
+	return "Explore and map a Bluesky user's social graph. Samples the accounts they follow, fetches who those accounts follow, and surfaces the most-connected people in their 2nd-degree network. Each paginated request is capped at 100 items and protected by per-endpoint rate limits plus a circuit breaker."
 }
 func (t *atprotoGraphExplorerTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoGraphExplorerTool) Effects() ToolEffects     { return ToolEffects{NeedsNetwork: true} }
@@ -287,12 +295,7 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 	if in.SampleSize > 25 {
 		in.SampleSize = 25
 	}
-	if in.FollowsLimit <= 0 {
-		in.FollowsLimit = 20
-	}
-	if in.FollowsLimit > 100 {
-		in.FollowsLimit = 100
-	}
+	in.FollowsLimit = clampExternalPageLimit(in.FollowsLimit, 20)
 
 	cli := newATProtoClient(t.cfg)
 	if err := cli.login(); err != nil {
@@ -312,6 +315,9 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 			"actor": {seedActor},
 		})
 		if err != nil {
+			if output, ok := toolSafetyErrorOutput(err); ok {
+				return ToolResult{OK: false, Output: output}, nil
+			}
 			return ToolResult{OK: false, Output: "failed to resolve actor: " + err.Error()}, nil
 		}
 		var profile struct {
@@ -332,6 +338,9 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 		"limit": {"100"},
 	})
 	if err != nil {
+		if output, ok := toolSafetyErrorOutput(err); ok {
+			return ToolResult{OK: false, Output: output}, nil
+		}
 		return ToolResult{OK: false, Output: "failed to get my follows: " + err.Error()}, nil
 	}
 
@@ -370,6 +379,9 @@ func (t *atprotoGraphExplorerTool) Exec(_ context.Context, _ ToolCallContext, ar
 			"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
 		})
 		if err != nil {
+			if output, ok := toolSafetyErrorOutput(err); ok {
+				return ToolResult{OK: false, Output: output}, nil
+			}
 			continue // skip failures for individual accounts
 		}
 
@@ -515,6 +527,9 @@ func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, 
 		"limit": {"100"},
 	})
 	if err != nil {
+		if output, ok := toolSafetyErrorOutput(err); ok {
+			return ToolResult{OK: false, Output: output}, nil
+		}
 		return ToolResult{OK: false, Output: "failed to get follows: " + err.Error()}, nil
 	}
 
@@ -542,6 +557,9 @@ func (t *atprotoCommunityDetectTool) Exec(_ context.Context, _ ToolCallContext, 
 			"limit": {fmt.Sprintf("%d", in.FollowsLimit)},
 		})
 		if err != nil {
+			if output, ok := toolSafetyErrorOutput(err); ok {
+				return ToolResult{OK: false, Output: output}, nil
+			}
 			continue
 		}
 		var resp struct {

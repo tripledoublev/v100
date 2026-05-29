@@ -250,13 +250,40 @@ func (t *atprotoNotificationsTool) Exec(_ context.Context, _ ToolCallContext, ar
 type atprotoPostTool struct{ cfg *config.Config }
 type atprotoCreateRecordTool struct{ cfg *config.Config }
 
+type atprotoPostArgs struct {
+	Text       string `json:"text"`
+	ReplyToURI string `json:"reply_to_uri"`
+	ReplyToCID string `json:"reply_to_cid"`
+	RootURI    string `json:"root_uri"`
+	RootCID    string `json:"root_cid"`
+	QuoteURI   string `json:"quote_uri"`
+	QuoteCID   string `json:"quote_cid"`
+	RepostURI  string `json:"repost_uri"`
+	RepostCID  string `json:"repost_cid"`
+	Images     []struct {
+		CID  string `json:"cid"`
+		Mime string `json:"mime"`
+		Size int64  `json:"size"`
+		Alt  string `json:"alt"`
+	} `json:"images"`
+	Account string `json:"account"`
+	DryRun  bool   `json:"dry_run"`
+	Confirm bool   `json:"confirm"`
+}
+
+type atprotoPostPlan struct {
+	Action     string
+	Collection string
+	Record     map[string]any
+}
+
 // ATProtoPost returns the atproto_post tool.
 func ATProtoPost(cfg *config.Config) Tool         { return &atprotoPostTool{cfg: cfg} }
 func ATProtoCreateRecord(cfg *config.Config) Tool { return &atprotoCreateRecordTool{cfg: cfg} }
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
-	return "Publish to Bluesky. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt - use atproto_upload_blob first to obtain these). Quote+images are combined as a recordWithMedia embed."
+	return "Publish to Bluesky with a dry-run preview and confirm=true requirement for real posts. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt - use atproto_upload_blob first). Quote+images are combined as a recordWithMedia embed. ATProto requests are protected by per-endpoint rate limits and a circuit breaker."
 }
 func (t *atprotoPostTool) DangerLevel() DangerLevel { return Dangerous }
 func (t *atprotoPostTool) Effects() ToolEffects {
@@ -376,7 +403,9 @@ func (t *atprotoPostTool) InputSchema() json.RawMessage {
 			"repost_uri":   {"type": "string",  "description": "AT URI of the post to repost (text not required)."},
 			"repost_cid":   {"type": "string",  "description": "CID of the post to repost (required with repost_uri)."},
 			"images":       {"type": "array",   "description": "Optional image attachments. Each item: {cid, mime, size, alt?}. Obtain cid/mime/size by calling atproto_upload_blob first.", "items": {"type": "object", "properties": {"cid": {"type": "string"}, "mime": {"type": "string"}, "size": {"type": "integer"}, "alt": {"type": "string"}}, "required": ["cid", "mime", "size"]}},
-			"account":      {"type": "string",  "description": "Which account to post from: \"main\" (default, charlebois.info) or \"alt\" (xx-c.art)."}
+			"account":      {"type": "string",  "description": "Which account to post from: \"main\" (default, charlebois.info) or \"alt\" (xx-c.art)."},
+			"dry_run":      {"type": "boolean", "description": "When true, return the exact post/repost preview without publishing."},
+			"confirm":      {"type": "boolean", "description": "Must be true to publish. When omitted or false, the tool returns a dry-run preview instead of posting."}
 		}
 	}`)
 }
@@ -393,24 +422,7 @@ func (t *atprotoPostTool) OutputSchema() json.RawMessage {
 }
 
 func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.RawMessage) (ToolResult, error) {
-	var in struct {
-		Text       string `json:"text"`
-		ReplyToURI string `json:"reply_to_uri"`
-		ReplyToCID string `json:"reply_to_cid"`
-		RootURI    string `json:"root_uri"`
-		RootCID    string `json:"root_cid"`
-		QuoteURI   string `json:"quote_uri"`
-		QuoteCID   string `json:"quote_cid"`
-		RepostURI  string `json:"repost_uri"`
-		RepostCID  string `json:"repost_cid"`
-		Images     []struct {
-			CID  string `json:"cid"`
-			Mime string `json:"mime"`
-			Size int64  `json:"size"`
-			Alt  string `json:"alt"`
-		} `json:"images"`
-		Account string `json:"account"`
-	}
+	var in atprotoPostArgs
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ToolResult{OK: false, Output: "invalid args: " + err.Error()}, nil
 	}
@@ -419,45 +431,71 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 	if err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
+	accountName := normalizedATProtoAccountName(in.Account)
+
+	plan, err := buildATProtoPostPlan(in, time.Now().UTC())
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+	if in.DryRun || !in.Confirm {
+		return atprotoPostPreviewResult(in, accountName, plan, !in.Confirm && !in.DryRun), nil
+	}
+
 	cli := newATProtoClient(accountCfg)
 	if err := cli.login(); err != nil {
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	// Repost path — separate lexicon.
-	if in.RepostURI != "" && in.RepostCID != "" {
-		payload := map[string]any{
-			"repo":       cli.session.DID,
-			"collection": "app.bsky.feed.repost",
-			"record": map[string]any{
+	payload := map[string]any{
+		"repo":       cli.session.DID,
+		"collection": plan.Collection,
+		"record":     plan.Record,
+	}
+	data, err := cli.xrpcPost("com.atproto.repo.createRecord", payload)
+	if err != nil {
+		return ToolResult{OK: false, Output: err.Error()}, nil
+	}
+
+	var out struct {
+		URI string `json:"uri"`
+		CID string `json:"cid"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
+	}
+	return CapToolResult(ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}), nil
+}
+
+func buildATProtoPostPlan(in atprotoPostArgs, now time.Time) (atprotoPostPlan, error) {
+	if in.RepostURI != "" || in.RepostCID != "" {
+		if in.RepostURI == "" || in.RepostCID == "" {
+			return atprotoPostPlan{}, fmt.Errorf("repost_uri and repost_cid are required together")
+		}
+		return atprotoPostPlan{
+			Action:     "repost",
+			Collection: "app.bsky.feed.repost",
+			Record: map[string]any{
 				"$type":     "app.bsky.feed.repost",
 				"subject":   map[string]string{"uri": in.RepostURI, "cid": in.RepostCID},
-				"createdAt": time.Now().UTC().Format(time.RFC3339),
+				"createdAt": now.Format(time.RFC3339),
 			},
-		}
-		data, err := cli.xrpcPost("com.atproto.repo.createRecord", payload)
-		if err != nil {
-			return ToolResult{OK: false, Output: err.Error()}, nil
-		}
-		var out struct {
-			URI string `json:"uri"`
-			CID string `json:"cid"`
-		}
-		if err := json.Unmarshal(data, &out); err != nil {
-			return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
-		}
-		return CapToolResult(ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}), nil
+		}, nil
 	}
 
 	if in.Text == "" && len(in.Images) == 0 {
-		return ToolResult{OK: false, Output: "text is required"}, nil
+		return atprotoPostPlan{}, fmt.Errorf("text is required")
+	}
+	if (in.ReplyToURI == "") != (in.ReplyToCID == "") {
+		return atprotoPostPlan{}, fmt.Errorf("reply_to_uri and reply_to_cid are required together")
+	}
+	if (in.QuoteURI == "") != (in.QuoteCID == "") {
+		return atprotoPostPlan{}, fmt.Errorf("quote_uri and quote_cid are required together")
 	}
 
-	// Build post record.
 	record := map[string]any{
 		"$type":     "app.bsky.feed.post",
 		"text":      in.Text,
-		"createdAt": time.Now().UTC().Format(time.RFC3339),
+		"createdAt": now.Format(time.RFC3339),
 	}
 
 	// Reply block. root defaults to parent for top-level replies; must be set
@@ -481,12 +519,12 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 	var imagesEmbed map[string]any
 	if len(in.Images) > 0 {
 		if len(in.Images) > 4 {
-			return ToolResult{OK: false, Output: "atproto: at most 4 images per post"}, nil
+			return atprotoPostPlan{}, fmt.Errorf("atproto: at most 4 images per post")
 		}
 		items := make([]map[string]any, len(in.Images))
 		for i, img := range in.Images {
 			if img.CID == "" || img.Mime == "" || img.Size <= 0 {
-				return ToolResult{OK: false, Output: fmt.Sprintf("images[%d]: cid, mime, and size are required", i)}, nil
+				return atprotoPostPlan{}, fmt.Errorf("images[%d]: cid, mime, and size are required", i)
 			}
 			items[i] = map[string]any{
 				"alt": img.Alt,
@@ -525,24 +563,44 @@ func (t *atprotoPostTool) Exec(_ context.Context, _ ToolCallContext, args json.R
 		record["embed"] = quoteEmbed
 	}
 
-	payload := map[string]any{
-		"repo":       cli.session.DID,
-		"collection": "app.bsky.feed.post",
-		"record":     record,
-	}
-	data, err := cli.xrpcPost("com.atproto.repo.createRecord", payload)
-	if err != nil {
-		return ToolResult{OK: false, Output: err.Error()}, nil
-	}
+	return atprotoPostPlan{
+		Action:     "post",
+		Collection: "app.bsky.feed.post",
+		Record:     record,
+	}, nil
+}
 
-	var out struct {
-		URI string `json:"uri"`
-		CID string `json:"cid"`
+func atprotoPostPreviewResult(in atprotoPostArgs, account string, plan atprotoPostPlan, confirmRequired bool) ToolResult {
+	payload := map[string]any{
+		"ok":                   !confirmRequired,
+		"dry_run":              true,
+		"action":               plan.Action,
+		"account":              account,
+		"collection":           plan.Collection,
+		"record":               plan.Record,
+		"images":               len(in.Images),
+		"requires_confirm":     true,
+		"confirmation_example": map[string]bool{"confirm": true},
 	}
-	if err := json.Unmarshal(data, &out); err != nil {
-		return CapToolResult(ToolResult{OK: true, Output: string(data)}), nil
+	if confirmRequired {
+		payload["error"] = "atproto_post requires confirm=true to publish; this is a dry-run preview only"
+		payload["message"] = "No Bluesky record was created. Review the preview, then call atproto_post again with confirm=true to publish."
+	} else {
+		payload["message"] = "Dry-run preview only. No Bluesky record was created."
 	}
-	return CapToolResult(ToolResult{OK: true, Output: fmt.Sprintf("uri=%s cid=%s", out.URI, out.CID)}), nil
+	body, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return ToolResult{OK: false, Output: "preview marshal failed: " + err.Error()}
+	}
+	return CapToolResult(ToolResult{OK: !confirmRequired, Output: string(body), Stdout: string(body)})
+}
+
+func normalizedATProtoAccountName(account string) string {
+	account = strings.TrimSpace(account)
+	if account == "" {
+		return "main"
+	}
+	return account
 }
 
 // ---------------------------------------------------------------------------

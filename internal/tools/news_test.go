@@ -81,6 +81,85 @@ func TestNewsFetchExecParsesRSSAndFiltersFreshItems(t *testing.T) {
 	}
 }
 
+func TestNewsFetchClampsMaxItemsTo100(t *testing.T) {
+	feedURL := "https://fixture.example/large-feed.xml"
+	var feed strings.Builder
+	feed.WriteString(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Fixture News</title>`)
+	for i := 0; i < 105; i++ {
+		fmt.Fprintf(&feed, `<item><title>City plan item %03d</title></item>`, i)
+	}
+	feed.WriteString(`</channel></rss>`)
+	session := &routingFakeDockerSession{
+		routes: map[string]executor.Result{
+			feedURL: {
+				ExitCode: 0,
+				Stdout:   "200\napplication/rss+xml\n\n__V100_CURL_BODY__\n" + feed.String(),
+			},
+		},
+	}
+
+	args, err := json.Marshal(map[string]any{
+		"sources":     []string{feedURL},
+		"max_items":   150,
+		"fresh_hours": 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := NewsFetch().Exec(context.Background(), ToolCallContext{Session: session}, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("news_fetch failed: %s", res.Output)
+	}
+	var out newsFetchOutput
+	if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Items) != 100 {
+		t.Fatalf("expected max_items to clamp at 100, got %d", len(out.Items))
+	}
+}
+
+func TestNewsFetchRateLimitCircuitBreakerFailureIsStructured(t *testing.T) {
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	replaceDefaultExternalAPISafetyForTest(t, newExternalAPISafety(func() time.Time { return now }, externalAPISafetyPolicy{
+		RatePerSecond:      100,
+		Burst:              100,
+		BreakerThreshold:   3,
+		BreakerBaseBackoff: time.Second,
+		BreakerMaxBackoff:  time.Minute,
+	}))
+	feedURL := "https://fixture.example/rate-limited.xml"
+	session := &routingFakeDockerSession{
+		routes: map[string]executor.Result{
+			feedURL: {
+				ExitCode: 0,
+				Stdout:   "429\ntext/plain\n\n__V100_CURL_BODY__\nrate limit exceeded",
+			},
+		},
+	}
+	args, err := json.Marshal(map[string]any{"sources": []string{feedURL}, "max_items": 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res ToolResult
+	for i := 0; i < 3; i++ {
+		res, err = NewsFetch().Exec(context.Background(), ToolCallContext{Session: session}, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.OK {
+			t.Fatalf("rate-limited fetch should fail, got: %s", res.Output)
+		}
+	}
+	if !strings.Contains(res.Output, "circuit_breaker_open") {
+		t.Fatalf("expected structured circuit-breaker alert in output, got: %s", res.Output)
+	}
+}
+
 func TestNewsFetchExecExtractsJSONLDHeadlines(t *testing.T) {
 	now := time.Now().UTC()
 	pageURL := "https://fixture.example/frontpage"
@@ -338,7 +417,6 @@ func (s *routingFakeDockerSession) Run(_ context.Context, req executor.RunReques
 	}
 	return executor.Result{ExitCode: 1, Stderr: "unexpected url: " + url}, nil
 }
-
 
 func TestResolveNewsSourceRequestsQuebecFrench(t *testing.T) {
 	reqs := resolveNewsSourceRequests(newsFetchArgs{

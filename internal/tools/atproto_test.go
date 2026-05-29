@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/config"
 )
@@ -437,7 +438,7 @@ func TestATProtoPost_PlainPost(t *testing.T) {
 
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
-	args, _ := json.Marshal(map[string]string{"text": "Hello Bluesky!"})
+	args, _ := json.Marshal(map[string]any{"text": "Hello Bluesky!", "confirm": true})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -453,6 +454,49 @@ func TestATProtoPost_PlainPost(t *testing.T) {
 	}
 }
 
+func TestATProtoPost_RequiresConfirmationPreviewDoesNotPublish(t *testing.T) {
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	createCalled := false
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, _ *http.Request) {
+		createCalled = true
+		http.Error(w, "should not publish without confirm", http.StatusInternalServerError)
+	})
+
+	fullCfg := &config.Config{ATProto: cfg}
+	tool := ATProtoPost(fullCfg)
+	args, _ := json.Marshal(map[string]string{"text": "preview only"})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("missing confirm should return OK=false so callers know nothing was posted: %s", result.Output)
+	}
+	if createCalled {
+		t.Fatal("createRecord should not be called without confirm=true")
+	}
+	if !strings.Contains(result.Output, `"dry_run": true`) || !strings.Contains(result.Output, "requires confirm=true") {
+		t.Fatalf("expected clear dry-run preview and confirmation guidance, got: %s", result.Output)
+	}
+}
+
+func TestATProtoPost_ExplicitDryRunPreviewIsOK(t *testing.T) {
+	fullCfg := &config.Config{ATProto: config.ATProtoConfig{Handle: "unused.bsky.social"}}
+	tool := ATProtoPost(fullCfg)
+	args, _ := json.Marshal(map[string]any{"text": "preview only", "dry_run": true})
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("explicit dry_run should succeed without publishing: %s", result.Output)
+	}
+	if !strings.Contains(result.Output, `"collection": "app.bsky.feed.post"`) {
+		t.Fatalf("expected post collection preview, got: %s", result.Output)
+	}
+}
+
 func TestATProtoPost_Repost(t *testing.T) {
 	mux := http.NewServeMux()
 	_, cfg := setupATProtoServer(t, mux)
@@ -465,10 +509,11 @@ func TestATProtoPost_Repost(t *testing.T) {
 
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
-	args, _ := json.Marshal(map[string]string{
+	args, _ := json.Marshal(map[string]any{
 		"text":       "ignored",
 		"repost_uri": "at://did:plc:other/app.bsky.feed.post/orig",
 		"repost_cid": "bafyorigcid",
+		"confirm":    true,
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
@@ -503,10 +548,11 @@ func TestATProtoPost_ReplyRootDefaultsToParent(t *testing.T) {
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
 	// Top-level reply: only reply_to_* set, no root_* — root should default to parent.
-	args, _ := json.Marshal(map[string]string{
+	args, _ := json.Marshal(map[string]any{
 		"text":         "replying here",
 		"reply_to_uri": "at://did:plc:other/app.bsky.feed.post/parent",
 		"reply_to_cid": "parentcid",
+		"confirm":      true,
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
@@ -546,12 +592,13 @@ func TestATProtoPost_ReplyNestedExplicitRoot(t *testing.T) {
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
 	// Nested reply: root_* differs from reply_to_* (thread root ≠ immediate parent).
-	args, _ := json.Marshal(map[string]string{
+	args, _ := json.Marshal(map[string]any{
 		"text":         "nested reply",
 		"reply_to_uri": "at://did:plc:other/app.bsky.feed.post/middle",
 		"reply_to_cid": "middlecid",
 		"root_uri":     "at://did:plc:other/app.bsky.feed.post/root",
 		"root_cid":     "rootcid",
+		"confirm":      true,
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
@@ -590,10 +637,11 @@ func TestATProtoPost_QuotePost(t *testing.T) {
 
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
-	args, _ := json.Marshal(map[string]string{
+	args, _ := json.Marshal(map[string]any{
 		"text":      "great take",
 		"quote_uri": "at://did:plc:other/app.bsky.feed.post/orig",
 		"quote_cid": "origcid",
+		"confirm":   true,
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
@@ -635,6 +683,7 @@ func TestATProtoPost_ImageOnlyPost(t *testing.T) {
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
 	args, _ := json.Marshal(map[string]any{
+		"confirm": true,
 		"images": []map[string]any{{
 			"cid":  "bafkimg",
 			"mime": "image/png",
@@ -689,6 +738,7 @@ func TestATProtoPost_QuoteWithImagesUsesRecordWithMedia(t *testing.T) {
 		"text":      "quote with image",
 		"quote_uri": "at://did:plc:other/app.bsky.feed.post/orig",
 		"quote_cid": "origcid",
+		"confirm":   true,
 		"images": []map[string]any{{
 			"cid":  "bafkimg",
 			"mime": "image/jpeg",
@@ -735,9 +785,10 @@ func TestATProtoPost_RepostSubjectPayload(t *testing.T) {
 
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
-	args, _ := json.Marshal(map[string]string{
+	args, _ := json.Marshal(map[string]any{
 		"repost_uri": "at://did:plc:other/app.bsky.feed.post/tgt",
 		"repost_cid": "tgtcid",
+		"confirm":    true,
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
@@ -767,7 +818,7 @@ func TestATProtoPost_ServerError(t *testing.T) {
 
 	fullCfg := &config.Config{ATProto: cfg}
 	tool := ATProtoPost(fullCfg)
-	args, _ := json.Marshal(map[string]string{"text": "will fail"})
+	args, _ := json.Marshal(map[string]any{"text": "will fail", "confirm": true})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
 		t.Fatalf("unexpected Go error (should be OK=false): %v", err)
@@ -777,6 +828,58 @@ func TestATProtoPost_ServerError(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "400") {
 		t.Errorf("expected HTTP status in error output, got: %s", result.Output)
+	}
+}
+
+func TestATProtoPost_RateLimitOpensCircuitBreaker(t *testing.T) {
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	replaceDefaultExternalAPISafetyForTest(t, newExternalAPISafety(func() time.Time { return now }, externalAPISafetyPolicy{
+		RatePerSecond:      100,
+		Burst:              100,
+		BreakerThreshold:   3,
+		BreakerBaseBackoff: time.Second,
+		BreakerMaxBackoff:  time.Minute,
+	}))
+
+	mux := http.NewServeMux()
+	_, cfg := setupATProtoServer(t, mux)
+	createCalls := 0
+	mux.HandleFunc("/xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, _ *http.Request) {
+		createCalls++
+		http.Error(w, `{"error":"RateLimitExceeded"}`, http.StatusTooManyRequests)
+	})
+
+	fullCfg := &config.Config{ATProto: cfg}
+	tool := ATProtoPost(fullCfg)
+	args, _ := json.Marshal(map[string]any{"text": "too much", "confirm": true})
+
+	var result ToolResult
+	for i := 0; i < 3; i++ {
+		var err error
+		result, err = tool.Exec(context.Background(), emptyCallCtx(), args)
+		if err != nil {
+			t.Fatalf("unexpected error on call %d: %v", i+1, err)
+		}
+		if result.OK {
+			t.Fatalf("rate-limited call %d should fail, got: %s", i+1, result.Output)
+		}
+	}
+	if !strings.Contains(result.Output, `"kind":"circuit_breaker_open"`) {
+		t.Fatalf("third rate-limit response should open circuit breaker, got: %s", result.Output)
+	}
+
+	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
+	if err != nil {
+		t.Fatalf("unexpected error after breaker opened: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("open breaker should block publishing, got: %s", result.Output)
+	}
+	if createCalls != 3 {
+		t.Fatalf("fourth call should be blocked before createRecord, createCalls=%d", createCalls)
+	}
+	if !strings.Contains(result.Output, `"kind":"circuit_breaker_open"`) {
+		t.Fatalf("expected structured circuit breaker alert, got: %s", result.Output)
 	}
 }
 
@@ -999,7 +1102,7 @@ func TestATProtoPost_AltAccount(t *testing.T) {
 		ATProtoAlt: config.ATProtoConfig{Handle: "alt.art", AppPassword: "pw-alt", PDSURL: srv.URL},
 	}
 	tool := ATProtoPost(cfg)
-	args, _ := json.Marshal(map[string]string{"text": "hello from alt", "account": "alt"})
+	args, _ := json.Marshal(map[string]any{"text": "hello from alt", "account": "alt", "confirm": true})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
