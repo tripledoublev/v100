@@ -104,6 +104,7 @@ func TestRegistryEffects(t *testing.T) {
 		"curl_fetch",
 		"web_extract",
 		"deep_research",
+		"source_code",
 		"news_fetch",
 		"git_push",
 		"sh",
@@ -113,6 +114,7 @@ func TestRegistryEffects(t *testing.T) {
 	reg.Register(tools.CurlFetch())
 	reg.Register(tools.WebExtract())
 	reg.Register(tools.NewDeepResearch(nil))
+	reg.Register(tools.SourceCode())
 	reg.Register(tools.NewsFetch())
 	reg.Register(tools.GitPush())
 	reg.Register(tools.Sh())
@@ -131,6 +133,9 @@ func TestRegistryEffects(t *testing.T) {
 	}
 	if eff := reg.Effects("deep_research"); !eff.NeedsNetwork || !eff.ExternalSideEffect || !eff.MutatesRunState {
 		t.Fatalf("deep_research effects = %+v, want run state mutation + network + external side effect", eff)
+	}
+	if eff := reg.Effects("source_code"); eff.NeedsNetwork || eff.ExternalSideEffect || eff.MutatesWorkspace || eff.MutatesRunState {
+		t.Fatalf("source_code effects = %+v, want read-only local/cache inspection", eff)
 	}
 	if eff := reg.Effects("news_fetch"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("news_fetch effects = %+v, want network + external side effect", eff)

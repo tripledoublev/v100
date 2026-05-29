@@ -470,6 +470,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.WebExtract())
 	reg.Register(tools.WebSearch())
 	reg.Register(tools.NewDeepResearch(nil))
+	reg.Register(tools.SourceCode())
 	reg.Register(tools.NewsFetch())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())

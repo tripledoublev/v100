@@ -99,6 +99,11 @@
       "input":  { "required": ["topic"], "properties": { "topic": { "type": "string" }, "queries": { "type": "array", "items": { "type": "string" } }, "max_queries": { "type": "integer" }, "results_per_query": { "type": "integer" }, "max_sources": { "type": "integer" }, "perspectives": { "type": "boolean" }, "primary_providers": { "type": "array", "items": { "type": "string" } }, "review_providers": { "type": "array", "items": { "type": "string" } } } },
       "output": { "properties": { "report": { "type": "string" }, "verification": { "type": "string" }, "sources": { "type": "array" }, "perspectives": { "type": "array" } } }
     },
+    "source_code": {
+      "dangerous": false,
+      "input":  { "required": ["action","package"], "properties": { "action": { "type": "string", "enum": ["resolve","list","search","read"] }, "ecosystem": { "type": "string", "enum": ["auto","go","npm","pypi","crates","path"] }, "package": { "type": "string" }, "version": { "type": "string" }, "path": { "type": "string" }, "pattern": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" }, "max_results": { "type": "integer" }, "max_chars": { "type": "integer" } } },
+      "output": { "properties": { "root": { "type": "string" }, "package_dir": { "type": "string" }, "output": { "type": "string" } } }
+    },
     "wiki": {
       "dangerous": false,
       "input":  { "required": ["action"], "properties": { "action": { "type": "string", "enum": ["read", "search", "update"] }, "title": { "type": "string" }, "query": { "type": "string" }, "lang": { "type": "string" }, "sentences": { "type": "integer" }, "max_results": { "type": "integer" } } },

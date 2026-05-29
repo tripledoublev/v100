@@ -107,6 +107,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !containsString(cfg.Tools.Enabled, "deep_research") {
 		t.Error("expected deep_research tool to be enabled by default")
 	}
+	if !containsString(cfg.Tools.Enabled, "source_code") {
+		t.Error("expected source_code tool to be enabled by default")
+	}
 
 	shDangerous := false
 	for _, tool := range cfg.Tools.Dangerous {
@@ -186,6 +189,9 @@ budget_steps = 25
 	}
 	if !containsString(cfg.Tools.Enabled, "deep_research") {
 		t.Error("expected deep_research tool to be enabled after migration")
+	}
+	if !containsString(cfg.Tools.Enabled, "source_code") {
+		t.Error("expected source_code tool to be enabled after migration")
 	}
 }
 
