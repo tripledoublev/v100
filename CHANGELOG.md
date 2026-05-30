@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.1 — 2026-05-30
+
+**Research and Inspection Tools**
+
+### Features
+
+- Added a `deep_research` tool for structured repository research workflows, with registry and schema wiring, wake integration, blackboard support, and coverage for tool behavior.
+- Added a `source_code` inspection tool for repository symbol and context lookup, including registry and schema registration, UI rendering support, and tests.
+- Added v1.0 roadmap and agent instruction docs to keep post-v0.3 work aligned with reliability-first priorities.
+
+### Maintenance
+
+- Updated project agent instructions for the closed v0.3 milestone and current roadmap priorities.
+- Added tests and schema coverage for the new research and inspection tool surfaces.
+
 ## v0.3.0 — 2026-05-30
 
 **Safety & Reliability**
