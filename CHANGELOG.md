@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.0 — 2026-05-30
+
+**Safety & Reliability**
+
+### Safety
+
+- Added per-endpoint rate limits and circuit breakers for ATProto and news tools, including bounded pagination for large external API calls.
+- Made `atproto_post` preview-first by default; callers must pass `confirm=true` to publish.
+- Hardened OAuth and provider secret loading so env vars and secret managers are preferred over plaintext fallback files, with clearer doctor guidance.
+
+### Reliability
+
+- Hardened executor lifecycle handling with bounded process cleanup, process-group cancellation, Docker container termination, and executor resource reporting in `v100 doctor`.
+- Switched workspace snapshots to delta mode with content-addressed blobs, manifest-based restore, async snapshot support, and full-copy compatibility mode.
+- Completed ACP lifecycle support, including initialize negotiation, suggested prompts, session lifecycle, cancellation behavior, finalize shutdown, and protocol docs.
+
+### Config & Memory
+
+- Extended `v100 doctor` with config and behavior-directory validation for `agents/`, `policies/`, and `tasks/`, including malformed TOML, unused/deprecated keys, missing prompt files, provider/task references, and fallback cycles.
+- Added `v100 doctor --dry-run` for validation-only checks without provider/network/write probes.
+- Bounded vector memory with default TTLs, duplicate embedding rejection, per-scope eviction, persisted-size caps, background compaction, and race-tested store operations.
+
+### Maintenance
+
+- Added focused tests and coverage gates for the new safety, snapshot, ACP, secret, memory, and config validation paths.
+- Documented doctor validation, vector-store lifecycle, secrets handling, ACP client behavior, and v0.3 project priorities.
+
 ## v0.2.32 — 2026-05-24
 
 **Router Model Routing and Dogfood Fixes**
