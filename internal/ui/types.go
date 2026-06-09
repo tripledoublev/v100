@@ -78,7 +78,6 @@ type ImageRenderedMsg struct {
 	MessageIndex int
 }
 
-
 type ToolExecution struct {
 	CallID    string // for matching call↔result events
 	Name      string
@@ -139,6 +138,8 @@ type TranscriptItem struct {
 	Expanded  bool
 	ID        int
 	Timestamp time.Time
+
+	pendingReviewTrace bool
 }
 
 type toggleTarget struct {

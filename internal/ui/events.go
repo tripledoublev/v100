@@ -51,6 +51,20 @@ func (m *TUIModel) appendEvent(ev core.Event) {
 		var p core.UserMsgPayload
 		_ = json.Unmarshal(ev.Payload, &p)
 		if !sub {
+			if p.Source == "reviewer" {
+				if role, text, ok := parseExternalReviewContent(p.Content); ok {
+					if !m.consumePendingReviewTrace(role, text) {
+						m.addItem(&TranscriptItem{
+							Type:      ItemMessage,
+							Role:      role,
+							Text:      text,
+							Timestamp: ev.TS,
+						})
+						_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", role, text)
+					}
+					break
+				}
+			}
 			role := "user"
 			if p.Source == "system" {
 				role = "system"
@@ -282,6 +296,26 @@ func (m *TUIModel) addItem(item *TranscriptItem) {
 	item.ID = m.nextItemID
 	m.nextItemID++
 	m.history = append(m.history, item)
+}
+
+func (m *TUIModel) markReviewTracePending(itemID int) {
+	for _, item := range m.history {
+		if item.ID == itemID {
+			item.pendingReviewTrace = true
+			return
+		}
+	}
+}
+
+func (m *TUIModel) consumePendingReviewTrace(role, text string) bool {
+	text = strings.TrimSpace(text)
+	for _, item := range m.history {
+		if item.pendingReviewTrace && item.Type == ItemMessage && item.Role == role && strings.TrimSpace(item.Text) == text {
+			item.pendingReviewTrace = false
+			return true
+		}
+	}
+	return false
 }
 
 func (m *TUIModel) getOrCreateToolGroup() *TranscriptItem {
@@ -614,6 +648,11 @@ func (m *TUIModel) updateStatus(ev core.Event) {
 		}
 		m.runSummary = fmt.Sprintf("v100 run %s  %s · %s", runShort, p.Provider, p.Model)
 	case core.EventUserMsg:
+		var p core.UserMsgPayload
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p.Source == "reviewer" {
+			return
+		}
 		m.StatusMode = i18n.StatusThinking
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = pickStatusLine(m.statusTick, []string{
