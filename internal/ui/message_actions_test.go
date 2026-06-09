@@ -2,12 +2,15 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/i18n"
 )
 
 func TestAssistantActionRowRendersEligibleButtons(t *testing.T) {
@@ -227,6 +230,154 @@ func TestAskActionAppendsReplyAndUsesStubbedRunner(t *testing.T) {
 	}
 	if m.statusLine != "codex replied" {
 		t.Fatalf("statusLine = %q, want codex replied", m.statusLine)
+	}
+}
+
+func TestReviewDoneRendersTranscriptBeforePersistingReview(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.width = 100
+	m.height = 30
+	m.history = []*TranscriptItem{
+		{ID: 1, Type: ItemMessage, Role: "codex", Text: "", Timestamp: time.Now()},
+	}
+	m.nextItemID = 2
+	m.rebuildTranscript(true)
+
+	var called bool
+	var gotRole, gotContent string
+	m.AppendConversationMessageFn = func(role, content string) {
+		called = true
+		gotRole = role
+		gotContent = content
+	}
+
+	updated, cmd := m.Update(reviewDoneMsg{
+		action: actionAskCodex,
+		itemID: 1,
+		output: "second opinion",
+	})
+	m = updated.(*TUIModel)
+
+	if called {
+		t.Fatal("persistence callback ran synchronously before Update returned")
+	}
+	if cmd == nil {
+		t.Fatal("expected review persistence command")
+	}
+	if out := stripANSI(m.transcriptBuf.String()); !strings.Contains(out, "second opinion") {
+		t.Fatalf("transcript buffer missing review output: %q", out)
+	}
+	if view := stripANSI(m.transcript.View()); !strings.Contains(view, "second opinion") {
+		t.Fatalf("visible transcript missing review output: %q", view)
+	}
+
+	if msg := cmd(); msg != nil {
+		t.Fatalf("persistence command message = %T, want nil", msg)
+	}
+	if !called {
+		t.Fatal("persistence callback did not run from returned command")
+	}
+	if gotRole != "system" {
+		t.Fatalf("persisted role = %q, want system", gotRole)
+	}
+	if !strings.Contains(gotContent, "[external review: codex]") || !strings.Contains(gotContent, "second opinion") {
+		t.Fatalf("persisted content = %q", gotContent)
+	}
+}
+
+func TestReviewerTraceEventRendersAsReviewRoleOnResume(t *testing.T) {
+	m := NewTUIModel(false, false)
+
+	m.appendEvent(reviewerEvent(t, "claude", "second opinion"))
+
+	last := m.history[len(m.history)-1]
+	if last.Role != "claude" || last.Text != "second opinion" {
+		t.Fatalf("last item = %+v, want claude review", last)
+	}
+	out := stripANSI(m.transcriptBuf.String())
+	if !strings.Contains(out, "claude") || !strings.Contains(out, "second opinion") {
+		t.Fatalf("transcript missing reviewer content: %q", out)
+	}
+	if strings.Contains(out, "[external review:") {
+		t.Fatalf("transcript leaked persistence wrapper: %q", out)
+	}
+}
+
+func TestReviewerTraceEventDoesNotDuplicateVisibleReviewItem(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.history = []*TranscriptItem{
+		{ID: 1, Type: ItemMessage, Role: "codex", Text: "second opinion", Timestamp: time.Now(), pendingReviewTrace: true},
+	}
+	m.nextItemID = 2
+	m.rebuildTranscript(true)
+
+	m.appendEvent(reviewerEvent(t, "codex", "second opinion"))
+
+	var matches int
+	for _, item := range m.history {
+		if item.Type == ItemMessage && item.Role == "codex" && item.Text == "second opinion" {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("codex review message count = %d, want 1", matches)
+	}
+	out := stripANSI(m.transcriptBuf.String())
+	if strings.Count(out, "second opinion") != 1 {
+		t.Fatalf("transcript duplicated review output: %q", out)
+	}
+	if m.history[0].pendingReviewTrace {
+		t.Fatal("expected pending review trace marker to be consumed")
+	}
+}
+
+func TestReviewerTraceEventsKeepDistinctSameTextReviews(t *testing.T) {
+	m := NewTUIModel(false, false)
+
+	m.appendEvent(reviewerEvent(t, "codex", "same note"))
+	m.appendEvent(reviewerEvent(t, "codex", "same note"))
+
+	var matches int
+	for _, item := range m.history {
+		if item.Type == ItemMessage && item.Role == "codex" && item.Text == "same note" {
+			matches++
+		}
+	}
+	if matches != 2 {
+		t.Fatalf("codex same-text review message count = %d, want 2", matches)
+	}
+}
+
+func TestReviewerTraceEventDoesNotOverrideReplyStatus(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.statusMode = "idle"
+	m.StatusMode = i18n.StatusIdle
+	m.statusLine = "codex replied"
+
+	m.appendEvent(reviewerEvent(t, "codex", "second opinion"))
+
+	if m.statusLine != "codex replied" {
+		t.Fatalf("statusLine = %q, want codex replied", m.statusLine)
+	}
+	if m.statusMode != "idle" {
+		t.Fatalf("statusMode = %q, want idle", m.statusMode)
+	}
+}
+
+func reviewerEvent(t *testing.T, label, output string) core.Event {
+	t.Helper()
+	payload, err := json.Marshal(core.UserMsgPayload{
+		Source:  "reviewer",
+		Content: externalReviewConversationContent(label, output),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return core.Event{
+		RunID:   "run-test",
+		TS:      time.Now(),
+		Type:    core.EventUserMsg,
+		Payload: payload,
 	}
 }
 

@@ -69,6 +69,33 @@ func buildReviewPrompt(contextUser, assistantText string) string {
 	return "Please review the following assistant response.\n\nOriginal user request:\n" + contextUser + "\n\nAssistant response:\n" + assistantText
 }
 
+const externalReviewGuidance = "This is feedback on the previous assistant response. Incorporate it when relevant."
+
+func externalReviewConversationContent(label, output string) string {
+	return "[external review: " + label + "]\n" +
+		externalReviewGuidance + "\n\n" +
+		output
+}
+
+func parseExternalReviewContent(content string) (string, string, bool) {
+	content = strings.TrimSpace(content)
+	const prefix = "[external review: "
+	if !strings.HasPrefix(content, prefix) {
+		return "", "", false
+	}
+	end := strings.Index(content, "]")
+	if end <= len(prefix) {
+		return "", "", false
+	}
+	label := strings.TrimSpace(content[len(prefix):end])
+	body := strings.TrimSpace(content[end+1:])
+	body = strings.TrimSpace(strings.TrimPrefix(body, externalReviewGuidance))
+	if label == "" || body == "" {
+		return "", "", false
+	}
+	return label, body, true
+}
+
 func realRunReview(ctx context.Context, kind messageActionKind, prompt string) (string, error) {
 	var cmd *exec.Cmd
 	switch kind {

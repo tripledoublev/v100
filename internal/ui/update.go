@@ -92,6 +92,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.reviewCancel != nil {
 			m.reviewCancel = nil
 		}
+		var persistReviewCmd tea.Cmd
 		// FIX: use index-based access to modify slice elements in place
 		for idx := range m.history {
 			if m.history[idx].ID == msg.itemID {
@@ -119,13 +120,19 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusLine = reviewLabel(msg.action) + " replied"
 			if strings.TrimSpace(msg.output) != "" && m.AppendConversationMessageFn != nil {
 				label := reviewLabel(msg.action)
-				content := "[external review: " + label + "]\n" +
-					"This is feedback on the previous assistant response. Incorporate it when relevant.\n\n" +
-					msg.output
-				m.AppendConversationMessageFn("system", content)
+				content := externalReviewConversationContent(label, msg.output)
+				appendConversationMessage := m.AppendConversationMessageFn
+				m.markReviewTracePending(msg.itemID)
+				persistReviewCmd = func() tea.Msg {
+					appendConversationMessage("system", content)
+					return nil
+				}
 			}
 		}
 		m.rebuildTranscript(true)
+		if persistReviewCmd != nil {
+			cmds = append(cmds, persistReviewCmd)
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
