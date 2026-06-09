@@ -270,6 +270,9 @@ func TestReviewDoneRendersTranscriptBeforePersistingReview(t *testing.T) {
 	if view := stripANSI(m.transcript.View()); !strings.Contains(view, "second opinion") {
 		t.Fatalf("visible transcript missing review output: %q", view)
 	}
+	if plain := m.plainBuf.String(); !strings.Contains(plain, "codex: second opinion") {
+		t.Fatalf("plain transcript missing review output: %q", plain)
+	}
 
 	if msg := cmd(); msg != nil {
 		t.Fatalf("persistence command message = %T, want nil", msg)
@@ -282,6 +285,11 @@ func TestReviewDoneRendersTranscriptBeforePersistingReview(t *testing.T) {
 	}
 	if !strings.Contains(gotContent, "[external review: codex]") || !strings.Contains(gotContent, "second opinion") {
 		t.Fatalf("persisted content = %q", gotContent)
+	}
+
+	m.appendEvent(reviewerEvent(t, "codex", "second opinion"))
+	if plain := m.plainBuf.String(); strings.Count(plain, "codex: second opinion") != 1 {
+		t.Fatalf("plain transcript duplicated review output after trace echo: %q", plain)
 	}
 }
 

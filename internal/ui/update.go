@@ -118,14 +118,17 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMode = "idle"
 			m.statusLine = reviewLabel(msg.action) + " replied"
-			if strings.TrimSpace(msg.output) != "" && m.AppendConversationMessageFn != nil {
+			if strings.TrimSpace(msg.output) != "" {
 				label := reviewLabel(msg.action)
-				content := externalReviewConversationContent(label, msg.output)
-				appendConversationMessage := m.AppendConversationMessageFn
-				m.markReviewTracePending(msg.itemID)
-				persistReviewCmd = func() tea.Msg {
-					appendConversationMessage("system", content)
-					return nil
+				_, _ = fmt.Fprintf(&m.plainBuf, "\n%s: %s\n", label, msg.output)
+				if m.AppendConversationMessageFn != nil {
+					content := externalReviewConversationContent(label, msg.output)
+					appendConversationMessage := m.AppendConversationMessageFn
+					m.markReviewTracePending(msg.itemID)
+					persistReviewCmd = func() tea.Msg {
+						appendConversationMessage("system", content)
+						return nil
+					}
 				}
 			}
 		}
