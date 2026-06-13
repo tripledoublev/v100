@@ -237,7 +237,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		}
 
 		outputFn := acp.NewTranslator(s.conn, sessionID)
-		registerAgentTool(cfg, comp.Registry, comp.Trace, comp.Budget, &outputFn, confirmFn, comp.Workspace, cfg.Defaults.MaxToolCallsPerStep, comp.Session, comp.Mapper)
+		registerAgentTool(cfg, comp.Registry, comp.Trace, comp.Budget, &outputFn, confirmFn, comp.Workspace, cfg.Defaults.MaxToolCallsPerStep, comp.Session, comp.Mapper, comp.ToolEnv, comp.RedactToolOutput)
 
 		loop := &core.Loop{
 			Run:              comp.Run,
@@ -253,6 +253,8 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			OutputFn:         outputFn,
 			Session:          comp.Session,
 			Mapper:           comp.Mapper,
+			ToolEnv:          append([]string(nil), comp.ToolEnv...),
+			RedactToolOutput: comp.RedactToolOutput,
 			NetworkTier:      loopNetworkTier(cfg),
 			Snapshots:        buildSnapshotManager(cfg, comp.Workspace),
 			Solver:           comp.Solver,

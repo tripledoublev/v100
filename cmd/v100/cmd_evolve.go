@@ -615,23 +615,26 @@ func runBenchWithPolicy(
 		renderer := ui.NewCLIRenderer()
 		confirmFn := func(_, _ string) bool { return true }
 		outputFn := core.OutputFn(renderer.RenderEvent)
-		registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sWorkspace, pol.MaxToolCallsPerStep, sSession, sMapper)
+		toolEnv, redactToolOutput := buildToolRuntime(cfg)
+		registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sWorkspace, pol.MaxToolCallsPerStep, sSession, sMapper, toolEnv, redactToolOutput)
 
 		loop := &core.Loop{
-			Run:         coreRun,
-			Provider:    prov,
-			Tools:       reg,
-			Policy:      pol,
-			Trace:       trace,
-			Budget:      budget,
-			ConfirmFn:   confirmFn,
-			OutputFn:    outputFn,
-			GenParams:   genParams,
-			Solver:      solver,
-			Session:     sSession,
-			Mapper:      sMapper,
-			NetworkTier: loopNetworkTier(cfg),
-			Snapshots:   buildSnapshotManager(cfg, sWorkspace),
+			Run:              coreRun,
+			Provider:         prov,
+			Tools:            reg,
+			Policy:           pol,
+			Trace:            trace,
+			Budget:           budget,
+			ConfirmFn:        confirmFn,
+			OutputFn:         outputFn,
+			GenParams:        genParams,
+			Solver:           solver,
+			Session:          sSession,
+			Mapper:           sMapper,
+			ToolEnv:          append([]string(nil), toolEnv...),
+			RedactToolOutput: redactToolOutput,
+			NetworkTier:      loopNetworkTier(cfg),
+			Snapshots:        buildSnapshotManager(cfg, sWorkspace),
 		}
 
 		loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))

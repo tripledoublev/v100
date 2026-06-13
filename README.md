@@ -112,6 +112,21 @@ Run fully unattended (the agent executes until completion or budget exhaustion):
 ./v100 run --continuous --workspace .
 ```
 
+Agent-run shell commands receive a minimal environment by default. To let a
+workflow use GitHub CLI auth without exposing unrelated shell secrets, export a
+token and opt in explicitly:
+
+```toml
+[tools.auth.github]
+mode = "env"
+env = "GH_TOKEN"
+```
+
+`[tools.env] allow = ["GH_TOKEN"]` is also supported for generic env
+passthrough. Values matching the configured redaction rules are scrubbed from
+traces, streamed tool output, and model-visible tool results. Authenticated
+writes still use the normal dangerous-tool confirmation flow.
+
 ### 3. Inspecting the Engine
 
 Browse recent runs, resume them, or replay their traces:

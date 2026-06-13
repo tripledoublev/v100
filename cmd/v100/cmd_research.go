@@ -254,17 +254,20 @@ func runResearchLoop(
 
 		model := resolveModel(v100cfg, providerName)
 		metadata := resolveProviderMetadata(ctx, prov, model, providers.ModelMetadata{})
+		toolEnv, redactToolOutput := buildToolRuntime(v100cfg)
 
 		loop := &core.Loop{
-			Run:       coreRun,
-			Provider:  prov,
-			Tools:     reg,
-			Policy:    pol,
-			Trace:     trace,
-			Budget:    budget,
-			ConfirmFn: confirmFn,
-			OutputFn:  outputFn,
-			Solver:    solver,
+			Run:              coreRun,
+			Provider:         prov,
+			Tools:            reg,
+			Policy:           pol,
+			Trace:            trace,
+			Budget:           budget,
+			ConfirmFn:        confirmFn,
+			OutputFn:         outputFn,
+			Solver:           solver,
+			ToolEnv:          append([]string(nil), toolEnv...),
+			RedactToolOutput: redactToolOutput,
 		}
 		loop.ModelMetadata = metadata
 

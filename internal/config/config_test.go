@@ -30,6 +30,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.UI.Theme != "v100" {
 		t.Errorf("expected default UI theme v100, got %q", cfg.UI.Theme)
 	}
+	if !containsString(cfg.Tools.Env.Redact, "*_TOKEN") {
+		t.Error("expected default tool env redaction patterns")
+	}
+	if cfg.Tools.Auth.GitHub.Mode != "disabled" {
+		t.Errorf("expected GitHub tool auth disabled by default, got %q", cfg.Tools.Auth.GitHub.Mode)
+	}
+	if cfg.Tools.Auth.GitHub.Env != "GH_TOKEN" {
+		t.Errorf("expected GitHub tool auth env GH_TOKEN, got %q", cfg.Tools.Auth.GitHub.Env)
+	}
 
 	// Check that anthropic provider exists in defaults
 	if _, ok := cfg.Providers["anthropic"]; !ok {
@@ -152,6 +161,11 @@ env = "ANTHROPIC_API_KEY"
 [tools]
 enabled = ["fs_read"]
 dangerous = []
+[tools.env]
+allow = ["GH_TOKEN"]
+[tools.auth.github]
+mode = "env"
+env = "GITHUB_TOKEN"
 
 [defaults]
 provider = "anthropic"
@@ -180,6 +194,12 @@ theme = "dracula"
 	}
 	if cfg.UI.Theme != "dracula" {
 		t.Errorf("expected UI theme dracula, got %q", cfg.UI.Theme)
+	}
+	if !containsString(cfg.Tools.Env.Allow, "GH_TOKEN") {
+		t.Errorf("expected tool env allow to include GH_TOKEN, got %v", cfg.Tools.Env.Allow)
+	}
+	if cfg.Tools.Auth.GitHub.Mode != "env" || cfg.Tools.Auth.GitHub.Env != "GITHUB_TOKEN" {
+		t.Errorf("unexpected GitHub tool auth config: %+v", cfg.Tools.Auth.GitHub)
 	}
 
 	// Verify sh is migrated if missing
@@ -295,6 +315,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "[ui]") || !contains(toml, `theme = "v100"`) {
 		t.Error("default TOML should contain UI theme config")
+	}
+	if !contains(toml, "[tools.env]") || !contains(toml, `allow = []`) {
+		t.Error("default TOML should contain tool env passthrough config")
+	}
+	if !contains(toml, "[tools.auth.github]") || !contains(toml, `mode = "disabled"`) {
+		t.Error("default TOML should contain GitHub tool auth config")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

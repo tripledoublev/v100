@@ -69,7 +69,7 @@ func (s *MiniGLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (S
 		}
 
 		// Turn start
-		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, currentProv))
+		_, _ = l.emit(EventModelCall, stepID, l.modelCallTracePayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, currentProv))
 
 		var (
 			assistantText strings.Builder
@@ -111,10 +111,7 @@ func (s *MiniGLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (S
 			return SolveResult{}, err
 		}
 
-		tcPayload := make([]ToolCall, len(toolCalls))
-		for i, tc := range toolCalls {
-			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
-		}
+		tcPayload := l.toolCallTracePayload(toolCalls)
 		_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
 			Text:      assistantText.String(),
 			ToolCalls: tcPayload,

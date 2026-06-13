@@ -89,8 +89,9 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 
 	res, err := call.Session.Run(ctx, executor.RunRequest{
 		Command:      "sh",
-		Args:         []string{"-c", sanitizedShellWrapperScript, "v100-sh", a.Cmd},
+		Args:         []string{"-c", a.Cmd},
 		Dir:          ".",
+		Env:          call.Env,
 		StdoutWriter: outputDeltaWriter(call, "stdout"),
 		StderrWriter: outputDeltaWriter(call, "stderr"),
 	})
@@ -100,10 +101,9 @@ func (t *shTool) Exec(ctx context.Context, call ToolCallContext, args json.RawMe
 
 	stdout := res.Stdout
 	stderr := res.Stderr
-	if call.Mapper != nil {
-		stdout = call.Mapper.SanitizeText(stdout)
-		stderr = call.Mapper.SanitizeText(stderr)
-	}
+	stdout, stderr = appendGitHubCLIDiagnostic(a.Cmd, stdout, stderr, call.Env)
+	stdout = sanitizeToolText(call, stdout)
+	stderr = sanitizeToolText(call, stderr)
 
 	out, cappedStdout, cappedStderr, err := marshalShellResult(stdout, stderr, res.ExitCode)
 	if err != nil {
@@ -191,15 +191,3 @@ func shrinkShellStreamBudget(budget int) int {
 	}
 	return next
 }
-
-const sanitizedShellWrapperScript = `
-exec env -i \
-PATH="${PATH:-/usr/bin:/bin}" \
-HOME="$PWD" \
-TMPDIR="${TMPDIR:-/tmp}" \
-PWD="$PWD" \
-LANG="${LANG:-C.UTF-8}" \
-TERM="${TERM:-dumb}" \
-SHELL=sh \
-sh -c "$1"
-`

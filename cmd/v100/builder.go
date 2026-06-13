@@ -16,21 +16,23 @@ import (
 
 // RunComponents holds all the pieces needed to start a core.Loop.
 type RunComponents struct {
-	Config        *config.Config
-	Run           *core.Run
-	Provider      providers.Provider
-	EmbedProvider providers.Provider
-	Registry      *tools.Registry
-	Policy        *policy.Policy
-	Trace         *core.TraceWriter
-	Budget        *core.BudgetTracker
-	Session       executor.Session
-	Mapper        *core.PathMapper
-	Workspace     string
-	Model         string
-	ModelMetadata providers.ModelMetadata
-	GenParams     providers.GenParams
-	Solver        core.Solver
+	Config           *config.Config
+	Run              *core.Run
+	Provider         providers.Provider
+	EmbedProvider    providers.Provider
+	Registry         *tools.Registry
+	Policy           *policy.Policy
+	Trace            *core.TraceWriter
+	Budget           *core.BudgetTracker
+	Session          executor.Session
+	Mapper           *core.PathMapper
+	Workspace        string
+	Model            string
+	ModelMetadata    providers.ModelMetadata
+	GenParams        providers.GenParams
+	Solver           core.Solver
+	ToolEnv          []string
+	RedactToolOutput func(string) string
 }
 
 // BuildRunComponents constructs the agent runtime based on config and overrides.
@@ -142,6 +144,7 @@ func BuildRunComponents(cfg *config.Config, opts RunOptions) (*RunComponents, er
 	}
 
 	budget := core.NewBudgetTracker(&run.Budget)
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
 
 	// 7. Solver
 	solver, err := buildSolver(cfg, opts.SolverName)
@@ -154,19 +157,21 @@ func BuildRunComponents(cfg *config.Config, opts RunOptions) (*RunComponents, er
 	}
 
 	return &RunComponents{
-		Config:        cfg,
-		Run:           run,
-		Provider:      prov,
-		EmbedProvider: embedProv,
-		Registry:      reg,
-		Policy:        pol,
-		Trace:         trace,
-		Budget:        budget,
-		Session:       session,
-		Mapper:        mapper,
-		Workspace:     workspace,
-		Model:         model,
-		Solver:        solver,
+		Config:           cfg,
+		Run:              run,
+		Provider:         prov,
+		EmbedProvider:    embedProv,
+		Registry:         reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		Session:          session,
+		Mapper:           mapper,
+		Workspace:        workspace,
+		Model:            model,
+		Solver:           solver,
+		ToolEnv:          toolEnv,
+		RedactToolOutput: redactToolOutput,
 	}, nil
 }
 

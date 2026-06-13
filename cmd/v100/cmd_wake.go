@@ -863,6 +863,7 @@ func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace
 
 	reg := tools.NewRegistry(nil)
 	pol := policy.Default()
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
 
 	loop := &core.Loop{
 		Run: &core.Run{
@@ -875,15 +876,17 @@ func runWakeCycleWithProvider(ctx context.Context, cfg *config.Config, workspace
 				MaxCostUSD: cfg.Wake.BudgetCostUSD,
 			},
 		},
-		Provider:      prov,
-		Tools:         reg,
-		Policy:        pol,
-		Trace:         trace,
-		Budget:        core.NewBudgetTracker(&core.Budget{MaxSteps: cfg.Wake.BudgetSteps, MaxTokens: cfg.Wake.BudgetTokens, MaxCostUSD: cfg.Wake.BudgetCostUSD}),
-		ConfirmFn:     func(_, _ string) bool { return false },
-		Mapper:        core.NewPathMapper(workspace, workspace),
-		NetworkTier:   "off",
-		ModelMetadata: providersModelMetadata(ctx, prov, model),
+		Provider:         prov,
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           core.NewBudgetTracker(&core.Budget{MaxSteps: cfg.Wake.BudgetSteps, MaxTokens: cfg.Wake.BudgetTokens, MaxCostUSD: cfg.Wake.BudgetCostUSD}),
+		ConfirmFn:        func(_, _ string) bool { return false },
+		Mapper:           core.NewPathMapper(workspace, workspace),
+		ToolEnv:          append([]string(nil), toolEnv...),
+		RedactToolOutput: redactToolOutput,
+		NetworkTier:      "off",
+		ModelMetadata:    providersModelMetadata(ctx, prov, model),
 	}
 
 	if err := loop.EmitRunStart(core.RunStartPayload{
@@ -1545,6 +1548,7 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 	defer func() { _ = trace.Close() }()
 
 	var carryContext string
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
 
 	for i, step := range task.Steps {
 		reg := buildScopedToolRegistry(cfg, step.EnabledTools()...)
@@ -1562,15 +1566,17 @@ func runWakeSynthesisTask(ctx context.Context, cfg *config.Config, workspace, pr
 					MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps)),
 				},
 			},
-			Provider:      prov,
-			Tools:         reg,
-			Policy:        pol,
-			Trace:         trace,
-			Budget:        core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: cfg.Wake.BudgetTokens / len(task.Steps), MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps))}),
-			ConfirmFn:     func(_, _ string) bool { return true },
-			Mapper:        core.NewPathMapper(workspace, workspace),
-			NetworkTier:   "open",
-			ModelMetadata: providersModelMetadata(ctx, prov, model),
+			Provider:         prov,
+			Tools:            reg,
+			Policy:           pol,
+			Trace:            trace,
+			Budget:           core.NewBudgetTracker(&core.Budget{MaxSteps: 10, MaxTokens: cfg.Wake.BudgetTokens / len(task.Steps), MaxCostUSD: cfg.Wake.BudgetCostUSD / float64(len(task.Steps))}),
+			ConfirmFn:        func(_, _ string) bool { return true },
+			Mapper:           core.NewPathMapper(workspace, workspace),
+			ToolEnv:          append([]string(nil), toolEnv...),
+			RedactToolOutput: redactToolOutput,
+			NetworkTier:      "open",
+			ModelMetadata:    providersModelMetadata(ctx, prov, model),
 		}
 
 		stepPrompt, err := buildStepPrompt(cfg.PromptBaseDir(), task, i, step, carryContext)

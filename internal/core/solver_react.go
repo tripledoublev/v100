@@ -105,7 +105,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		for _, ts := range toolSpecs {
 			toolNames = append(toolNames, ts.Name)
 		}
-		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, l.Provider))
+		_, _ = l.emit(EventModelCall, stepID, l.modelCallTracePayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, l.Provider))
 
 		var (
 			assistantText strings.Builder
@@ -229,10 +229,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			terminalErr = err
 		}
 
-		tcPayload := make([]ToolCall, len(toolCalls))
-		for i, tc := range toolCalls {
-			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
-		}
+		tcPayload := l.toolCallTracePayload(toolCalls)
 
 		// Proactive Tool Call Validation: Check for malformed JSON before execution or history persistence.
 		var malformedTCs []providers.ToolCall

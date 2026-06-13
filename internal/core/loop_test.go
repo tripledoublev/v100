@@ -68,6 +68,33 @@ func (p *watchdogCapturingProvider) Metadata(_ context.Context, model string) (p
 	return providers.ModelMetadata{Model: "capturing", ContextSize: 4096}, nil
 }
 
+type secretOutputTool struct {
+	secret string
+}
+
+func (t *secretOutputTool) Name() string { return "secret_output" }
+func (t *secretOutputTool) Description() string {
+	return "Emit a configured secret for redaction tests."
+}
+func (t *secretOutputTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (t *secretOutputTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string"}}}`)
+}
+func (t *secretOutputTool) DangerLevel() tools.DangerLevel { return tools.Safe }
+func (t *secretOutputTool) Effects() tools.ToolEffects     { return tools.ToolEffects{} }
+func (t *secretOutputTool) Exec(_ context.Context, call tools.ToolCallContext, _ json.RawMessage) (tools.ToolResult, error) {
+	if call.EmitOutputDelta != nil {
+		_ = call.EmitOutputDelta("stdout", "stream "+t.secret)
+	}
+	return tools.ToolResult{
+		OK:     true,
+		Output: "output " + t.secret,
+		Stdout: "stdout " + t.secret,
+	}, nil
+}
+
 func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (*core.Loop, *core.TraceWriter) {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,6 +131,65 @@ func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (
 		Mapper:    core.NewPathMapper(dir, dir),
 	}
 	return loop, trace
+}
+
+func TestLoopRedactsToolSecretsFromTraceAndModelMessages(t *testing.T) {
+	secret := "super-secret-token"
+	prov := &watchdogCapturingProvider{
+		responses: []providers.CompleteResponse{
+			{ToolCalls: []providers.ToolCall{{ID: "call-1", Name: "secret_output", Args: json.RawMessage(`{"token":"super-secret-token"}`)}}},
+			{AssistantText: `{"predicted_result":"prediction super-secret-token"}`},
+			{AssistantText: "done"},
+		},
+	}
+	loop, trace := newTestLoop(t, prov, []string{"secret_output"})
+	defer func() { _ = trace.Close() }()
+	loop.Tools.Register(&secretOutputTool{secret: secret})
+	loop.Policy.MirrorToolResults = true
+	loop.RedactToolOutput = func(text string) string {
+		return strings.ReplaceAll(text, secret, "[REDACTED]")
+	}
+
+	if err := loop.Step(context.Background(), "run tool"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if strings.Contains(string(ev.Payload), secret) {
+			t.Fatalf("secret leaked in trace event %s payload %s", ev.Type, string(ev.Payload))
+		}
+	}
+	if len(prov.requests) < 2 {
+		t.Fatalf("provider requests = %d, want at least 2", len(prov.requests))
+	}
+	for _, msg := range prov.requests[1].Messages {
+		if strings.Contains(msg.Content, secret) {
+			t.Fatalf("secret leaked into tool prediction prompt: %q", msg.Content)
+		}
+	}
+	if len(prov.requests) < 3 {
+		t.Fatalf("provider requests = %d, want at least 3", len(prov.requests))
+	}
+	var sawToolMessage bool
+	for _, msg := range prov.requests[2].Messages {
+		if msg.Role != "tool" {
+			continue
+		}
+		sawToolMessage = true
+		if strings.Contains(msg.Content, secret) {
+			t.Fatalf("secret leaked into model-visible tool message: %q", msg.Content)
+		}
+		if !strings.Contains(msg.Content, "[REDACTED]") {
+			t.Fatalf("tool message was not redacted: %q", msg.Content)
+		}
+	}
+	if !sawToolMessage {
+		t.Fatal("expected redacted tool message in second model request")
+	}
 }
 
 func TestAppendConversationMessagePersistsForNextModelCall(t *testing.T) {

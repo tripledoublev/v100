@@ -605,23 +605,26 @@ func runBenchConfig(cfgPath *string, benchPath string, opts benchRunOptions) (st
 			renderer := ui.NewCLIRenderer()
 			confirmFn := func(_, _ string) bool { return true }
 			outputFn := core.OutputFn(renderer.RenderEvent)
-			registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sWorkspace, pol.MaxToolCallsPerStep, sSession, sMapper)
+			toolEnv, redactToolOutput := buildToolRuntime(cfg)
+			registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sWorkspace, pol.MaxToolCallsPerStep, sSession, sMapper, toolEnv, redactToolOutput)
 
 			loop := &core.Loop{
-				Run:         coreRun,
-				Provider:    prov,
-				Tools:       reg,
-				Policy:      pol,
-				Trace:       trace,
-				Budget:      budget,
-				ConfirmFn:   confirmFn,
-				OutputFn:    outputFn,
-				GenParams:   genParams,
-				Solver:      solver,
-				Session:     sSession,
-				Mapper:      sMapper,
-				NetworkTier: loopNetworkTier(cfg),
-				Snapshots:   buildSnapshotManager(cfg, sWorkspace),
+				Run:              coreRun,
+				Provider:         prov,
+				Tools:            reg,
+				Policy:           pol,
+				Trace:            trace,
+				Budget:           budget,
+				ConfirmFn:        confirmFn,
+				OutputFn:         outputFn,
+				GenParams:        genParams,
+				Solver:           solver,
+				Session:          sSession,
+				Mapper:           sMapper,
+				ToolEnv:          append([]string(nil), toolEnv...),
+				RedactToolOutput: redactToolOutput,
+				NetworkTier:      loopNetworkTier(cfg),
+				Snapshots:        buildSnapshotManager(cfg, sWorkspace),
 			}
 
 			metadata, _ := prov.Metadata(ctx, variant.Model)
@@ -930,23 +933,26 @@ func experimentCmd(cfgPath *string) *cobra.Command {
 
 					confirmFn := func(_, _ string) bool { return true } // auto-approve for experiments
 					outputFn := core.OutputFn(func(ev core.Event) {})   // silent by default
-					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper)
+					toolEnv, redactToolOutput := buildToolRuntime(cfg)
+					registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, s_workspace, pol.MaxToolCallsPerStep, s_session, s_mapper, toolEnv, redactToolOutput)
 
 					loop := &core.Loop{
-						Run:         coreRun,
-						Provider:    prov,
-						Tools:       reg,
-						Policy:      pol,
-						Trace:       trace,
-						Budget:      budget,
-						ConfirmFn:   confirmFn,
-						OutputFn:    outputFn,
-						Solver:      solver,
-						GenParams:   providers.GenParams{},
-						Session:     s_session,
-						Mapper:      s_mapper,
-						NetworkTier: loopNetworkTier(cfg),
-						Snapshots:   buildSnapshotManager(cfg, s_workspace),
+						Run:              coreRun,
+						Provider:         prov,
+						Tools:            reg,
+						Policy:           pol,
+						Trace:            trace,
+						Budget:           budget,
+						ConfirmFn:        confirmFn,
+						OutputFn:         outputFn,
+						Solver:           solver,
+						GenParams:        providers.GenParams{},
+						Session:          s_session,
+						Mapper:           s_mapper,
+						ToolEnv:          append([]string(nil), toolEnv...),
+						RedactToolOutput: redactToolOutput,
+						NetworkTier:      loopNetworkTier(cfg),
+						Snapshots:        buildSnapshotManager(cfg, s_workspace),
 					}
 
 					metadata, _ := prov.Metadata(ctx, model)

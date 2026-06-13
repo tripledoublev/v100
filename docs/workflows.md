@@ -55,7 +55,29 @@ Related commands:
 - `v100 compress <run_id>`
 - `v100 restore <run_id>`
 
-## 3. Evaluate a run
+## 3. Authenticated CLI workflows
+
+Shell tools do not inherit the full operator environment. Pass only the
+credentials a workflow needs:
+
+```toml
+[tools.auth.github]
+mode = "env"
+env = "GH_TOKEN"
+
+[tools.env]
+allow = ["GH_TOKEN"]
+redact = ["*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY"]
+```
+
+With `GH_TOKEN` exported, agent-run `gh issue create`, `gh pr create`, and
+related commands can authenticate without mounting unrelated shell secrets.
+When `gh` auth is missing, rejected, or under-scoped, shell output includes an
+actionable diagnostic. Secret values are redacted from traces, streamed output,
+and model-visible tool results. Authenticated writes still use the normal
+dangerous-tool confirmation flow.
+
+## 4. Evaluate a run
 
 Use this when a run is done and you want to score, classify, or analyze it.
 
@@ -81,7 +103,7 @@ Use this workflow for:
 - model/provider comparison
 - judging whether a run actually succeeded
 
-## 4. Benchmark a policy or provider
+## 5. Benchmark a policy or provider
 
 Use this when you want controlled comparisons instead of one-off runs.
 
@@ -109,7 +131,7 @@ Rule of thumb:
 - use `bench` for benchmark suites
 - use `experiment` for structured repeated comparisons across variants and prompts
 
-## 5. Durable memory workflow
+## 6. Durable memory workflow
 
 Use this when you want the runtime to keep facts, preferences, constraints, or notes across runs.
 
@@ -130,7 +152,7 @@ Use this workflow for:
 
 Memory is for durable runtime context. It is not a substitute for replay, eval, or benchmark artifacts.
 
-## 6. Long-running autonomous operation
+## 7. Long-running autonomous operation
 
 Use this when you want less hands-on supervision.
 
@@ -158,7 +180,7 @@ Important controls:
 
 This mode is powerful, but it is where runtime reliability and operator discipline matter most.
 
-## 7. Research subsystem
+## 8. Research subsystem
 
 Use this when you want v100 to run autonomous experiment loops against a target file and an experiment command.
 
@@ -186,7 +208,7 @@ This workflow is for:
 
 This is an important subsystem, but it is not the whole product.
 
-## 8. Training-loop subsystem
+## 9. Training-loop subsystem
 
 This is the specialized experiment-target path built around:
 
@@ -198,7 +220,7 @@ Use this only if you specifically want that training-loop workflow.
 
 This path is optional and more specialized than the rest of v100. Most of the engine does not depend on it.
 
-## 9. No GPU
+## 10. No GPU
 
 You do not need a GPU for the main v100 engine.
 
@@ -219,7 +241,7 @@ GPU-independent workflows include:
 
 The training-loop subsystem may require GPU-oriented setup depending on what experiment target you are running.
 
-## 10. Choosing the right workflow
+## 11. Choosing the right workflow
 
 Use this shortcut if you are unsure where to start:
 

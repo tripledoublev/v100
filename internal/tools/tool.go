@@ -35,10 +35,12 @@ type ToolCallContext struct {
 	StateDir         string // host path for run-scoped mutable state
 	TimeoutMS        int
 	Provider         providers.Provider
-	EmbedProvider    providers.Provider // dedicated embedding provider; falls back to Provider if nil
-	Registry         *Registry          // access to other enabled tools
-	Session          executor.Session   // active sandbox session
-	Mapper           PathTranslator     // bidirectional path mapping
+	EmbedProvider    providers.Provider  // dedicated embedding provider; falls back to Provider if nil
+	Registry         *Registry           // access to other enabled tools
+	Session          executor.Session    // active sandbox session
+	Mapper           PathTranslator      // bidirectional path mapping
+	Env              []string            // explicit environment passthrough entries (KEY=value)
+	RedactText       func(string) string // redacts secret values from tool-visible output
 	EmitOutputDelta  func(stream, text string) error
 }
 
@@ -72,13 +74,20 @@ type Tool interface {
 }
 
 func sanitizeToolResult(call ToolCallContext, result ToolResult) ToolResult {
-	if call.Mapper == nil {
-		return result
-	}
-	result.Output = call.Mapper.SanitizeText(result.Output)
-	result.Stdout = call.Mapper.SanitizeText(result.Stdout)
-	result.Stderr = call.Mapper.SanitizeText(result.Stderr)
+	result.Output = sanitizeToolText(call, result.Output)
+	result.Stdout = sanitizeToolText(call, result.Stdout)
+	result.Stderr = sanitizeToolText(call, result.Stderr)
 	return result
+}
+
+func sanitizeToolText(call ToolCallContext, text string) string {
+	if call.Mapper != nil {
+		text = call.Mapper.SanitizeText(text)
+	}
+	if call.RedactText != nil {
+		text = call.RedactText(text)
+	}
+	return text
 }
 
 func outputDeltaWriter(call ToolCallContext, stream string) io.Writer {
@@ -101,9 +110,7 @@ func (w toolOutputDeltaWriter) Write(p []byte) (int, error) {
 		return 0, nil
 	}
 	text := string(p)
-	if w.call.Mapper != nil {
-		text = w.call.Mapper.SanitizeText(text)
-	}
+	text = sanitizeToolText(w.call, text)
 	if err := w.call.EmitOutputDelta(w.stream, text); err != nil {
 		return 0, err
 	}

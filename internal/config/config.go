@@ -133,8 +133,27 @@ type AuthConfig struct {
 
 // ToolsConfig lists enabled and dangerous tools.
 type ToolsConfig struct {
-	Enabled   []string `toml:"enabled"`
-	Dangerous []string `toml:"dangerous"`
+	Enabled   []string       `toml:"enabled"`
+	Dangerous []string       `toml:"dangerous"`
+	Env       ToolEnvConfig  `toml:"env"`
+	Auth      ToolAuthConfig `toml:"auth"`
+}
+
+// ToolEnvConfig controls explicit environment passthrough for agent-run CLI tools.
+type ToolEnvConfig struct {
+	Allow  []string `toml:"allow"`
+	Redact []string `toml:"redact"`
+}
+
+// ToolAuthConfig contains first-class auth contracts for CLI tool families.
+type ToolAuthConfig struct {
+	GitHub GitHubToolAuthConfig `toml:"github"`
+}
+
+// GitHubToolAuthConfig controls GitHub CLI credential passthrough.
+type GitHubToolAuthConfig struct {
+	Mode string `toml:"mode"` // disabled | env
+	Env  string `toml:"env"`
 }
 
 // PolicyConfig holds specific named policies.
@@ -262,6 +281,15 @@ func DefaultConfig() *Config {
 				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
 			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"},
+			Env: ToolEnvConfig{
+				Redact: []string{"*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY", "GH_TOKEN", "GITHUB_TOKEN"},
+			},
+			Auth: ToolAuthConfig{
+				GitHub: GitHubToolAuthConfig{
+					Mode: "disabled",
+					Env:  "GH_TOKEN",
+				},
+			},
 		},
 		Agents: map[string]AgentConfig{
 			"researcher": {
@@ -414,6 +442,14 @@ model = "nomic-embed-text:latest"
 enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"]
 
+[tools.env]
+allow = []                       # explicit env vars passed to shell tools, e.g. ["GH_TOKEN"]
+redact = ["*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY", "GH_TOKEN", "GITHUB_TOKEN"]
+
+[tools.auth.github]
+mode = "disabled"                # disabled | env; env passes the configured token var to gh
+env = "GH_TOKEN"
+
 [policies.default]
 system_prompt_path = "~/.config/v100/policies/default.md"
 max_tool_calls_per_step = 50
@@ -488,6 +524,8 @@ func loadConfigFile(path string) (*Config, error) {
 	cfg.SourceDir = sourceDir
 	applyProviderDefaults(&cfg, DefaultConfig())
 	applyToolDefaults(&cfg.Tools, DefaultConfig().Tools)
+	applyToolEnvDefaults(&cfg.Tools.Env, DefaultConfig().Tools.Env)
+	applyToolAuthDefaults(&cfg.Tools.Auth, DefaultConfig().Tools.Auth)
 	// Backward-compatible tool migrations for older config files.
 	ensureString(&cfg.Tools.Enabled, "sh")
 	ensureString(&cfg.Tools.Dangerous, "sh")
@@ -579,6 +617,27 @@ func applyToolDefaults(dst *ToolsConfig, defaults ToolsConfig) {
 	}
 	if len(dst.Dangerous) == 0 {
 		dst.Dangerous = append([]string(nil), defaults.Dangerous...)
+	}
+}
+
+func applyToolEnvDefaults(dst *ToolEnvConfig, defaults ToolEnvConfig) {
+	if dst == nil {
+		return
+	}
+	if len(dst.Redact) == 0 {
+		dst.Redact = append([]string(nil), defaults.Redact...)
+	}
+}
+
+func applyToolAuthDefaults(dst *ToolAuthConfig, defaults ToolAuthConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.GitHub.Mode) == "" {
+		dst.GitHub.Mode = defaults.GitHub.Mode
+	}
+	if strings.TrimSpace(dst.GitHub.Env) == "" {
+		dst.GitHub.Env = defaults.GitHub.Env
 	}
 }
 

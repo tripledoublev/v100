@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 )
@@ -305,6 +306,7 @@ func validateEffectiveConfig(result *ValidationResult, cfg *Config) {
 	}
 	validateProviderFallbackCycles(result, cfg)
 	validateWakeTaskReference(result, cfg)
+	validateToolCredentialConfig(result, cfg)
 	validateUIConfig(result, cfg)
 }
 
@@ -376,6 +378,23 @@ func validateProviderFallbackCycles(result *ValidationResult, cfg *Config) {
 	}
 }
 
+func validateToolCredentialConfig(result *ValidationResult, cfg *Config) {
+	for i, name := range cfg.Tools.Env.Allow {
+		if !validEnvName(strings.TrimSpace(name)) {
+			result.Add(ValidationError, fmt.Sprintf("tools.env.allow[%d]", i), fmt.Sprintf("invalid environment variable name %q", name))
+		}
+	}
+	gh := cfg.Tools.Auth.GitHub
+	switch strings.ToLower(strings.TrimSpace(gh.Mode)) {
+	case "", "disabled", "env":
+	default:
+		result.Add(ValidationError, "tools.auth.github.mode", fmt.Sprintf("unsupported GitHub auth mode %q; use disabled or env", gh.Mode))
+	}
+	if strings.EqualFold(strings.TrimSpace(gh.Mode), "env") && !validEnvName(strings.TrimSpace(gh.Env)) {
+		result.Add(ValidationError, "tools.auth.github.env", fmt.Sprintf("invalid GitHub token environment variable name %q", gh.Env))
+	}
+}
+
 func validateUIConfig(result *ValidationResult, cfg *Config) {
 	theme := strings.ToLower(strings.TrimSpace(cfg.UI.Theme))
 	if theme == "" || theme == "default" {
@@ -386,6 +405,21 @@ func validateUIConfig(result *ValidationResult, cfg *Config) {
 	default:
 		result.Add(ValidationError, "ui.theme", fmt.Sprintf("unsupported UI theme %q; use v100, mono, dracula, or catppuccin", cfg.UI.Theme))
 	}
+}
+
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 && !(r == '_' || unicode.IsLetter(r)) {
+			return false
+		}
+		if !(r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeTOMLFile(path string, dst any) (toml.MetaData, error) {

@@ -214,7 +214,8 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 
 	renderer := ui.NewCLIRenderer()
 	outputFn := core.OutputFn(renderer.RenderEvent)
-	registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), workspace, pol.MaxToolCallsPerStep, session, mapper)
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, buildConfirmFn(cfg.Defaults.ConfirmTools), workspace, pol.MaxToolCallsPerStep, session, mapper, toolEnv, redactToolOutput)
 
 	ctx := context.Background()
 	metadata = resolveProviderMetadata(ctx, prov, model, metadata)
@@ -245,6 +246,8 @@ func resumeWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		OutputFn:         outputFn,
 		Session:          session,
 		Mapper:           mapper,
+		ToolEnv:          append([]string(nil), toolEnv...),
+		RedactToolOutput: redactToolOutput,
 		ModelMetadata:    metadata,
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
@@ -414,7 +417,8 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	}
 
 	tuiOutputFn := core.OutputFn(func(ev core.Event) { tui.SendEvent(ev) })
-	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
+	registerAgentTool(cfg, reg, trace, budget, &tuiOutputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper, toolEnv, redactToolOutput)
 
 	loop = &core.Loop{
 		Run:              run,
@@ -430,6 +434,8 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 		OutputFn:         tuiOutputFn,
 		Session:          session,
 		Mapper:           mapper,
+		ToolEnv:          append([]string(nil), toolEnv...),
+		RedactToolOutput: redactToolOutput,
 		ModelMetadata:    metadata,
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),

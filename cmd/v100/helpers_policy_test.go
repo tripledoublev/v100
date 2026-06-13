@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/config"
@@ -98,5 +99,33 @@ func TestBuildToolRegistryRegistersATProtoUploadBlob(t *testing.T) {
 	reg := buildToolRegistry(cfg)
 	if _, ok := reg.Lookup("atproto_upload_blob"); !ok {
 		t.Fatal("atproto_upload_blob should be registered")
+	}
+}
+
+func TestBuildToolRuntimeUsesExplicitAllowlistAndGitHubEnvMode(t *testing.T) {
+	t.Setenv("GH_TOKEN", "gh-secret")
+	t.Setenv("V100_EXTRA_TOKEN", "extra-secret")
+	t.Setenv("V100_PARENT_ONLY", "parent-secret")
+
+	cfg := config.DefaultConfig()
+	cfg.Tools.Env.Allow = []string{"V100_EXTRA_TOKEN", "bad-name"}
+	cfg.Tools.Auth.GitHub.Mode = "env"
+	cfg.Tools.Auth.GitHub.Env = "GH_TOKEN"
+
+	env, redact := buildToolRuntime(cfg)
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "V100_EXTRA_TOKEN=extra-secret") {
+		t.Fatalf("missing explicit allow env in %q", joined)
+	}
+	if !strings.Contains(joined, "GH_TOKEN=gh-secret") {
+		t.Fatalf("missing GitHub auth env in %q", joined)
+	}
+	if strings.Contains(joined, "V100_PARENT_ONLY") || strings.Contains(joined, "bad-name") {
+		t.Fatalf("unexpected env passthrough in %q", joined)
+	}
+
+	out := redact("gh-secret extra-secret parent-secret")
+	if strings.Contains(out, "gh-secret") || strings.Contains(out, "extra-secret") {
+		t.Fatalf("explicit tool secret leaked after redaction: %q", out)
 	}
 }

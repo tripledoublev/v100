@@ -65,6 +65,33 @@ func applyUITheme(cfg *config.Config, themeFlag string, flagSet bool) error {
 	return nil
 }
 
+func buildToolRuntime(cfg *config.Config) ([]string, func(string) string) {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	allow := append([]string(nil), cfg.Tools.Env.Allow...)
+	gh := cfg.Tools.Auth.GitHub
+	if strings.EqualFold(strings.TrimSpace(gh.Mode), "env") {
+		allow = append(allow, gh.Env)
+	}
+
+	seen := map[string]bool{}
+	env := make([]string, 0, len(allow))
+	for _, name := range allow {
+		name = strings.TrimSpace(name)
+		if !tools.ValidEnvName(name) || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+
+	redactor := tools.NewSecretRedactor(cfg.Tools.Env.Redact, env)
+	return env, redactor.RedactText
+}
+
 func expandHomePath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()
@@ -686,7 +713,7 @@ func sandboxFinalizeMessage(result core.SandboxFinalizeResult) string {
 }
 
 func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.TraceWriter,
-	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper) {
+	budget *core.BudgetTracker, outputFn *core.OutputFn, confirmFn core.ConfirmFn, workspace string, parentMaxToolCalls int, session executor.Session, mapper *core.PathMapper, toolEnv []string, redactToolOutput func(string) string) {
 
 	providerBuilder := func(providerName, model string) (providers.Provider, string, string, error) {
 		providerName = strings.TrimSpace(providerName)
@@ -884,18 +911,20 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			})
 
 		childLoop := &core.Loop{
-			Run:         childRun,
-			Provider:    prov,
-			Tools:       childReg,
-			Policy:      childPolicy,
-			Trace:       trace,
-			Budget:      childBudget,
-			ConfirmFn:   confirmFn,
-			OutputFn:    childOutputFn,
-			Session:     session,
-			Mapper:      mapper,
-			NetworkTier: loopNetworkTier(cfg),
-			Snapshots:   buildSnapshotManager(cfg, workspace),
+			Run:              childRun,
+			Provider:         prov,
+			Tools:            childReg,
+			Policy:           childPolicy,
+			Trace:            trace,
+			Budget:           childBudget,
+			ConfirmFn:        confirmFn,
+			OutputFn:         childOutputFn,
+			Session:          session,
+			Mapper:           mapper,
+			ToolEnv:          append([]string(nil), toolEnv...),
+			RedactToolOutput: redactToolOutput,
+			NetworkTier:      loopNetworkTier(cfg),
+			Snapshots:        buildSnapshotManager(cfg, workspace),
 		}
 
 		var result string

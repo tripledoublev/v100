@@ -98,6 +98,51 @@ func TestGitCommitUsesSandboxSession(t *testing.T) {
 	}
 }
 
+func TestGitCommitPassesExplicitEnvToSession(t *testing.T) {
+	sourceDir := t.TempDir()
+	initGitRepo(t, sourceDir)
+
+	session := startHostSession(t, sourceDir)
+	sandboxDir := session.Workspace()
+
+	if err := os.WriteFile(filepath.Join(sandboxDir, "sandbox-only.txt"), []byte("sandbox"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := tools.ToolCallContext{
+		WorkspaceDir: sourceDir,
+		Session:      session,
+		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
+		Env: []string{
+			"GIT_AUTHOR_NAME=Allowed Author",
+			"GIT_AUTHOR_EMAIL=author@example.com",
+			"GIT_COMMITTER_NAME=Allowed Committer",
+			"GIT_COMMITTER_EMAIL=committer@example.com",
+		},
+	}
+	args, err := json.Marshal(map[string]any{
+		"message": "env commit",
+		"add_all": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tools.GitCommit().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("git commit failed: %s", res.Output)
+	}
+
+	got := strings.TrimSpace(runGitCmd(t, sandboxDir, "log", "-1", "--format=%an <%ae>|%cn <%ce>"))
+	want := "Allowed Author <author@example.com>|Allowed Committer <committer@example.com>"
+	if got != want {
+		t.Fatalf("commit identity = %q, want %q", got, want)
+	}
+}
+
 func startHostSession(t *testing.T, sourceDir string) executor.Session {
 	t.Helper()
 

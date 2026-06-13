@@ -212,6 +212,7 @@ func runGit(ctx context.Context, call ToolCallContext, gitArgs ...string) (ToolR
 			Command:      "git",
 			Args:         gitArgs,
 			Dir:          ".",
+			Env:          call.Env,
 			StdoutWriter: outputDeltaWriter(call, "stdout"),
 			StderrWriter: outputDeltaWriter(call, "stderr"),
 		})

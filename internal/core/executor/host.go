@@ -82,7 +82,7 @@ func (s *HostSession) Run(ctx context.Context, req RunRequest) (Result, error) {
 		Command:      req.Command,
 		Args:         req.Args,
 		Dir:          fullDir,
-		Env:          append(os.Environ(), req.Env...),
+		Env:          append(defaultHostEnv(fullDir), req.Env...),
 		Stdin:        stdin,
 		StdoutWriter: req.StdoutWriter,
 		StderrWriter: req.StderrWriter,
@@ -94,6 +94,34 @@ func (s *HostSession) Workspace() string {
 		return s.sourceWorkspace
 	}
 	return s.sandboxDir
+}
+
+func defaultHostEnv(workdir string) []string {
+	path := os.Getenv("PATH")
+	if strings.TrimSpace(path) == "" {
+		path = "/usr/bin:/bin"
+	}
+	tmpdir := os.Getenv("TMPDIR")
+	if strings.TrimSpace(tmpdir) == "" {
+		tmpdir = "/tmp"
+	}
+	lang := os.Getenv("LANG")
+	if strings.TrimSpace(lang) == "" {
+		lang = "C.UTF-8"
+	}
+	term := os.Getenv("TERM")
+	if strings.TrimSpace(term) == "" {
+		term = "dumb"
+	}
+	return []string{
+		"PATH=" + path,
+		"HOME=" + workdir,
+		"TMPDIR=" + tmpdir,
+		"PWD=" + workdir,
+		"LANG=" + lang,
+		"TERM=" + term,
+		"SHELL=sh",
+	}
 }
 
 // copyDir recursively copies a directory tree.

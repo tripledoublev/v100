@@ -168,7 +168,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 	predictTool := providers.ToolSpec{
 		Name:        predictToolName,
 		Description: `Call a sub-model with a DSPy-style signature. Format: predict("input: Type, ... -> output: Type", input=value, ...). Use for reasoning tasks only. For I/O (fetching images, files, web), use other tools first, then use predict with the fetched data as input.`,
-		InputSchema:  json.RawMessage(predictToolSchema),
+		InputSchema: json.RawMessage(predictToolSchema),
 	}
 
 	for {
@@ -187,7 +187,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 			toolNames = append(toolNames, ts.Name)
 		}
 
-		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, l.Provider))
+		_, _ = l.emit(EventModelCall, stepID, l.modelCallTracePayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, l.Provider))
 
 		var (
 			assistantText strings.Builder
@@ -271,10 +271,7 @@ func (s *RLMSolver) Solve(ctx context.Context, l *Loop, userInput string) (Solve
 		_ = l.Budget.AddCost(usage.CostUSD)
 		stepOutputTokens = usage.OutputTokens
 
-		tcPayload := make([]ToolCall, len(toolCalls))
-		for i, tc := range toolCalls {
-			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
-		}
+		tcPayload := l.toolCallTracePayload(toolCalls)
 		if _, err := l.emit(EventModelResp, stepID, ModelRespPayload{
 			Text:      assistantText.String(),
 			ToolCalls: tcPayload,

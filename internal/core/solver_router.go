@@ -109,7 +109,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 		}
 
 		// Turn start
-		_, _ = l.emit(EventModelCall, stepID, newModelCallPayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, currentProv))
+		_, _ = l.emit(EventModelCall, stepID, l.modelCallTracePayload("", msgs, toolNames, maxToolCalls-toolCallsUsed, currentProv))
 
 		var (
 			assistantText strings.Builder
@@ -190,10 +190,7 @@ func (s *RouterSolver) Solve(ctx context.Context, l *Loop, userInput string) (So
 			return SolveResult{}, err
 		}
 
-		tcPayload := make([]ToolCall, len(toolCalls))
-		for i, tc := range toolCalls {
-			tcPayload[i] = ToolCall{ID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)}
-		}
+		tcPayload := l.toolCallTracePayload(toolCalls)
 		_, err = l.emit(EventModelResp, stepID, ModelRespPayload{
 			Text:      assistantText.String(),
 			ToolCalls: tcPayload,

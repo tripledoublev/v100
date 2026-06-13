@@ -334,7 +334,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	confirmFn := wrapConfirmFnWithActivity(baseConfirmFn, &confirmActive)
 
 	outputFn := core.OutputFn(renderer.RenderEvent)
-	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper)
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, workspace, pol.MaxToolCallsPerStep, session, mapper, toolEnv, redactToolOutput)
 
 	loop := &core.Loop{
 		Run:              run,
@@ -352,6 +353,8 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		Solver:           solver,
 		Session:          session,
 		Mapper:           mapper,
+		ToolEnv:          append([]string(nil), toolEnv...),
+		RedactToolOutput: redactToolOutput,
 		NetworkTier:      loopNetworkTier(cfg),
 		Snapshots:        buildSnapshotManager(cfg, workspace),
 	}

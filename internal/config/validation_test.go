@@ -150,6 +150,29 @@ task = "missing-task"
 	}
 }
 
+func TestValidateConfigPathToolCredentialConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	writeFile(t, path, `[defaults]
+provider = "codex"
+
+[tools.env]
+allow = ["GH_TOKEN", "bad-name"]
+
+[tools.auth.github]
+mode = "gh_config"
+env = "1TOKEN"
+`)
+
+	result := ValidateConfigPath(path)
+	if !hasFinding(result, ValidationError, `invalid environment variable name "bad-name"`) {
+		t.Fatalf("missing invalid tools.env.allow error: %+v", result.Findings)
+	}
+	if !hasFinding(result, ValidationError, `unsupported GitHub auth mode "gh_config"`) {
+		t.Fatalf("missing invalid GitHub auth mode error: %+v", result.Findings)
+	}
+}
+
 func TestValidateConfigPathUITheme(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

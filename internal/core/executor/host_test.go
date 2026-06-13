@@ -79,6 +79,56 @@ func TestHostSessionRunUsesSourceWorkspaceWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestHostSessionRunDoesNotInheritParentEnvironment(t *testing.T) {
+	t.Setenv("V100_PARENT_ONLY_SECRET", "hidden")
+
+	sourceDir := t.TempDir()
+	session := &HostSession{
+		runID:           "run-1",
+		sourceWorkspace: sourceDir,
+		sandboxDir:      filepath.Join(t.TempDir(), "workspace"),
+		Enabled:         false,
+	}
+
+	res, err := session.Run(context.Background(), RunRequest{
+		Command: "sh",
+		Args:    []string{"-c", "printf '%s' \"${V100_PARENT_ONLY_SECRET:-}\""},
+		Dir:     ".",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d stderr=%q", res.ExitCode, res.Stderr)
+	}
+	if res.Stdout != "" {
+		t.Fatalf("expected parent env secret to be absent, got %q", res.Stdout)
+	}
+}
+
+func TestHostSessionRunPassesExplicitEnvironment(t *testing.T) {
+	sourceDir := t.TempDir()
+	session := &HostSession{
+		runID:           "run-1",
+		sourceWorkspace: sourceDir,
+		sandboxDir:      filepath.Join(t.TempDir(), "workspace"),
+		Enabled:         false,
+	}
+
+	res, err := session.Run(context.Background(), RunRequest{
+		Command: "sh",
+		Args:    []string{"-c", "printf '%s' \"$V100_ALLOWED\""},
+		Dir:     ".",
+		Env:     []string{"V100_ALLOWED=ok"},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if res.Stdout != "ok" {
+		t.Fatalf("expected explicit env to pass, got %q", res.Stdout)
+	}
+}
+
 func TestNewExecutorDisabledUsesHostSessionWithoutMaterializing(t *testing.T) {
 	sourceDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(sourceDir, "marker.txt"), []byte("ok"), 0o644); err != nil {
