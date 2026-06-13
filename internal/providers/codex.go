@@ -91,40 +91,16 @@ func (p *CodexProvider) Complete(ctx context.Context, req CompleteRequest) (Comp
 		model = p.defaultModel
 	}
 
+	cReq, err := buildCodexRequest(req, model)
+	if err != nil {
+		return CompleteResponse{}, err
+	}
+
 	access, accountID, err := p.accessToken(ctx)
 	if err != nil {
 		return CompleteResponse{}, err
 	}
 
-	instructions, input := codexConvertMessages(req.Messages)
-
-	var tools []codexToolDef
-	for _, ts := range req.Tools {
-		tools = append(tools, codexToolDef{
-			Type:        "function",
-			Name:        ts.Name,
-			Description: ts.Description,
-			Parameters:  ts.InputSchema,
-		})
-	}
-
-	cReq := codexRequest{
-		Model:        model,
-		Instructions: instructions,
-		Input:        input,
-		Tools:        tools,
-		Stream:       true,
-		Store:        false,
-	}
-	if req.GenParams.Temperature != nil {
-		cReq.Temperature = req.GenParams.Temperature
-	}
-	if req.GenParams.TopP != nil {
-		cReq.TopP = req.GenParams.TopP
-	}
-	if req.GenParams.MaxTokens > 0 {
-		cReq.MaxTokens = req.GenParams.MaxTokens
-	}
 	body, err := json.Marshal(cReq)
 	if err != nil {
 		return CompleteResponse{}, err
@@ -177,7 +153,40 @@ type codexRequest struct {
 	Store        bool           `json:"store"`
 	Temperature  *float64       `json:"temperature,omitempty"`
 	TopP         *float64       `json:"top_p,omitempty"`
-	MaxTokens    int            `json:"max_output_tokens,omitempty"`
+}
+
+func buildCodexRequest(req CompleteRequest, model string) (codexRequest, error) {
+	if req.GenParams.MaxTokens > 0 {
+		return codexRequest{}, fmt.Errorf("codex: unsupported generation parameter max_tokens for codex/responses; remove --max-tokens or choose a provider that supports token limits")
+	}
+
+	instructions, input := codexConvertMessages(req.Messages)
+
+	var tools []codexToolDef
+	for _, ts := range req.Tools {
+		tools = append(tools, codexToolDef{
+			Type:        "function",
+			Name:        ts.Name,
+			Description: ts.Description,
+			Parameters:  ts.InputSchema,
+		})
+	}
+
+	cReq := codexRequest{
+		Model:        model,
+		Instructions: instructions,
+		Input:        input,
+		Tools:        tools,
+		Stream:       true,
+		Store:        false,
+	}
+	if req.GenParams.Temperature != nil {
+		cReq.Temperature = req.GenParams.Temperature
+	}
+	if req.GenParams.TopP != nil {
+		cReq.TopP = req.GenParams.TopP
+	}
+	return cReq, nil
 }
 
 type codexInput struct {
@@ -428,39 +437,14 @@ func (p *CodexProvider) StreamComplete(ctx context.Context, req CompleteRequest)
 		model = p.defaultModel
 	}
 
-	access, accountID, err := p.accessToken(ctx)
+	cReq, err := buildCodexRequest(req, model)
 	if err != nil {
 		return nil, err
 	}
 
-	instructions, input := codexConvertMessages(req.Messages)
-
-	var tools []codexToolDef
-	for _, ts := range req.Tools {
-		tools = append(tools, codexToolDef{
-			Type:        "function",
-			Name:        ts.Name,
-			Description: ts.Description,
-			Parameters:  ts.InputSchema,
-		})
-	}
-
-	cReq := codexRequest{
-		Model:        model,
-		Instructions: instructions,
-		Input:        input,
-		Tools:        tools,
-		Stream:       true,
-		Store:        false,
-	}
-	if req.GenParams.Temperature != nil {
-		cReq.Temperature = req.GenParams.Temperature
-	}
-	if req.GenParams.TopP != nil {
-		cReq.TopP = req.GenParams.TopP
-	}
-	if req.GenParams.MaxTokens > 0 {
-		cReq.MaxTokens = req.GenParams.MaxTokens
+	access, accountID, err := p.accessToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(cReq)

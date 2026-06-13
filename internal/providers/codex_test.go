@@ -1,9 +1,15 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/tripledoublev/v100/internal/auth"
 )
 
 func TestCodexConvertMessagesToolOutputAlwaysPresent(t *testing.T) {
@@ -29,6 +35,68 @@ func TestCodexConvertMessagesToolOutputAlwaysPresent(t *testing.T) {
 	}
 }
 
+func TestCodexCompleteRejectsMaxTokensBeforeHTTP(t *testing.T) {
+	var called bool
+	prov := newTestCodexProvider(func(*http.Request) (*http.Response, error) {
+		called = true
+		return codexTestStreamResponse(), nil
+	})
+
+	_, err := prov.Complete(context.Background(), CompleteRequest{
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		GenParams: GenParams{MaxTokens: 700},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported generation parameter max_tokens") {
+		t.Fatalf("expected local max_tokens error, got %v", err)
+	}
+	if called {
+		t.Fatal("HTTP transport should not be called for unsupported max_tokens")
+	}
+}
+
+func TestCodexStreamCompleteRejectsMaxTokensBeforeHTTP(t *testing.T) {
+	var called bool
+	prov := newTestCodexProvider(func(*http.Request) (*http.Response, error) {
+		called = true
+		return codexTestStreamResponse(), nil
+	})
+
+	ch, err := prov.StreamComplete(context.Background(), CompleteRequest{
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		GenParams: GenParams{MaxTokens: 700},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported generation parameter max_tokens") {
+		t.Fatalf("expected local max_tokens error, got %v", err)
+	}
+	if ch != nil {
+		t.Fatal("expected nil stream channel on unsupported max_tokens")
+	}
+	if called {
+		t.Fatal("HTTP transport should not be called for unsupported max_tokens")
+	}
+}
+
+func TestCodexCompleteRequestOmitsMaxOutputTokens(t *testing.T) {
+	var body []byte
+	prov := newTestCodexProvider(func(req *http.Request) (*http.Response, error) {
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		return codexTestStreamResponse(), nil
+	})
+
+	if _, err := prov.Complete(context.Background(), CompleteRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	}); err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if strings.Contains(string(body), "max_output_tokens") {
+		t.Fatalf("Codex request should not include max_output_tokens: %s", body)
+	}
+}
+
 func TestCodexConvertMessagesUserInputHasNoOutputField(t *testing.T) {
 	_, input := codexConvertMessages([]Message{
 		{Role: "user", Content: "hello"},
@@ -46,6 +114,37 @@ func TestCodexConvertMessagesUserInputHasNoOutputField(t *testing.T) {
 	}
 	if _, ok := obj["output"]; ok {
 		t.Fatalf("unexpected output field in user input payload: %s", string(b))
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newTestCodexProvider(rt roundTripFunc) *CodexProvider {
+	return &CodexProvider{
+		token: auth.Token{
+			Access:    "access-token",
+			AccountID: "account-id",
+			ExpiresMS: time.Now().Add(time.Hour).UnixMilli(),
+		},
+		defaultModel: codexDefaultModel,
+		client:       &http.Client{Transport: rt},
+	}
+}
+
+func codexTestStreamResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"event: response.output_text.delta\n" +
+				"data: {\"delta\":\"ok\"}\n\n" +
+				"event: response.completed\n" +
+				"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
 	}
 }
 
