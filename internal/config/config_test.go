@@ -27,6 +27,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Defaults.MemoryMaxTokens != 256 {
 		t.Errorf("expected default memory max tokens 256, got %d", cfg.Defaults.MemoryMaxTokens)
 	}
+	if cfg.UI.Theme != "v100" {
+		t.Errorf("expected default UI theme v100, got %q", cfg.UI.Theme)
+	}
 
 	// Check that anthropic provider exists in defaults
 	if _, ok := cfg.Providers["anthropic"]; !ok {
@@ -153,6 +156,9 @@ dangerous = []
 [defaults]
 provider = "anthropic"
 budget_steps = 25
+
+[ui]
+theme = "dracula"
 `
 	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
@@ -171,6 +177,9 @@ budget_steps = 25
 	}
 	if _, ok := cfg.Providers["anthropic"]; !ok {
 		t.Error("expected anthropic in providers")
+	}
+	if cfg.UI.Theme != "dracula" {
+		t.Errorf("expected UI theme dracula, got %q", cfg.UI.Theme)
 	}
 
 	// Verify sh is migrated if missing
@@ -283,6 +292,9 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, "compress_provider = \"glm\"") {
 		t.Error("default TOML should default compression provider to glm")
+	}
+	if !contains(toml, "[ui]") || !contains(toml, `theme = "v100"`) {
+		t.Error("default TOML should contain UI theme config")
 	}
 	if !contains(toml, "[sandbox]") {
 		t.Error("default TOML should contain sandbox section")

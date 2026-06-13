@@ -15,22 +15,6 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		return ""
 	}
 
-	// Define colors locally for the dashboard
-	colorPrimary := lipgloss.Color("#3B82F6")
-	colorInfo := lipgloss.Color("#06B6D4")
-	colorWarn := lipgloss.Color("#F59E0B")
-	colorDanger := lipgloss.Color("#EF4444")
-	colorCognition := lipgloss.Color("#A78BFA")
-	colorMoney := lipgloss.Color("#10B981")
-
-	// Create local styles for consistent rendering
-	styleBlue := lipgloss.NewStyle().Foreground(colorPrimary)
-	styleCyan := lipgloss.NewStyle().Foreground(colorInfo)
-	styleAmber := lipgloss.NewStyle().Foreground(colorWarn)
-	styleRed := lipgloss.NewStyle().Foreground(colorDanger)
-	styleViolet := lipgloss.NewStyle().Foreground(colorCognition)
-	styleGreen := lipgloss.NewStyle().Foreground(colorMoney)
-
 	w := width - 4
 
 	// Workspace path line — truncate from the left if too wide
@@ -40,7 +24,7 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 		if maxPathW := w - 6; len(pathLine) > maxPathW {
 			pathLine = "…" + pathLine[len(pathLine)-maxPathW+1:]
 		}
-		pathDisplay = styleMuted.Render(i18n.T("dashboard_path")+": ") + styleCyan.Render(pathLine)
+		pathDisplay = styleMuted.Render(i18n.T("dashboard_path")+": ") + styleInfo.Render(pathLine)
 	}
 
 	// 1. Step Progress (The "Shield/Fuel" Meter)
@@ -48,22 +32,22 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	if maxSteps > 0 {
 		stepPct = float64(currentStep) / float64(maxSteps)
 	}
-	stepBar := renderMiniBar(i18n.T("dashboard_steps"), stepPct, w, colorPrimary)
+	stepBar := renderMiniBar(i18n.T("dashboard_steps"), stepPct, w, clrPrimary)
 
 	// 2. Token Entropy (The "System Pressure" Meter)
 	tokenPct := 0.0
 	if maxTokens > 0 {
 		tokenPct = float64(usedTokens) / float64(maxTokens)
 	}
-	tokenColor := colorInfo
-	tokenStyle := styleCyan
+	tokenColor := clrInfo
+	tokenStyle := styleInfo
 	if tokenPct > 0.7 {
-		tokenColor = colorWarn
-		tokenStyle = styleAmber
+		tokenColor = clrWarning
+		tokenStyle = styleWarn
 	}
 	if tokenPct > 0.9 {
-		tokenColor = colorDanger
-		tokenStyle = styleRed
+		tokenColor = clrDanger
+		tokenStyle = styleDanger
 	}
 	tokenBar := renderMiniBar(i18n.T("dashboard_token"), tokenPct, w, tokenColor)
 
@@ -73,19 +57,19 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	if ioTotal > 0 {
 		ioRatio = float64(outTokens) / float64(ioTotal)
 	}
-	ioBar := renderMiniBar(i18n.T("dashboard_reasoning"), ioRatio, w, colorCognition)
+	ioBar := renderMiniBar(i18n.T("dashboard_reasoning"), ioRatio, w, clrAssistant)
 
 	// 4. Cost Vector
 	costPct := 0.0
 	if maxCost > 0.0001 { // avoid div by zero
 		costPct = usedCost / maxCost
 	}
-	costBar := renderMiniBar(i18n.T("dashboard_cost"), costPct, w, colorMoney)
+	costBar := renderMiniBar(i18n.T("dashboard_cost"), costPct, w, clrSuccess)
 
 	// 5. Radar/Heartbeat (Visual Flair)
 	pulse := currentStep % 8
 	heartbeat := "──" + strings.Repeat("·", pulse) + "Λ" + strings.Repeat("·", (7-pulse)) + "──"
-	heartbeat = styleMuted.Render("[") + styleCyan.Bold(true).Render(heartbeat) + styleMuted.Render("]")
+	heartbeat = styleMuted.Render("[") + styleInfo.Bold(true).Render(heartbeat) + styleMuted.Render("]")
 
 	tempo := "cool"
 	if recentToolCalls >= 6 || recentModelCalls >= 4 {
@@ -105,67 +89,67 @@ func LiveMetricDashboard(currentStep, maxSteps, usedTokens, maxTokens, inTokens,
 	velocityColor := styleMuted
 	switch tempo {
 	case "hot":
-		velocityColor = styleRed
+		velocityColor = styleDanger
 	case "warm":
-		velocityColor = styleAmber
+		velocityColor = styleWarn
 	case "cool":
-		velocityColor = styleCyan
+		velocityColor = styleInfo
 	}
 
 	healthColor := styleMuted
 	switch health {
 	case "critical":
-		healthColor = styleRed
+		healthColor = styleDanger
 	case "compression-pressure":
-		healthColor = styleAmber
+		healthColor = styleWarn
 	case "warming":
-		healthColor = styleCyan
+		healthColor = styleInfo
 	case "stable":
-		healthColor = styleGreen
+		healthColor = styleOK
 	}
 
 	stateColor := styleMuted
 	switch inspectorState(statusMode, idleFor) {
 	case "thinking":
-		stateColor = styleViolet
+		stateColor = styleAssistant
 	case "tooling":
-		stateColor = styleAmber
+		stateColor = styleWarn
 	case "error":
-		stateColor = styleRed
+		stateColor = styleDanger
 	case "ready":
-		stateColor = styleGreen
+		stateColor = styleOK
 	}
 
 	velocityLine := fmt.Sprintf("%s %s  %s%s/30s  %s%s/30s  %s%s/30s",
 		styleMuted.Render(i18n.T("dashboard_velocity")+":"), velocityColor.Bold(true).Render(dashboardLabel(tempo)),
-		styleMuted.Render(i18n.T("dashboard_model")+":"), styleBlue.Bold(true).Render(fmt.Sprintf("%d", recentModelCalls)),
-		styleMuted.Render(i18n.T("dashboard_tools")+":"), styleAmber.Bold(true).Render(fmt.Sprintf("%d", recentToolCalls)),
-		styleMuted.Render(i18n.T("dashboard_compress")+":"), styleRed.Bold(true).Render(fmt.Sprintf("%d", recentCompresses)))
+		styleMuted.Render(i18n.T("dashboard_model")+":"), stylePrimary.Render(fmt.Sprintf("%d", recentModelCalls)),
+		styleMuted.Render(i18n.T("dashboard_tools")+":"), styleWarn.Render(fmt.Sprintf("%d", recentToolCalls)),
+		styleMuted.Render(i18n.T("dashboard_compress")+":"), styleDanger.Render(fmt.Sprintf("%d", recentCompresses)))
 
 	pressureLine := fmt.Sprintf("%s %s  %s%s  %s%s",
 		styleMuted.Render(i18n.T("dashboard_health")+":"), healthColor.Bold(true).Render(dashboardLabel(health)),
 		styleMuted.Render(i18n.T("dashboard_token_label")+":"), tokenStyle.Bold(true).Render(percentLabel(tokenPct)),
-		styleMuted.Render(i18n.T("dashboard_io")+":"), styleViolet.Bold(true).Render(percentLabel(ioRatio)))
+		styleMuted.Render(i18n.T("dashboard_io")+":"), styleAssistant.Render(percentLabel(ioRatio)))
 
 	stateLine := fmt.Sprintf("%s %s  %s%s",
 		styleMuted.Render(i18n.T("dashboard_state")+":"), stateColor.Bold(true).Render(dashboardLabel(inspectorState(statusMode, idleFor))),
-		styleMuted.Render(i18n.T("dashboard_idle")+":"), styleCyan.Bold(true).Render(FormatDuration(idleFor.Milliseconds())))
+		styleMuted.Render(i18n.T("dashboard_idle")+":"), styleInfo.Render(FormatDuration(idleFor.Milliseconds())))
 
 	lastStepLine := fmt.Sprintf("%s %s  %s%s",
-		styleMuted.Render(i18n.T("dashboard_last_step")+":"), styleCyan.Bold(true).Render(FormatDuration(lastStepMS)),
-		styleMuted.Render(i18n.T("dashboard_tools")+":"), styleAmber.Bold(true).Render(fmt.Sprintf("%d", lastStepTools)))
+		styleMuted.Render(i18n.T("dashboard_last_step")+":"), styleInfo.Render(FormatDuration(lastStepMS)),
+		styleMuted.Render(i18n.T("dashboard_tools")+":"), styleWarn.Render(fmt.Sprintf("%d", lastStepTools)))
 
 	inspectorTitleStyle := lipgloss.NewStyle().
-		Foreground(colorCognition).
+		Foreground(clrAssistant).
 		Italic(true).
 		Bold(true)
 
 	heartbeatLabelStyle := styleMuted
 	switch tempo {
 	case "hot":
-		heartbeatLabelStyle = styleRed
+		heartbeatLabelStyle = styleDanger
 	case "warm":
-		heartbeatLabelStyle = styleAmber
+		heartbeatLabelStyle = styleWarn
 	}
 
 	dashboardLines := []string{
@@ -235,7 +219,7 @@ func renderMiniBar(label string, pct float64, width int, color lipgloss.Color) s
 
 	barStyle := lipgloss.NewStyle().Foreground(color)
 	labelStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")) // very dark gray
+	emptyStyle := lipgloss.NewStyle().Foreground(clrPaneBorder)
 
 	return fmt.Sprintf("%s %s%s%s%s",
 		labelStyle.Render(label),

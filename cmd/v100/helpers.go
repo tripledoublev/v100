@@ -43,6 +43,28 @@ func loadConfig(cfgPath string) (*config.Config, error) {
 	return config.Load(cfgPath)
 }
 
+func applyUITheme(cfg *config.Config, themeFlag string, flagSet bool) error {
+	name := ""
+	if cfg != nil {
+		name = cfg.UI.Theme
+	}
+	if envTheme := strings.TrimSpace(os.Getenv("V100_THEME")); envTheme != "" {
+		name = envTheme
+	}
+	if flagSet {
+		name = themeFlag
+	}
+	theme, ok := ui.ThemeByName(name)
+	if !ok {
+		return fmt.Errorf("unknown theme %q (available: %s)", name, strings.Join(ui.ThemeNames(), ", "))
+	}
+	ui.ApplyTheme(theme)
+	if cfg != nil {
+		cfg.UI.Theme = theme.Name
+	}
+	return nil
+}
+
 func expandHomePath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()

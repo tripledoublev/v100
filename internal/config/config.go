@@ -21,6 +21,7 @@ type Config struct {
 	Policies   map[string]PolicyConfig   `toml:"policies"`
 	Agents     map[string]AgentConfig    `toml:"agents"`
 	Defaults   DefaultsConfig            `toml:"defaults"`
+	UI         UIConfig                  `toml:"ui"`
 	Sandbox    SandboxConfig             `toml:"sandbox"`
 	Wake       WakeConfig                `toml:"wake"`
 	Update     UpdateConfig              `toml:"update"`
@@ -46,6 +47,11 @@ type ATProtoConfig struct {
 // UpdateConfig defines auto-update behavior.
 type UpdateConfig struct {
 	CheckInterval string `toml:"check_interval"` // e.g. "24h", "disabled"
+}
+
+// UIConfig defines terminal UI rendering preferences.
+type UIConfig struct {
+	Theme string `toml:"theme"` // v100 | mono | dracula | catppuccin
 }
 
 // SandboxConfig defines the isolated execution environment.
@@ -305,6 +311,9 @@ func DefaultConfig() *Config {
 			CompressProvider:      "glm",
 			StaleToolElideSteps:   20,
 		},
+		UI: UIConfig{
+			Theme: "v100",
+		},
 		Sandbox: SandboxConfig{
 			Enabled:     false,
 			Backend:     "host",
@@ -427,6 +436,9 @@ compress_protect_recent = 6   # recent messages protected from targeted compress
 compress_provider = "glm"     # provider for compression calls (empty = main provider for cloud runs)
 mirror_tool_results = false   # when true, predict tool outputs and log hallucination coefficients
 
+[ui]
+theme = "v100"                 # v100 | mono | dracula | catppuccin; override with V100_THEME or --theme
+
 [sandbox]
 enabled = false
 backend = "host"            # host | docker
@@ -531,6 +543,7 @@ func loadConfigFile(path string) (*Config, error) {
 		cfg.Agents = DefaultConfig().Agents
 	}
 	applyDefaultsConfig(&cfg.Defaults, DefaultConfig().Defaults)
+	applyUIDefaults(&cfg.UI, DefaultConfig().UI)
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
@@ -629,6 +642,15 @@ func ensureString(slice *[]string, val string) {
 		}
 	}
 	*slice = append(*slice, val)
+}
+
+func applyUIDefaults(dst *UIConfig, defaults UIConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.Theme) == "" {
+		dst.Theme = defaults.Theme
+	}
 }
 
 func applySandboxDefaults(dst *SandboxConfig, defaults SandboxConfig) {

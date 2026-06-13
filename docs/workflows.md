@@ -17,6 +17,7 @@ v100 run --provider minimax --workspace .
 Useful flags:
 
 - `--tui` for the Bubble Tea interface
+- `--theme v100|mono|dracula|catppuccin` to override `[ui].theme` or `V100_THEME`
 - `--continuous` to continue automatically between steps
 - `--sandbox` to isolate execution
 - `--confirm-tools` to control tool confirmations
@@ -43,6 +44,9 @@ v100 replay <run_id>
 Use `resume` when you want the agent to keep working.
 
 Use `replay` when you want to inspect the trace without continuing execution.
+
+`resume --tui --theme dracula <run_id>` applies the selected theme before
+replaying events into the interface.
 
 Related commands:
 

@@ -55,6 +55,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 		tuiNoAltFlag     bool
 		tuiPlainFlag     bool
 		tuiDebugFlag     bool
+		themeFlag        string
 		verboseFlag      bool
 		exitFlag         bool
 		continuousFlag   bool
@@ -80,6 +81,9 @@ func runCmd(cfgPath *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(*cfgPath)
 			if err != nil {
+				return err
+			}
+			if err := applyUITheme(cfg, themeFlag, cmd.Flags().Changed("theme")); err != nil {
 				return err
 			}
 
@@ -252,6 +256,7 @@ func runCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
+	cmd.Flags().StringVar(&themeFlag, "theme", "", "UI theme: v100|mono|dracula|catppuccin (overrides [ui].theme and V100_THEME)")
 	cmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "show full tool call details and verbose output")
 	cmd.Flags().BoolVar(&exitFlag, "exit", false, "exit after the initial prompt completes without entering interactive mode")
 	cmd.Flags().BoolVar(&continuousFlag, "continuous", false, "automatically continue after each step without waiting for user input")

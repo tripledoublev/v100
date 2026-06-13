@@ -150,6 +150,22 @@ task = "missing-task"
 	}
 }
 
+func TestValidateConfigPathUITheme(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	writeFile(t, path, `[defaults]
+provider = "codex"
+
+[ui]
+theme = "solarized"
+`)
+
+	result := ValidateConfigPath(path)
+	if !hasFinding(result, ValidationError, `unsupported UI theme "solarized"`) {
+		t.Fatalf("missing unsupported theme error: %+v", result.Findings)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

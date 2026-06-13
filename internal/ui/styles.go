@@ -7,42 +7,45 @@ import (
 
 const userMessageLabel = "●"
 
-// Color palette
+// Active color palette.
 var (
-	clrPrimary   = lipgloss.Color("#A78BFA") // violet  — v100 brand
-	clrSuccess   = lipgloss.Color("#34D399") // emerald — ok / green checks
-	clrWarning   = lipgloss.Color("#FBBF24") // amber   — tools / warnings
-	clrError     = lipgloss.Color("#F87171") // red     — errors / fail
-	clrInfo      = lipgloss.Color("#60A5FA") // blue    — info / meta
-	clrMuted     = lipgloss.Color("#6B7280") // gray    — timestamps / dim text
-	clrUser      = lipgloss.Color("#C4B5FD") // light violet — user messages
-	clrAssistant = lipgloss.Color("#5EEAD4") // teal    — assistant messages
-	clrTool      = lipgloss.Color("#FBBF24") // amber   — tool calls
-	clrRunID     = lipgloss.Color("#818CF8") // indigo  — run IDs
-	clrDanger    = lipgloss.Color("#F87171") // red     — dangerous tool confirm
-	clrLatSlow   = lipgloss.Color("#F87171") // red     — slow model calls (>2s)
-	clrLatMed    = lipgloss.Color("#FBBF24") // amber   — medium latency (500ms-2s)
-	clrLatFast   = lipgloss.Color("#34D399") // green   — fast model calls (<500ms)
+	clrPrimary          lipgloss.Color
+	clrSuccess          lipgloss.Color
+	clrWarning          lipgloss.Color
+	clrError            lipgloss.Color
+	clrInfo             lipgloss.Color
+	clrMuted            lipgloss.Color
+	clrUser             lipgloss.Color
+	clrAssistant        lipgloss.Color
+	clrTool             lipgloss.Color
+	clrRunID            lipgloss.Color
+	clrDanger           lipgloss.Color
+	clrPaneBorder       lipgloss.Color
+	clrActivePaneBorder lipgloss.Color
+	clrCopyIcon         lipgloss.Color
+	clrLatSlow          lipgloss.Color
+	clrLatMed           lipgloss.Color
+	clrLatFast          lipgloss.Color
 )
 
 // Named base styles (unexported, used in this package)
 var (
-	styleOK        = lipgloss.NewStyle().Foreground(clrSuccess)
-	styleFail      = lipgloss.NewStyle().Foreground(clrError)
-	styleWarn      = lipgloss.NewStyle().Foreground(clrWarning)
-	styleInfo      = lipgloss.NewStyle().Foreground(clrInfo)
-	styleMuted     = lipgloss.NewStyle().Foreground(clrMuted)
-	stylePrimary   = lipgloss.NewStyle().Foreground(clrPrimary).Bold(true)
-	styleUser      = lipgloss.NewStyle().Foreground(clrUser).Bold(true)
-	styleAssistant = lipgloss.NewStyle().Foreground(clrAssistant).Bold(true)
-	styleTool      = lipgloss.NewStyle().Foreground(clrTool).Bold(true)
-	styleRunID     = lipgloss.NewStyle().Foreground(clrRunID)
-	styleDanger    = lipgloss.NewStyle().Foreground(clrDanger).Bold(true)
-	styleBold      = lipgloss.NewStyle().Bold(true)
-	styleLatSlow   = lipgloss.NewStyle().Foreground(clrLatSlow)
-	styleLatMed    = lipgloss.NewStyle().Foreground(clrLatMed)
-	styleLatFast   = lipgloss.NewStyle().Foreground(clrLatFast)
-	styleJSONKey   = lipgloss.NewStyle().Foreground(clrInfo).Bold(true)
+	styleOK         lipgloss.Style
+	styleFail       lipgloss.Style
+	styleWarn       lipgloss.Style
+	styleInfo       lipgloss.Style
+	styleMuted      lipgloss.Style
+	stylePrimary    lipgloss.Style
+	styleUser       lipgloss.Style
+	styleAssistant  lipgloss.Style
+	styleTool       lipgloss.Style
+	styleRunID      lipgloss.Style
+	styleDanger     lipgloss.Style
+	styleBold       lipgloss.Style
+	styleLatSlow    lipgloss.Style
+	styleLatMed     lipgloss.Style
+	styleLatFast    lipgloss.Style
+	styleJSONKey    lipgloss.Style
 	styleJSONString = lipgloss.NewStyle().Foreground(clrSuccess)
 	styleJSONNumber = lipgloss.NewStyle().Foreground(clrWarning)
 	styleJSONBool   = lipgloss.NewStyle().Foreground(clrPrimary).Bold(true)
@@ -132,46 +135,76 @@ func itoa(n int) string {
 // ── TUI pane / chrome styles ──────────────────────────────────────────────────
 
 var (
+	tuiHeaderStyle      lipgloss.Style
+	tuiHeaderDimStyle   lipgloss.Style
+	tuiPaneStyle        lipgloss.Style
+	tuiActivePaneStyle  lipgloss.Style
+	tuiInputStyle       lipgloss.Style
+	tuiInputActiveStyle lipgloss.Style
+	tuiConfirmStyle     lipgloss.Style
+	tuiTraceLabelStyle  lipgloss.Style
+	tuiStatusLabelStyle lipgloss.Style
+	tuiCopyIconStyle    lipgloss.Style
+)
+
+func init() {
+	ApplyTheme(ThemeV100)
+}
+
+func rebuildStyles() {
+	styleOK = lipgloss.NewStyle().Foreground(clrSuccess)
+	styleFail = lipgloss.NewStyle().Foreground(clrError)
+	styleWarn = lipgloss.NewStyle().Foreground(clrWarning)
+	styleInfo = lipgloss.NewStyle().Foreground(clrInfo)
+	styleMuted = lipgloss.NewStyle().Foreground(clrMuted)
+	stylePrimary = lipgloss.NewStyle().Foreground(clrPrimary).Bold(true)
+	styleUser = lipgloss.NewStyle().Foreground(clrUser).Bold(true)
+	styleAssistant = lipgloss.NewStyle().Foreground(clrAssistant).Bold(true)
+	styleTool = lipgloss.NewStyle().Foreground(clrTool).Bold(true)
+	styleRunID = lipgloss.NewStyle().Foreground(clrRunID)
+	styleDanger = lipgloss.NewStyle().Foreground(clrDanger).Bold(true)
+	styleBold = lipgloss.NewStyle().Bold(true)
+	styleLatSlow = lipgloss.NewStyle().Foreground(clrLatSlow)
+	styleLatMed = lipgloss.NewStyle().Foreground(clrLatMed)
+	styleLatFast = lipgloss.NewStyle().Foreground(clrLatFast)
+	styleJSONKey = lipgloss.NewStyle().Foreground(clrInfo).Bold(true)
+	styleJSONString = lipgloss.NewStyle().Foreground(clrSuccess)
+	styleJSONNumber = lipgloss.NewStyle().Foreground(clrWarning)
+	styleJSONBool = lipgloss.NewStyle().Foreground(clrPrimary).Bold(true)
+	styleJSONNull = lipgloss.NewStyle().Foreground(clrMuted).Italic(true)
+	styleJSONPunct = lipgloss.NewStyle().Foreground(clrMuted)
+
 	tuiHeaderStyle = lipgloss.NewStyle().
 		Foreground(clrPrimary).
 		Bold(true)
-
 	tuiHeaderDimStyle = lipgloss.NewStyle().
-				Foreground(clrMuted)
-
+		Foreground(clrMuted)
 	tuiPaneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151"))
-
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrPaneBorder)
 	tuiActivePaneStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(clrPrimary)
-
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrActivePaneBorder)
 	tuiInputStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151"))
-
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrPaneBorder)
 	tuiInputActiveStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(clrPrimary)
-
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrActivePaneBorder)
 	tuiConfirmStyle = lipgloss.NewStyle().
-			Bold(true).
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(clrDanger).
-			Padding(1, 3)
-
+		Bold(true).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(clrDanger).
+		Padding(1, 3)
 	tuiTraceLabelStyle = lipgloss.NewStyle().
-				Foreground(clrMuted).
-				Italic(true)
-
+		Foreground(clrMuted).
+		Italic(true)
 	tuiStatusLabelStyle = lipgloss.NewStyle().
-				Foreground(clrMuted).
-				Italic(true)
-
+		Foreground(clrMuted).
+		Italic(true)
 	tuiCopyIconStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#374151"))
-)
+		Foreground(clrCopyIcon)
+}
 
 // EnablePlainTTY forces monochrome rendering for terminal compatibility.
 func EnablePlainTTY() {

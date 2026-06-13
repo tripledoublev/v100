@@ -95,6 +95,10 @@ Enable Bubble Tea TUI for a better visual experience:
 ./v100 run --provider minimax --tui --workspace .
 ```
 
+Built-in TUI themes are `v100`, `mono`, `dracula`, and `catppuccin`.
+Configure `[ui] theme = "dracula"`, set `V100_THEME=dracula`, or pass
+`--theme dracula` to `run`/`resume`.
+
 Leverage advanced solvers for planning or cost routing:
 
 ```bash

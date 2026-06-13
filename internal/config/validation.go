@@ -305,6 +305,7 @@ func validateEffectiveConfig(result *ValidationResult, cfg *Config) {
 	}
 	validateProviderFallbackCycles(result, cfg)
 	validateWakeTaskReference(result, cfg)
+	validateUIConfig(result, cfg)
 }
 
 func checkProviderReference(result *ValidationResult, cfg *Config, field, name string, required bool) {
@@ -372,6 +373,18 @@ func validateProviderFallbackCycles(result *ValidationResult, cfg *Config) {
 		if visit(name) {
 			return
 		}
+	}
+}
+
+func validateUIConfig(result *ValidationResult, cfg *Config) {
+	theme := strings.ToLower(strings.TrimSpace(cfg.UI.Theme))
+	if theme == "" || theme == "default" {
+		return
+	}
+	switch theme {
+	case "v100", "mono", "dracula", "catppuccin":
+	default:
+		result.Add(ValidationError, "ui.theme", fmt.Sprintf("unsupported UI theme %q; use v100, mono, dracula, or catppuccin", cfg.UI.Theme))
 	}
 }
 
