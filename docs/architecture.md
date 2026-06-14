@@ -21,6 +21,31 @@ The system has six main layers:
 
 Those layers are tied together by traceability, checkpoints, and a bias toward inspectable behavior over hidden magic.
 
+```mermaid
+flowchart TB
+    subgraph Operator
+        CLI["1 · Command surface<br/>cmd/v100"]
+    end
+    subgraph Engine
+        RT["2 · Execution runtime<br/>internal/core"]
+        TOOLS["3 · Tool layer<br/>internal/tools"]
+        PROV["4 · Provider layer<br/>internal/providers"]
+        MEM["5 · Memory & retrieval<br/>internal/memory"]
+        EVAL["6 · Eval & research<br/>internal/eval"]
+    end
+
+    CLI --> RT
+    RT --> TOOLS
+    RT --> PROV
+    RT --> MEM
+    RT --> EVAL
+    EVAL -. evaluation feedback .-> RT
+    RT ==> TRACE[("trace.jsonl<br/>+ checkpoints")]
+    TRACE -. replay · blame · analyze .-> CLI
+```
+
+The dashed edges are what make it a loop rather than a pipeline: evaluation feeds back into the runtime, and every run leaves a trace the operator can replay.
+
 ## 1. Command surface
 
 Path: `cmd/v100/`
@@ -62,6 +87,19 @@ Important pieces:
   - `RouterSolver`: Cheap-to-smart provider escalation (using a `trivialMutations` allowlist for cheap tool execution).
   - `RLMSolver`: DSPy-style Recursive Language Model pattern with sub-model invocation.
   - `MiniGLMSolver`: Intelligent provider switching between tool-focused (MiniMax) and reasoning-focused (GLM) models.
+
+The `RouterSolver` (smartrouter) is the clearest example of cost-performance routing: cheap, idempotent work stays on cheap models; anything dangerous or complex escalates to a frontier model.
+
+```mermaid
+flowchart LR
+    IN[step / tool call] --> Q{trivial and<br/>idempotent?<br/>e.g. read file}
+    Q -- yes --> CHEAP["cheap model<br/>Gemini Flash · Ollama"]
+    Q -- no --> D{dangerous or<br/>complex mutation?}
+    D -- no --> CHEAP
+    D -- yes --> FRONT["frontier model<br/>Claude Opus · MiniMax"]
+    CHEAP --> OUT[result]
+    FRONT --> OUT
+```
 - `trace.go`: structured event output for replay and analysis
 - `budget.go`: Budget tracking system for token/cost accounting, limits, and `ErrBudgetExceeded` handling.
 - `checkpoint*.go` and `snapshot*.go`: Persistence API (`PersistCheckpoint`, `ReadCheckpoint`, etc.) and `SnapshotManager` for workspace snapshots and restore points.
@@ -99,6 +137,23 @@ Important design ideas:
 - tool effects are visible in traces and can be reviewed after the fact
 
 This layer is one of the strongest defining traits of v100. The project is not only about model quality; it is about runtime behavior at the boundary between model and environment.
+
+The Safe/Dangerous classification is enforced at the boundary, before any effect reaches the workspace:
+
+```mermaid
+flowchart TD
+    M[model emits tool call] --> R{registered &<br/>schema-valid?}
+    R -- no --> X[reject]
+    R -- yes --> S{Safe or<br/>Dangerous?}
+    S -- Safe --> EX[execute]
+    S -- Dangerous --> P{policy}
+    P -- ReflectOnDangerous --> RF[reflection turn<br/>confidence + uncertainty]
+    P -- confirm required --> CG{operator gate}
+    RF --> CG
+    CG -- approved --> SNAP[pre-mutation snapshot] --> EX
+    CG -- denied --> DN[denial counted → watchdog]
+    EX --> TR[(trace event)]
+```
 
 ## 4. Provider layer
 
@@ -182,6 +237,22 @@ Tool risk is modeled directly. Confirmation, dangerous-tool handling, workspace 
 - **Sandbox Snapshots:** Events for sandbox state capture and restoration (`EventSandboxSnapshot`, `EventSandboxRestore`).
 
 The project is aiming for autonomy with visibility, not autonomy by hiding the sharp edges.
+
+This is most visible in the `wake` issue-worker daemon. There is no PR step and no built-in human-approval gate; the worker prompt requires local verification before commit, and the daemon then enforces budgets, a clean-tree/default-branch preflight, and a one-commit clean-tree check before pushing:
+
+```mermaid
+flowchart TD
+    T([interval tick]) --> PRE{clean tree and<br/>on origin default branch?}
+    PRE -- no --> FAIL["record failure<br/>(preflight guard)"]
+    PRE -- yes --> L["gh issue list --state open"]
+    L --> PICK["take first issue<br/>labels injected for prioritization"]
+    PICK --> RUN["v100 run --auto --unsafe --sandbox"]
+    RUN --> COMMIT{one new commit<br/>and clean tree?}
+    COMMIT -- no --> FAIL["record failure<br/>(max_failures guard)"]
+    COMMIT -- yes --> PUSH[daemon pushes + closes issue]
+    PUSH --> T
+    FAIL --> T
+```
 
 ### Long-run usability
 

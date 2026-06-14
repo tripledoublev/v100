@@ -2,6 +2,11 @@
 
 # v100: Engine for Agentic Research
 
+[![Release](https://img.shields.io/github/v/release/tripledoublev/v100?sort=semver)](https://github.com/tripledoublev/v100/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/tripledoublev/v100)](go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tripledoublev/v100)](https://goreportcard.com/report/github.com/tripledoublev/v100)
+[![License: MIT](https://img.shields.io/github/license/tripledoublev/v100)](LICENSE)
+
 v100 is my engine for building, running, studying, and evolving autonomous coding agents under real constraints.
 
 It is a concrete Go-based agent runtime with a CLI, Bubble Tea TUI, tool safety controls, durable memory, trace replay, benchmarking, evaluation, policy evolution, and long-running execution paths.
@@ -44,6 +49,50 @@ v100 keeps surprising behavior explainable after the fact:
 - Every run emits a structured `trace.jsonl`.
 - `v100 replay <run_id>` lets you step through an agent's reasoning turn-by-turn after the fact.
 - Checkpoints allow you to resume interrupted runs seamlessly.
+
+---
+
+## 🗺️ Architecture at a Glance
+
+Six layers, tied together by a single rule: every action lands in a replayable trace.
+
+```mermaid
+flowchart TB
+    CLI["<b>Command surface</b><br/>cmd/v100 · run · wake · replay · eval"]
+    RT["<b>Execution runtime</b><br/>internal/core · loop · solvers · budgets · snapshots"]
+    TOOLS["<b>Tool layer</b><br/>internal/tools · 40+ schema-bound tools · Safe / Dangerous"]
+    PROV["<b>Provider layer</b><br/>internal/providers · MiniMax · GLM · Anthropic · Gemini · Ollama"]
+    MEM["<b>Memory & retrieval</b><br/>internal/memory · blackboard · vector store · ATProto RAG"]
+    EVAL["<b>Eval & research</b><br/>internal/eval · scoring · bench · experiments · evolve"]
+
+    CLI --> RT
+    RT --> TOOLS
+    RT --> PROV
+    RT --> MEM
+    RT --> EVAL
+    TOOLS -. effects .-> SANDBOX[["Sandbox<br/>Docker · network tiers"]]
+    RT ==> TRACE[("trace.jsonl<br/>replay · blame")]
+```
+
+A single run is a budgeted loop where dangerous tool calls get gated before they touch the workspace, and the whole path is recoverable after the fact:
+
+```mermaid
+flowchart LR
+    A([run]) --> B{solver}
+    B --> C[reason]
+    C --> D{tool call?}
+    D -- safe --> E[execute]
+    D -- dangerous --> F{confirm / reflect}
+    F -- approved --> E
+    F -- denied --> C
+    E --> G[append event to trace]
+    G --> H{budget left<br/>and not done?}
+    H -- yes --> C
+    H -- no --> I([commit / exit])
+    I --> J[(replay · blame)]
+```
+
+See [`docs/architecture.md`](docs/architecture.md) for the layer-by-layer breakdown, the tool-safety gate, the wake daemon cycle, and smartrouter escalation.
 
 ---
 
