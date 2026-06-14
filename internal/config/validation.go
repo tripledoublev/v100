@@ -412,10 +412,10 @@ func validEnvName(name string) bool {
 		return false
 	}
 	for i, r := range name {
-		if i == 0 && !(r == '_' || unicode.IsLetter(r)) {
+		if i == 0 && r != '_' && !unicode.IsLetter(r) {
 			return false
 		}
-		if !(r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
 			return false
 		}
 	}

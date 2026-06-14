@@ -135,7 +135,7 @@ func TestHelpOverlayDoesNotInterceptConfirmation(t *testing.T) {
 		t.Fatal("expected confirmation to be pending")
 	}
 
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlY})
+	_ = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlY})
 	select {
 	case approved := <-result:
 		if !approved {

@@ -165,11 +165,9 @@ func helpModelValue(provider, model string) string {
 }
 
 func (m *TUIModel) helpPanelState() string {
-	detail := "unavailable"
+	detail := "n/a"
 	if m.selectedToolExec != nil {
 		detail = onOff(m.showDetail)
-	} else {
-		detail = "n/a"
 	}
 	return strings.Join([]string{
 		"trace:" + onOff(m.showTrace),
