@@ -132,8 +132,25 @@ Responses return a stop reason:
 { "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "end_turn" } }
 ```
 
-During execution, v100 emits `session/update` notifications for model chunks,
-thought chunks, tool calls, and tool results.
+During execution, v100 emits `session/update` notifications for live run state.
+
+| v100 trace event | ACP `sessionUpdate` | Notes |
+| --- | --- | --- |
+| `run.start` / `run.end` | `run_status_update` | Includes raw run payload with provider/model, end reason, and final budget usage. |
+| `run.error` | `run_error` | Includes the raw error payload. |
+| `model.token` | `agent_message_chunk` | Streaming assistant text. |
+| `solver.plan` / `solver.replan` | `agent_thought_chunk` | Planner text or replan error. |
+| `step.summary` | `step_summary` | Includes per-step token, cost, model-call, tool-call, and duration payload. |
+| `tool.call` | `tool_call` | Includes tool call ID, kind, title, status, and raw input. |
+| `tool.output_delta` | `tool_call_update` | Streams stdout/stderr deltas as `in_progress` updates. |
+| `tool.result` | `tool_call_update` | Marks the tool call `completed` or `failed`. |
+| `agent.start` / `agent.dispatch` / `agent.end` | `agent_lifecycle` | Uses child run ID as `toolCallId` and includes parent/child metadata in raw output. |
+| `hook.intervention` | `hook_intervention` | Includes hook action, message, and reason. |
+| `sandbox.snapshot` / `sandbox.restore` | `sandbox_update` | Includes snapshot/restore metadata and related tool call ID when available. |
+
+Events not listed here remain trace-only for now. Confirmation prompts are still
+represented by the request/response lifecycle around dangerous tool calls rather
+than a dedicated ACP update type.
 
 ### session/close
 
