@@ -44,6 +44,12 @@ func TestACPLifecycleInitializeSuggestedPromptsFinalize(t *testing.T) {
 	if initResult.ProtocolVersion != acp.ProtocolVersion || initResult.AgentInfo.Name != "v100" {
 		t.Fatalf("initialize result = %#v", initResult)
 	}
+	if !initResult.AgentCapabilities.LoadSession ||
+		initResult.AgentCapabilities.SessionCapabilities.Close == nil ||
+		initResult.AgentCapabilities.SessionCapabilities.List == nil ||
+		initResult.AgentCapabilities.SessionCapabilities.Resume == nil {
+		t.Fatalf("initialize capabilities = %#v", initResult.AgentCapabilities)
+	}
 	if !server.initialized || server.clientInfo.Name != "test-client" || !server.clientCaps.Terminal {
 		t.Fatalf("server handshake state not recorded: %#v %#v", server.clientInfo, server.clientCaps)
 	}
@@ -265,6 +271,130 @@ func TestACPErrorsUseProtocolCodes(t *testing.T) {
 	}
 }
 
+func TestACPListSessionsIncludesActiveAndRestorableRuns(t *testing.T) {
+	root := t.TempDir()
+	runRoot := filepath.Join(root, "runs")
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restorableID := "20260613T010101-deadbeef"
+	writeACPTraceFixture(t, runRoot, restorableID, workspace, "completed")
+
+	activeID := "20260613T020202-feedbeef"
+	activeDir := writeACPTraceFixture(t, runRoot, activeID, workspace, "")
+	trace, err := core.OpenTrace(filepath.Join(activeDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+	}
+	server.sessions[activeID] = &acpSession{
+		comp: &RunComponents{
+			Run:       &core.Run{ID: activeID, Dir: workspace, TraceFile: filepath.Join(activeDir, "trace.jsonl")},
+			Trace:     trace,
+			Workspace: workspace,
+			Model:     "test-model",
+		},
+		promptActive: true,
+	}
+
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionList, acp.SessionListParams{RunDir: runRoot}))
+	responses := acpResponses(t, out.String())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var result acp.SessionListResult
+	decodeACPResult(t, responses[0], &result)
+	if len(result.Sessions) != 2 {
+		t.Fatalf("sessions = %#v, want active + restorable", result.Sessions)
+	}
+	byRunID := map[string]acp.SessionInfo{}
+	for _, session := range result.Sessions {
+		byRunID[session.RunID] = session
+	}
+	active := byRunID[activeID]
+	if !active.Active || active.State != "busy" || !active.Restorable {
+		t.Fatalf("active session info = %#v", active)
+	}
+	restorable := byRunID[restorableID]
+	if restorable.Active || !restorable.Restorable || restorable.State != "ended" || restorable.EndReason != "completed" {
+		t.Fatalf("restorable session info = %#v", restorable)
+	}
+	if restorable.Provider != "llamacpp" || restorable.Model != "test-model" || restorable.Workspace != workspace {
+		t.Fatalf("restorable metadata = %#v", restorable)
+	}
+}
+
+func TestACPResumeLoadsPriorTraceAsSession(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`
+[providers.llamacpp]
+type = "llamacpp"
+default_model = "test-model"
+base_url = "http://127.0.0.1:19091/v1"
+
+[defaults]
+provider = "llamacpp"
+cheap_provider = "llamacpp"
+smart_provider = "llamacpp"
+compress_provider = "llamacpp"
+confirm_tools = "dangerous"
+budget_steps = 2
+budget_tokens = 1000
+max_tool_calls_per_step = 1
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runID := "20260613T030303-cafebabe"
+	writeACPTraceFixture(t, filepath.Join(root, "runs"), runID, workspace, "prompt_exit")
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionResume, acp.SessionResumeParams{RunID: runID}))
+	responses := acpResponses(t, out.String())
+	if len(responses) == 0 {
+		t.Fatal("no ACP response")
+	}
+	var result acp.SessionResumeResult
+	decodeACPResult(t, responses[0], &result)
+	if result.SessionID != runID || result.RunID != runID {
+		t.Fatalf("resume result = %#v", result)
+	}
+	session := server.sessions[runID]
+	if session == nil || session.loop == nil {
+		t.Fatalf("session not registered: %#v", server.sessions)
+	}
+	if got := len(session.loop.Messages); got < 3 {
+		t.Fatalf("resumed messages = %d, want summary + prior user/assistant", got)
+	}
+	if !strings.Contains(session.loop.Messages[0].Content, "Resume summary for run "+runID) {
+		t.Fatalf("first resumed message = %#v", session.loop.Messages[0])
+	}
+	if session.loop.Messages[1].Role != "user" || session.loop.Messages[2].Role != "assistant" {
+		t.Fatalf("resumed history = %#v", session.loop.Messages[:3])
+	}
+
+	closeACPSession(session)
+}
+
 func acpRequest(t *testing.T, id int, method string, params any) acp.Request {
 	t.Helper()
 	raw, err := json.Marshal(params)
@@ -336,6 +466,56 @@ func (s *fakeACPSession) Start(context.Context) error { return nil }
 func (s *fakeACPSession) Close() error {
 	s.closed = true
 	return nil
+}
+
+func writeACPTraceFixture(t *testing.T, runRoot, runID, workspace, endReason string) string {
+	t.Helper()
+	runDir := filepath.Join(runRoot, runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := core.WriteMeta(runDir, core.RunMeta{
+		RunID:           runID,
+		Provider:        "llamacpp",
+		Model:           "test-model",
+		SourceWorkspace: workspace,
+		CreatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+	writeACPTraceEvent(t, trace, runID, "start", core.EventRunStart, core.RunStartPayload{
+		Provider:  "llamacpp",
+		Model:     "test-model",
+		Workspace: workspace,
+	})
+	writeACPTraceEvent(t, trace, runID, "user", core.EventUserMsg, core.UserMsgPayload{Content: "prior prompt"})
+	writeACPTraceEvent(t, trace, runID, "assistant", core.EventModelResp, core.ModelRespPayload{Text: "prior answer"})
+	if strings.TrimSpace(endReason) != "" {
+		writeACPTraceEvent(t, trace, runID, "end", core.EventRunEnd, core.RunEndPayload{Reason: endReason})
+	}
+	return runDir
+}
+
+func writeACPTraceEvent(t *testing.T, trace *core.TraceWriter, runID, eventID string, eventType core.EventType, payload any) {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := trace.Write(core.Event{
+		TS:      time.Now().UTC(),
+		RunID:   runID,
+		EventID: eventID,
+		Type:    eventType,
+		Payload: raw,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (s *fakeACPSession) Run(context.Context, executor.RunRequest) (executor.Result, error) {

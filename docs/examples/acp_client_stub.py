@@ -5,8 +5,9 @@ Run from a repository root:
 
     python3 docs/examples/acp_client_stub.py
 
-The script starts `v100 acp`, initializes the connection, creates a session,
-sends one text prompt, and finalizes the server.
+The script starts `v100 acp`, initializes the connection, lists restorable
+sessions, resumes the newest one when available, otherwise creates a new
+session, sends one text prompt, and finalizes the server.
 """
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ def main() -> int:
             },
         )
         print(f"initialized: {init['result']['agentInfo']}")
+        capabilities = init["result"].get("agentCapabilities", {})
 
         send(
             proc,
@@ -81,22 +83,48 @@ def main() -> int:
             },
         )
 
-        session = send(
-            proc,
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "session/new",
-                "params": {"cwd": workspace},
-            },
-        )["result"]["sessionId"]
+        session = None
+        if capabilities.get("sessionCapabilities", {}).get("list"):
+            listed = send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/list",
+                    "params": {"limit": 5},
+                },
+            )["result"]["sessions"]
+            restorable = [s for s in listed if s.get("restorable") and not s.get("active")]
+            if restorable and capabilities.get("sessionCapabilities", {}).get("resume"):
+                resumed = send(
+                    proc,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 4,
+                        "method": "session/resume",
+                        "params": {"runId": restorable[0]["runId"]},
+                    },
+                )["result"]
+                session = resumed["sessionId"]
+                print(f"resumed: {resumed['runId']}")
+
+        if session is None:
+            session = send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "session/new",
+                    "params": {"cwd": workspace},
+                },
+            )["result"]["sessionId"]
         print(f"session: {session}")
 
         prompt = send(
             proc,
             {
                 "jsonrpc": "2.0",
-                "id": 4,
+                "id": 6,
                 "method": "session/prompt",
                 "params": {
                     "sessionId": session,
@@ -110,7 +138,7 @@ def main() -> int:
             proc,
             {
                 "jsonrpc": "2.0",
-                "id": 5,
+                "id": 7,
                 "method": "finalize",
                 "params": {"reason": "stub complete"},
             },

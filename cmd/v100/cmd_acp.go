@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/tripledoublev/v100/internal/acp"
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
+	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/providers"
 )
 
@@ -143,8 +147,11 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		res := acp.InitializeResult{
 			ProtocolVersion: acp.ProtocolVersion,
 			AgentCapabilities: acp.AgentCapabilities{
+				LoadSession: true,
 				SessionCapabilities: acp.SessionCapabilities{
-					Close: &struct{}{},
+					Close:  &struct{}{},
+					List:   &struct{}{},
+					Resume: &struct{}{},
 				},
 			},
 			AgentInfo: acp.AgentInfo{
@@ -164,6 +171,19 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		s.clientCaps = params.ClientCapabilities
 		s.mu.Unlock()
 
+		_ = s.conn.SendResponse(req.ID, res)
+
+	case acp.MethodSessionList:
+		var params acp.SessionListParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		res, err := s.listSessions(params)
+		if err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
+		}
 		_ = s.conn.SendResponse(req.ID, res)
 
 	case acp.MethodFinalize:
@@ -283,18 +303,21 @@ func (s *acpServer) handleRequest(req acp.Request) {
 
 		_ = s.conn.SendResponse(req.ID, acp.SessionNewResult{SessionID: sessionID})
 
-		// Advertise available slash commands to the client
-		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
-			SessionID: sessionID,
-			Update: acp.Update{
-				Type: "available_commands_update",
-				AvailableCommands: []acp.Command{
-					{Name: "model", Description: "switch model or provider"},
-					{Name: "auto", Description: "switch to auto (smartrouter) mode"},
-					{Name: "local", Description: "switch to local provider"},
-				},
-			},
-		})
+		s.sendAvailableCommands(sessionID)
+
+	case acp.MethodSessionResume, acp.MethodSessionLoad:
+		var params acp.SessionResumeParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		res, err := s.resumeSession(params)
+		if err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
+		}
+		_ = s.conn.SendResponse(req.ID, res)
+		s.sendAvailableCommands(res.SessionID)
 
 	case acp.MethodSessionPrompt:
 		var params acp.SessionPromptParams
@@ -457,6 +480,10 @@ func acpErrorCode(err error) int {
 	return acp.ErrInternal
 }
 
+func acpStatus(code int, format string, args ...any) error {
+	return acpStatusError{code: code, msg: fmt.Sprintf(format, args...)}
+}
+
 func (s *acpServer) setSuggestedPrompts(params acp.SetSuggestedPromptsParams) error {
 	prompts := copySuggestedPrompts(params.Prompts)
 	if params.SessionID == "" {
@@ -486,6 +513,467 @@ func (s *acpServer) setSuggestedPrompts(params acp.SetSuggestedPromptsParams) er
 	}
 	session.prompts = prompts
 	return nil
+}
+
+func (s *acpServer) listSessions(params acp.SessionListParams) (acp.SessionListResult, error) {
+	runRoot := strings.TrimSpace(params.RunDir)
+	if runRoot == "" {
+		runRoot = "runs"
+	}
+	runRoot = expandHomePath(runRoot)
+	if abs, err := filepath.Abs(runRoot); err == nil {
+		runRoot = abs
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	s.mu.Lock()
+	activeSessions := make(map[string]*acpSession, len(s.sessions))
+	for id, session := range s.sessions {
+		activeSessions[id] = session
+	}
+	s.mu.Unlock()
+
+	activeRunIDs := make(map[string]bool, len(activeSessions))
+	infos := make([]acp.SessionInfo, 0, len(activeSessions))
+	for sessionID, session := range activeSessions {
+		info := acpActiveSessionInfo(sessionID, session)
+		if info.RunID != "" {
+			activeRunIDs[info.RunID] = true
+		}
+		if info.SessionID != "" {
+			activeRunIDs[info.SessionID] = true
+		}
+		infos = append(infos, info)
+	}
+
+	restorable, err := acpRestorableRunInfos(runRoot, activeRunIDs)
+	if err != nil && !os.IsNotExist(err) {
+		return acp.SessionListResult{}, err
+	}
+	infos = append(infos, restorable...)
+
+	sort.SliceStable(infos, func(i, j int) bool {
+		if infos[i].LastUpdate == infos[j].LastUpdate {
+			return infos[i].RunID > infos[j].RunID
+		}
+		return infos[i].LastUpdate > infos[j].LastUpdate
+	})
+	if limit > 0 && len(infos) > limit {
+		infos = infos[:limit]
+	}
+	return acp.SessionListResult{Sessions: infos}, nil
+}
+
+func acpActiveSessionInfo(sessionID string, session *acpSession) acp.SessionInfo {
+	info := acp.SessionInfo{
+		SessionID:  sessionID,
+		RunID:      sessionID,
+		State:      "active",
+		Active:     true,
+		Restorable: true,
+	}
+	if session == nil {
+		return info
+	}
+
+	session.mu.Lock()
+	closing := session.closing
+	promptActive := session.promptActive
+	comp := session.comp
+	loop := session.loop
+	session.mu.Unlock()
+
+	switch {
+	case closing:
+		info.State = "closing"
+	case promptActive:
+		info.State = "busy"
+	}
+	if comp != nil {
+		if comp.Run != nil {
+			info.RunID = strings.TrimSpace(comp.Run.ID)
+			info.TracePath = strings.TrimSpace(comp.Run.TraceFile)
+			if info.TracePath != "" {
+				info.RunDir = filepath.Dir(info.TracePath)
+			}
+		}
+		if comp.Provider != nil {
+			info.Provider = strings.TrimSpace(comp.Provider.Name())
+		}
+		info.Model = strings.TrimSpace(comp.Model)
+		info.Workspace = strings.TrimSpace(comp.Workspace)
+	}
+	if loop != nil {
+		if info.Model == "" {
+			info.Model = strings.TrimSpace(loop.Model)
+		}
+		if info.Provider == "" && loop.Provider != nil {
+			info.Provider = strings.TrimSpace(loop.Provider.Name())
+		}
+		if info.TracePath == "" && loop.Run != nil {
+			info.TracePath = strings.TrimSpace(loop.Run.TraceFile)
+			if info.RunID == "" {
+				info.RunID = strings.TrimSpace(loop.Run.ID)
+			}
+			if info.TracePath != "" {
+				info.RunDir = filepath.Dir(info.TracePath)
+			}
+		}
+	}
+	if info.RunID == "" {
+		info.RunID = sessionID
+	}
+	if info.RunDir != "" {
+		enrichACPSessionInfo(&info, info.RunDir)
+	}
+	if info.TracePath != "" {
+		info.LastUpdate = acpTraceModTime(info.TracePath)
+	}
+	return info
+}
+
+func acpRestorableRunInfos(runRoot string, activeRunIDs map[string]bool) ([]acp.SessionInfo, error) {
+	entries, err := os.ReadDir(runRoot)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]acp.SessionInfo, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		runID := entry.Name()
+		if activeRunIDs[runID] {
+			continue
+		}
+		runDir := filepath.Join(runRoot, runID)
+		tracePath := filepath.Join(runDir, "trace.jsonl")
+		if _, err := os.Stat(tracePath); err != nil {
+			continue
+		}
+		info := acp.SessionInfo{
+			SessionID:  runID,
+			RunID:      runID,
+			RunDir:     runDir,
+			TracePath:  tracePath,
+			State:      "restorable",
+			Restorable: true,
+		}
+		enrichACPSessionInfo(&info, runDir)
+		if activeRunIDs[info.RunID] || activeRunIDs[info.SessionID] {
+			continue
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func enrichACPSessionInfo(info *acp.SessionInfo, runDir string) {
+	if info == nil {
+		return
+	}
+	if strings.TrimSpace(runDir) == "" {
+		return
+	}
+	if meta, err := core.ReadMeta(runDir); err == nil {
+		if strings.TrimSpace(meta.RunID) != "" {
+			info.RunID = strings.TrimSpace(meta.RunID)
+			if strings.TrimSpace(info.SessionID) == "" {
+				info.SessionID = info.RunID
+			}
+		}
+		if info.Provider == "" {
+			info.Provider = strings.TrimSpace(meta.Provider)
+		}
+		if info.Model == "" {
+			info.Model = strings.TrimSpace(meta.Model)
+		}
+		if info.Workspace == "" {
+			info.Workspace = strings.TrimSpace(meta.SourceWorkspace)
+		}
+	}
+
+	tracePath := filepath.Join(runDir, "trace.jsonl")
+	info.TracePath = tracePath
+	info.RunDir = runDir
+	info.LastUpdate = acpTraceModTime(tracePath)
+	if events, err := core.ReadAll(tracePath); err == nil {
+		provider, model, workspace, endReason := acpTraceSummary(events)
+		if provider != "" {
+			info.Provider = provider
+		}
+		if model != "" {
+			info.Model = model
+		}
+		if workspace != "" && info.Workspace == "" {
+			info.Workspace = workspace
+		}
+		if endReason != "" {
+			info.EndReason = endReason
+			if !info.Active {
+				info.State = "ended"
+			}
+		}
+	}
+	if info.SessionID == "" {
+		info.SessionID = info.RunID
+	}
+}
+
+func acpTraceSummary(events []core.Event) (provider, model, workspace, endReason string) {
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventRunStart:
+			var payload core.RunStartPayload
+			_ = json.Unmarshal(ev.Payload, &payload)
+			if strings.TrimSpace(payload.Provider) != "" {
+				provider = strings.TrimSpace(payload.Provider)
+			}
+			if strings.TrimSpace(payload.Model) != "" {
+				model = strings.TrimSpace(payload.Model)
+			}
+			if strings.TrimSpace(payload.Workspace) != "" {
+				workspace = strings.TrimSpace(payload.Workspace)
+			}
+		case core.EventRunEnd:
+			var payload core.RunEndPayload
+			_ = json.Unmarshal(ev.Payload, &payload)
+			endReason = strings.TrimSpace(payload.Reason)
+		}
+	}
+	return provider, model, workspace, endReason
+}
+
+func acpTraceModTime(tracePath string) string {
+	if info, err := os.Stat(tracePath); err == nil {
+		return info.ModTime().UTC().Format(time.RFC3339)
+	}
+	return ""
+}
+
+func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionResumeResult, error) {
+	runDir, runID, err := resolveACPResumeRunDir(params)
+	if err != nil {
+		return acp.SessionResumeResult{}, err
+	}
+	tracePath := filepath.Join(runDir, "trace.jsonl")
+
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		sessionID = runID
+	}
+	s.mu.Lock()
+	if _, exists := s.sessions[sessionID]; exists {
+		s.mu.Unlock()
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrSessionAlreadyExists, "%s: %s", acp.ErrorMessage(acp.ErrSessionAlreadyExists), sessionID)
+	}
+	s.mu.Unlock()
+
+	events, err := core.ReadAll(tracePath)
+	if err != nil {
+		return acp.SessionResumeResult{}, fmt.Errorf("read trace: %w", err)
+	}
+	cfg, err := loadConfig(s.cfgPath)
+	if err != nil {
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrProviderConfiguration, "%s", err.Error())
+	}
+
+	msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
+	if ckMsgs, err := loadCheckpoint(runDir); err != nil {
+		return acp.SessionResumeResult{}, fmt.Errorf("load checkpoint: %w", err)
+	} else if len(ckMsgs) > 0 {
+		msgs = ckMsgs
+	}
+	if resumeSummary := buildResumeSummary(runID, events, msgs); strings.TrimSpace(resumeSummary) != "" {
+		msgs = append([]providers.Message{{Role: "system", Content: resumeSummary}}, msgs...)
+	}
+
+	meta, _ := core.ReadMeta(runDir)
+	if meta.Sandbox.Enabled || strings.TrimSpace(meta.Sandbox.Backend) != "" {
+		cfg.Sandbox = meta.Sandbox
+	}
+	providerName, model, selectionChanged := resolveResumeProviderSelection(cfg, providerName, model, "", "")
+	if selectionChanged {
+		metadata = providers.ModelMetadata{}
+	}
+	prov, err := buildProviderWithModel(cfg, providerName, model)
+	if err != nil {
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrProviderConfiguration, "%s", err.Error())
+	}
+	reg := buildToolRegistry(cfg)
+	if err := validateToolRegistry(reg); err != nil {
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrProviderConfiguration, "%s", err.Error())
+	}
+	pol := loadPolicy(cfg, "default")
+	if cfg.Defaults.ContextLimit > 0 {
+		pol.ContextLimit = cfg.Defaults.ContextLimit
+	}
+	budget := core.NewBudgetTracker(&core.Budget{
+		MaxSteps:   cfg.Defaults.BudgetSteps,
+		MaxTokens:  cfg.Defaults.BudgetTokens,
+		MaxCostUSD: cfg.Defaults.BudgetCostUSD,
+	})
+	trace, err := core.OpenTrace(tracePath)
+	if err != nil {
+		return acp.SessionResumeResult{}, fmt.Errorf("open trace: %w", err)
+	}
+
+	run := &core.Run{
+		ID:        runID,
+		Dir:       runDir,
+		TraceFile: tracePath,
+		Budget: core.Budget{
+			MaxSteps:   cfg.Defaults.BudgetSteps,
+			MaxTokens:  cfg.Defaults.BudgetTokens,
+			MaxCostUSD: cfg.Defaults.BudgetCostUSD,
+		},
+	}
+	sourceWorkspace := resolveResumeSourceWorkspace(params.CWD, runDir, tracedWorkspace, meta)
+	execFactory, err := executor.NewExecutor(cfg.Sandbox, filepath.Dir(runDir))
+	if err != nil {
+		_ = trace.Close()
+		return acp.SessionResumeResult{}, err
+	}
+	execSession, err := execFactory.NewSession(runID, sourceWorkspace)
+	if err != nil {
+		_ = trace.Close()
+		return acp.SessionResumeResult{}, err
+	}
+
+	sandboxWorkspace := sourceWorkspace
+	if cfg.Sandbox.Enabled {
+		sandboxWorkspace = filepath.Join(filepath.Dir(runDir), runID, "workspace")
+		if _, err := os.Stat(sandboxWorkspace); err != nil {
+			_ = trace.Close()
+			_ = execSession.Close()
+			return acp.SessionResumeResult{}, fmt.Errorf("resume sandbox workspace: %w", err)
+		}
+	}
+	mapper := core.NewPathMapper(sourceWorkspace, sandboxWorkspace)
+	run.Dir = sandboxWorkspace
+
+	toolEnv, redactToolOutput := buildToolRuntime(cfg)
+	confirmMode := cfg.Defaults.ConfirmTools
+	if s.yolo {
+		confirmMode = "never"
+	}
+	confirmFn := buildConfirmFn(confirmMode)
+	if !s.yolo {
+		confirmFn = func(toolName, _ string) bool { return false }
+	}
+	outputFn := acp.NewTranslator(s.conn, sessionID)
+	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sandboxWorkspace, cfg.Defaults.MaxToolCallsPerStep, execSession, mapper, toolEnv, redactToolOutput)
+
+	cmd := s.cmd
+	if cmd == nil {
+		cmd = &cobra.Command{}
+	}
+	comp := &RunComponents{
+		Config:           cfg,
+		Run:              run,
+		Provider:         prov,
+		Registry:         reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		Session:          execSession,
+		Mapper:           mapper,
+		Workspace:        sandboxWorkspace,
+		Model:            model,
+		ModelMetadata:    metadata,
+		GenParams:        buildGenParams(cfg, 0, 0, 0, 0, 0, cmd),
+		ToolEnv:          toolEnv,
+		RedactToolOutput: redactToolOutput,
+	}
+	loop := &core.Loop{
+		Run:              run,
+		Provider:         prov,
+		Model:            model,
+		CompressProvider: buildCompressProvider(cfg),
+		Tools:            reg,
+		Policy:           pol,
+		Trace:            trace,
+		Budget:           budget,
+		Messages:         msgs,
+		ConfirmFn:        confirmFn,
+		OutputFn:         outputFn,
+		Session:          execSession,
+		Mapper:           mapper,
+		ToolEnv:          append([]string(nil), toolEnv...),
+		RedactToolOutput: redactToolOutput,
+		ModelMetadata:    metadata,
+		NetworkTier:      loopNetworkTier(cfg),
+		Snapshots:        buildSnapshotManager(cfg, sandboxWorkspace),
+		GenParams:        comp.GenParams,
+	}
+	loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))
+	loop.Hooks = append(loop.Hooks, core.DeduplicationHook(2))
+
+	s.mu.Lock()
+	if _, exists := s.sessions[sessionID]; exists {
+		s.mu.Unlock()
+		cleanupRunComponents(comp)
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrSessionAlreadyExists, "%s: %s", acp.ErrorMessage(acp.ErrSessionAlreadyExists), sessionID)
+	}
+	if s.sessions == nil {
+		s.sessions = make(map[string]*acpSession)
+	}
+	s.sessions[sessionID] = &acpSession{
+		comp:    comp,
+		loop:    loop,
+		prompts: copySuggestedPrompts(s.suggestedPrompts),
+	}
+	s.mu.Unlock()
+
+	return acp.SessionResumeResult{SessionID: sessionID, RunID: runID}, nil
+}
+
+func resolveACPResumeRunDir(params acp.SessionResumeParams) (string, string, error) {
+	runDirParam := strings.TrimSpace(params.RunDir)
+	target := strings.TrimSpace(params.RunID)
+	if target == "" {
+		target = strings.TrimSpace(params.SessionID)
+	}
+	if runDirParam != "" {
+		runDirParam = expandHomePath(runDirParam)
+		if hasACPTrace(runDirParam) {
+			runID := target
+			if runID == "" {
+				runID = filepath.Base(filepath.Clean(runDirParam))
+			}
+			return runDirParam, runID, nil
+		}
+		if target == "" {
+			return "", "", acpStatus(acp.ErrInvalidParams, "session resume requires runId when runDir is a runs root")
+		}
+		candidate := filepath.Join(runDirParam, target)
+		if hasACPTrace(candidate) {
+			return candidate, target, nil
+		}
+		return "", "", acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), target)
+	}
+	if target == "" {
+		return "", "", acpStatus(acp.ErrInvalidParams, "session resume requires runId, runDir, or sessionId")
+	}
+	runDir, err := findRunDir(target)
+	if err != nil {
+		return "", "", acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), target)
+	}
+	return runDir, filepath.Base(filepath.Clean(runDir)), nil
+}
+
+func hasACPTrace(runDir string) bool {
+	if strings.TrimSpace(runDir) == "" {
+		return false
+	}
+	if info, err := os.Stat(filepath.Join(runDir, "trace.jsonl")); err == nil && !info.IsDir() {
+		return true
+	}
+	return false
 }
 
 func (s *acpServer) finalize() int {
@@ -539,6 +1027,20 @@ func copySuggestedPrompts(in []acp.SuggestedPrompt) []acp.SuggestedPrompt {
 		out[i].Tags = append([]string(nil), in[i].Tags...)
 	}
 	return out
+}
+
+func (s *acpServer) sendAvailableCommands(sessionID string) {
+	_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
+		SessionID: sessionID,
+		Update: acp.Update{
+			Type: "available_commands_update",
+			AvailableCommands: []acp.Command{
+				{Name: "model", Description: "switch model or provider"},
+				{Name: "auto", Description: "switch to auto (smartrouter) mode"},
+				{Name: "local", Description: "switch to local provider"},
+			},
+		},
+	})
 }
 
 func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt string, images []providers.ImageAttachment) string {

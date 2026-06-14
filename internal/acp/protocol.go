@@ -42,6 +42,9 @@ const (
 	MethodFinalize            = "finalize"
 	MethodSetSuggestedPrompts = "set_suggested_prompts"
 	MethodSessionNew          = "session/new"
+	MethodSessionList         = "session/list"
+	MethodSessionResume       = "session/resume"
+	MethodSessionLoad         = "session/load"
 	MethodSessionPrompt       = "session/prompt"
 	MethodSessionClose        = "session/close"
 	MethodSessionCancel       = "session/cancel"
@@ -170,6 +173,42 @@ type SessionNewParams struct {
 
 type SessionNewResult struct {
 	SessionID string `json:"sessionId"`
+}
+
+type SessionListParams struct {
+	RunDir string `json:"runDir,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+type SessionInfo struct {
+	SessionID  string `json:"sessionId"`
+	RunID      string `json:"runId"`
+	RunDir     string `json:"runDir,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Workspace  string `json:"workspace,omitempty"`
+	State      string `json:"state"`
+	EndReason  string `json:"endReason,omitempty"`
+	LastUpdate string `json:"lastUpdated,omitempty"`
+	TracePath  string `json:"tracePath,omitempty"`
+	Active     bool   `json:"active"`
+	Restorable bool   `json:"restorable"`
+}
+
+type SessionListResult struct {
+	Sessions []SessionInfo `json:"sessions"`
+}
+
+type SessionResumeParams struct {
+	SessionID string `json:"sessionId,omitempty"`
+	RunID     string `json:"runId,omitempty"`
+	RunDir    string `json:"runDir,omitempty"`
+	CWD       string `json:"cwd,omitempty"`
+}
+
+type SessionResumeResult struct {
+	SessionID string `json:"sessionId"`
+	RunID     string `json:"runId"`
 }
 
 type SuggestedPrompt struct {

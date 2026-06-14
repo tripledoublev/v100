@@ -52,7 +52,8 @@ Response:
     "agentInfo": { "name": "v100", "version": "..." },
     "agentCapabilities": {
       "promptCapabilities": { "image": true },
-      "sessionCapabilities": { "close": {} }
+      "loadSession": true,
+      "sessionCapabilities": { "close": {}, "list": {}, "resume": {} }
     }
   }
 }
@@ -112,12 +113,89 @@ Response:
 
 v100 may also send `session/update` notifications with available slash commands.
 
-### session/prompt
+### session/list
+
+List active ACP sessions and restorable run directories. Omit `runDir` to scan
+the ACP server process' `./runs` directory, matching the default `v100 run` and
+`v100 acp session/new` behavior.
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 4,
+  "method": "session/list",
+  "params": { "limit": 20 }
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "sessions": [
+      {
+        "sessionId": "20260613T030303-cafebabe",
+        "runId": "20260613T030303-cafebabe",
+        "provider": "llamacpp",
+        "model": "test-model",
+        "workspace": "/path/to/workspace",
+        "state": "ended",
+        "endReason": "prompt_exit",
+        "lastUpdated": "2026-06-13T21:10:00Z",
+        "tracePath": "/path/to/workspace/runs/20260613T030303-cafebabe/trace.jsonl",
+        "active": false,
+        "restorable": true
+      }
+    ]
+  }
+}
+```
+
+Active sessions report `active: true` and use `state` values such as `active`,
+`busy`, or `closing`. Restorable disk runs report `state: ended` when the trace
+has a final `run.end` reason, otherwise `restorable`.
+
+### session/resume and session/load
+
+Resume a prior run into an active ACP session. `session/load` is an alias for
+clients that use load terminology. If `sessionId` is omitted, v100 uses the
+run ID as the active ACP session ID. `cwd` optionally overrides the workspace
+used for resumed tool execution; otherwise v100 uses `meta.json` and trace
+workspace data, matching `v100 resume`.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session/resume",
+  "params": { "runId": "20260613T030303-cafebabe" }
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "sessionId": "20260613T030303-cafebabe",
+    "runId": "20260613T030303-cafebabe"
+  }
+}
+```
+
+After resume/load, send `session/prompt` with the returned `sessionId`.
+
+### session/prompt
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
   "method": "session/prompt",
   "params": {
     "sessionId": "run-...",
@@ -129,7 +207,7 @@ v100 may also send `session/update` notifications with available slash commands.
 Responses return a stop reason:
 
 ```json
-{ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "end_turn" } }
+{ "jsonrpc": "2.0", "id": 6, "result": { "stopReason": "end_turn" } }
 ```
 
 During execution, v100 emits `session/update` notifications for live run state.
@@ -157,7 +235,7 @@ than a dedicated ACP update type.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 5,
+  "id": 7,
   "method": "session/close",
   "params": { "sessionId": "run-..." }
 }
@@ -171,7 +249,7 @@ resources.
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 6,
+  "id": 8,
   "method": "finalize",
   "params": { "reason": "client shutdown" }
 }
@@ -180,7 +258,7 @@ resources.
 Response:
 
 ```json
-{ "jsonrpc": "2.0", "id": 6, "result": { "closedSessions": 1 } }
+{ "jsonrpc": "2.0", "id": 8, "result": { "closedSessions": 1 } }
 ```
 
 `finalize` cancels active sessions, closes inactive sessions immediately, clears
