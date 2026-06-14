@@ -71,6 +71,81 @@ func TestViewKeepsClockVisibleInHeader(t *testing.T) {
 	}
 }
 
+func TestHelpOverlayTogglesAndShowsRunContext(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.width = 72
+	m.height = 42
+	m.SetRunInfo(RunInfo{
+		RunID:       "run-help-1234",
+		Provider:    "codex",
+		Model:       "gpt-5.4",
+		TracePath:   "runs/run-help-1234/trace.jsonl",
+		Workspace:   "/tmp/workspace",
+		ConfirmMode: "dangerous",
+	})
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !m.showHelp {
+		t.Fatal("expected help overlay to open")
+	}
+	view := stripANSI(m.View())
+	for _, want := range []string{"v100 help", "run-help-1234", "codex / gpt-5.4", "Ctrl+T", "confirm"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("help view missing %q:\n%s", want, view)
+		}
+	}
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.showHelp {
+		t.Fatal("expected Esc to close help overlay")
+	}
+}
+
+func TestHelpOverlayKeepsActionsVisibleInShortTerminal(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.width = 72
+	m.height = 18
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	view := stripANSI(m.View())
+	for _, want := range []string{"v100 help", "Actions", "Ctrl+T/S/M"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("short help view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestHelpOverlayDoesNotInterceptConfirmation(t *testing.T) {
+	m := NewTUIModel(false, false)
+	m.width = 72
+	m.height = 22
+	m.showHelp = true
+	result := make(chan bool, 1)
+
+	updated, _ := m.Update(RequestConfirmMsg{
+		ToolName: "sh",
+		Args:     `{"cmd":"make test"}`,
+		Result:   result,
+	})
+	m = updated.(*TUIModel)
+	if m.showHelp {
+		t.Fatal("expected confirmation to close help overlay")
+	}
+	if !m.pendConfirm.isActive() {
+		t.Fatal("expected confirmation to be pending")
+	}
+
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlY})
+	select {
+	case approved := <-result:
+		if !approved {
+			t.Fatal("expected approval result")
+		}
+	default:
+		t.Fatal("expected Ctrl+Y to reach confirmation")
+	}
+}
+
 func TestToolResultRendersAsIndentedBlock(t *testing.T) {
 	m := NewTUIModel(false, false)
 	m.width = 80

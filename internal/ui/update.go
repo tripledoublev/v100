@@ -44,6 +44,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendEvent(core.Event(msg))
 
 	case RequestConfirmMsg:
+		m.showHelp = false
 		m.pendConfirm = &confirmState{
 			toolName: msg.ToolName,
 			args:     msg.Args,
@@ -138,10 +139,25 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if m.showHelp && !m.pendConfirm.isActive() {
+			switch msg.String() {
+			case "esc", "?", "ctrl+p", "q":
+				m.showHelp = false
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			m.stopRadio()
 			return m, tea.Quit
+
+		case "?", "ctrl+p":
+			if !m.pendConfirm.isActive() && !m.showRadioSelect {
+				m.showHelp = true
+				return m, nil
+			}
 
 		case "ctrl+t":
 			m.showTrace = !m.showTrace

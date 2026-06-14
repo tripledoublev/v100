@@ -405,6 +405,14 @@ func resumeWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, r
 	}
 
 	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY, cliAvailable("codex"), cliAvailable("claude"))
+	tui.SetRunInfo(ui.RunInfo{
+		RunID:       run.ID,
+		Provider:    prov.Name(),
+		Model:       model,
+		TracePath:   run.TraceFile,
+		Workspace:   workspace,
+		ConfirmMode: cfg.Defaults.ConfirmTools,
+	})
 
 	confirmFn := func(toolName, args string) bool {
 		if cfg.Defaults.ConfirmTools == "never" {

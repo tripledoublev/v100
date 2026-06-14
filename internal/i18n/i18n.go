@@ -96,10 +96,10 @@ var messages = map[string]map[string]string{
 
 		// TUI chrome
 		"ui_initializing_terminal": "Initializing terminal size...",
-		"ui_header_hint_wide":      "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
-		"ui_header_hint_medium":    "  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
-		"ui_header_hint_narrow":    "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
-		"ui_header_hint_tiny":      "  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+D:detail  Ctrl+A:copy  Ctrl+C:quit",
+		"ui_header_hint_wide":      "  ?:help  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
+		"ui_header_hint_medium":    "  ?:help  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
+		"ui_header_hint_narrow":    "  ?:help  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy all  Ctrl+C:quit",
+		"ui_header_hint_tiny":      "  ?:help  Tab:focus  Ctrl+PgUp/PgDn:half  Ctrl+M:inspect  Ctrl+D:detail  Ctrl+A:copy  Ctrl+C:quit",
 		"ui_status":                "status",
 		"ui_trace":                 "trace",
 		"ui_radio":                 "radio",
@@ -197,10 +197,10 @@ var messages = map[string]map[string]string{
 
 		// TUI chrome
 		"ui_initializing_terminal": "Initialisation de la taille du terminal...",
-		"ui_header_hint_wide":      "  Tab:focus  Shift+Tab:retour  Ctrl+PgUp/PgDn:moitié  Shift+flèches:redim.  Ctrl+T:trace  Ctrl+S:statut  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
-		"ui_header_hint_medium":    "  Tab:focus  Shift+Tab:retour  Ctrl+PgUp/PgDn:moitié  Ctrl+T:trace  Ctrl+S:statut  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
-		"ui_header_hint_narrow":    "  Tab:focus  Ctrl+PgUp/PgDn:moitié  Ctrl+T:trace  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
-		"ui_header_hint_tiny":      "  Tab:focus  Ctrl+PgUp/PgDn:moitié  Ctrl+M:inspecter  Ctrl+D:détail  Ctrl+A:copier  Ctrl+C:quitter",
+		"ui_header_hint_wide":      "  ?:aide  Tab:focus  Shift+Tab:retour  Ctrl+PgUp/PgDn:moitié  Shift+flèches:redim.  Ctrl+T:trace  Ctrl+S:statut  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
+		"ui_header_hint_medium":    "  ?:aide  Tab:focus  Shift+Tab:retour  Ctrl+PgUp/PgDn:moitié  Ctrl+T:trace  Ctrl+S:statut  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
+		"ui_header_hint_narrow":    "  ?:aide  Tab:focus  Ctrl+PgUp/PgDn:moitié  Ctrl+T:trace  Ctrl+M:inspecteur  Ctrl+D:détail  Ctrl+A:tout copier  Ctrl+C:quitter",
+		"ui_header_hint_tiny":      "  ?:aide  Tab:focus  Ctrl+PgUp/PgDn:moitié  Ctrl+M:inspecter  Ctrl+D:détail  Ctrl+A:copier  Ctrl+C:quitter",
 		"ui_status":                "statut",
 		"ui_trace":                 "trace",
 		"ui_radio":                 "radio",

@@ -71,6 +71,12 @@ func (t *TUI) SetVerbose(v bool) {
 	}
 }
 
+func (t *TUI) SetRunInfo(info RunInfo) {
+	if t.model != nil {
+		t.model.SetRunInfo(info)
+	}
+}
+
 // Run starts the TUI event loop (blocks until quit).
 func (t *TUI) Run() error {
 	_, err := t.program.Run()

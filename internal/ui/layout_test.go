@@ -91,9 +91,9 @@ func TestComputeViewLayoutTracksSplitAndSinglePaneModes(t *testing.T) {
 
 func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 	cases := []struct {
-		name string
-		w, h int
-		want string
+		name     string
+		w, h     int
+		want     string
 		contains []string
 	}{
 		{
@@ -142,7 +142,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 			name: "standard",
 			w:    120,
 			h:    30,
-			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:d…  <clock>
+			want: `v100  ?:help  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  …  <clock>
 ╭───────────────────────────────────────────────────────────────────────────╮ ╭────────────────────────────────────────╮
 │transcript line one                                                        │ │trace                                   │
 │transcript line two                                                        │ │trace line one                          │
@@ -180,7 +180,7 @@ func TestViewSnapshotsForCoreScreenSizes(t *testing.T) {
 			name: "wide",
 			w:    160,
 			h:    36,
-			want: `v100  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl+A:copy …  <clock>
+			want: `v100  ?:help  Tab:focus  Shift+Tab:back  Ctrl+PgUp/PgDn:half  Shift+Arrows:resize  Ctrl+T:trace  Ctrl+S:status  Ctrl+M:inspector  Ctrl+D:detail  Ctrl…  <clock>
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────╮
 │transcript line one                                                                                   │ │trace                                                │
 │transcript line two                                                                                   │ │trace line one                                       │

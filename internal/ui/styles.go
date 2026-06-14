@@ -142,6 +142,7 @@ var (
 	tuiInputStyle       lipgloss.Style
 	tuiInputActiveStyle lipgloss.Style
 	tuiConfirmStyle     lipgloss.Style
+	tuiHelpStyle        lipgloss.Style
 	tuiTraceLabelStyle  lipgloss.Style
 	tuiStatusLabelStyle lipgloss.Style
 	tuiCopyIconStyle    lipgloss.Style
@@ -196,6 +197,10 @@ func rebuildStyles() {
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(clrDanger).
 		Padding(1, 3)
+	tuiHelpStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(clrActivePaneBorder).
+		Padding(1, 2)
 	tuiTraceLabelStyle = lipgloss.NewStyle().
 		Foreground(clrMuted).
 		Italic(true)

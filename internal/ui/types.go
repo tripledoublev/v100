@@ -159,6 +159,15 @@ type SubmitRequest struct {
 	Images [][]byte
 }
 
+type RunInfo struct {
+	RunID       string
+	Provider    string
+	Model       string
+	TracePath   string
+	Workspace   string
+	ConfirmMode string
+}
+
 type reviewDoneMsg struct {
 	action messageActionKind
 	itemID int
@@ -219,6 +228,8 @@ type TUIModel struct {
 	verbose          bool
 	WorkspacePath    string
 	showMetrics      bool
+	showHelp         bool
+	RunInfo          RunInfo
 
 	// live metrics state
 	currentStep   int
@@ -263,5 +274,9 @@ type TUIModel struct {
 }
 
 func (m *TUIModel) SetVerbose(v bool) { m.verbose = v }
+
+func (m *TUIModel) SetRunInfo(info RunInfo) {
+	m.RunInfo = info
+}
 
 func (cs *confirmState) isActive() bool { return cs != nil }

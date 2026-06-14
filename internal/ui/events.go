@@ -639,6 +639,16 @@ func (m *TUIModel) updateStatus(ev core.Event) {
 	case core.EventRunStart:
 		var p core.RunStartPayload
 		_ = json.Unmarshal(ev.Payload, &p)
+		m.RunInfo.RunID = ev.RunID
+		if strings.TrimSpace(p.Provider) != "" {
+			m.RunInfo.Provider = strings.TrimSpace(p.Provider)
+		}
+		if strings.TrimSpace(p.Model) != "" {
+			m.RunInfo.Model = strings.TrimSpace(p.Model)
+		}
+		if strings.TrimSpace(p.Workspace) != "" {
+			m.RunInfo.Workspace = strings.TrimSpace(p.Workspace)
+		}
 		m.StatusMode = i18n.StatusIdle
 		m.statusMode = m.StatusMode.String()
 		m.statusLine = i18n.T("status_ready")

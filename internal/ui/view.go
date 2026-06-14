@@ -32,6 +32,10 @@ func (m *TUIModel) View() string {
 		return m.radioSelectView()
 	}
 
+	if m.showHelp {
+		return m.helpView()
+	}
+
 	// Input box
 	inputSt := tuiInputStyle
 	if m.focus == focusInput {

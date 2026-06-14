@@ -139,6 +139,14 @@ func runWithTUI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 	}
 
 	tui = ui.NewTUI(submitFn, useAltScreen, plainTTY, codexAvailable, claudeAvailable)
+	tui.SetRunInfo(ui.RunInfo{
+		RunID:       run.ID,
+		Provider:    prov.Name(),
+		Model:       model,
+		TracePath:   run.TraceFile,
+		Workspace:   workspace,
+		ConfirmMode: confirmMode,
+	})
 	tui.SetInterruptFn(interruptFn)
 	tui.SetVerbose(verbose)
 
