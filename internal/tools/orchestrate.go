@@ -48,6 +48,7 @@ func (t *orchestrateTool) InputSchema() json.RawMessage {
 					"task":{"type":"string"},
 					"provider":{"type":"string"},
 					"model":{"type":"string"},
+					"tools":{"type":"array","items":{"type":"string"}},
 					"max_steps":{"type":"integer"},
 					"handoff_schema_name":{"type":"string"},
 					"handoff_schema":{"type":"object"}
@@ -79,6 +80,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 			Task              string          `json:"task"`
 			Provider          string          `json:"provider"`
 			Model             string          `json:"model"`
+			Tools             []string        `json:"tools"`
 			MaxSteps          int             `json:"max_steps"`
 			HandoffSchemaName string          `json:"handoff_schema_name"`
 			HandoffSchema     json.RawMessage `json:"handoff_schema"`
@@ -114,6 +116,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 				Task:              task.Task,
 				Provider:          task.Provider,
 				Model:             task.Model,
+				Tools:             task.Tools,
 				MaxSteps:          task.MaxSteps,
 				HandoffSchemaName: task.HandoffSchemaName,
 				HandoffSchema:     task.HandoffSchema,
@@ -145,6 +148,7 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 					Task:              task.Task,
 					Provider:          task.Provider,
 					Model:             task.Model,
+					Tools:             task.Tools,
 					MaxSteps:          task.MaxSteps,
 					HandoffSchemaName: task.HandoffSchemaName,
 					HandoffSchema:     task.HandoffSchema,

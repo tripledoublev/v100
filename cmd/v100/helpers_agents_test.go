@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/config"
+	"github.com/tripledoublev/v100/internal/tools"
 )
 
 func TestConfiguredAgentNamesSorted(t *testing.T) {
@@ -53,6 +54,53 @@ func TestAgentsCmdListsDefaultRoles(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("agents output missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestAgentsCmdIncludesRunSubcommand(t *testing.T) {
+	cfgPath := t.TempDir() + "/missing.toml"
+	cmd := agentsCmd(&cfgPath)
+	run, _, err := cmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run == nil || run.Name() != "run" {
+		t.Fatalf("run subcommand not found: %#v", run)
+	}
+	flag := run.Flags().Lookup("handoff-schema-name")
+	if flag == nil || flag.DefValue != tools.HandoffSchemaStandard {
+		t.Fatalf("handoff schema flag = %#v", flag)
+	}
+}
+
+func TestSplitAgentRunCSVTrimsDeduplicatesAndDropsEmpty(t *testing.T) {
+	got := splitAgentRunCSV(" fs_read, sh,fs_read,, ")
+	want := []string{"fs_read", "sh"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("splitAgentRunCSV() = %v, want %v", got, want)
+	}
+}
+
+func TestReadAgentRunHandoffSchemaValidatesJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.json")
+	if err := os.WriteFile(path, []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := readAgentRunHandoffSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"type":"object"}` {
+		t.Fatalf("schema = %s", raw)
+	}
+
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte(`not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readAgentRunHandoffSchema(bad); err == nil {
+		t.Fatal("expected invalid JSON schema file to fail")
 	}
 }
 

@@ -55,6 +55,7 @@ func (t *dispatchTool) InputSchema() json.RawMessage {
 			"task":      {"type": "string", "description": "Task for the dispatched specialist."},
 			"provider":  {"type": "string", "description": "Optional provider override for this dispatch."},
 			"model":     {"type": "string", "description": "Optional model override for this dispatch."},
+			"tools":     {"type": "array", "items": {"type": "string"}, "description": "Optional tool subset for this dispatch."},
 			"max_steps": {"type": "integer", "description": "Optional step cap override for this dispatch."},
 			"handoff_schema_name": {"type": "string", "description": "Named structured handoff schema to require, e.g. standard."},
 			"handoff_schema": {"type": "object", "description": "Custom JSON Schema subset for the dispatched final result."}
@@ -87,6 +88,7 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 		Task              string          `json:"task"`
 		Provider          string          `json:"provider"`
 		Model             string          `json:"model"`
+		Tools             []string        `json:"tools"`
 		MaxSteps          int             `json:"max_steps"`
 		HandoffSchemaName string          `json:"handoff_schema_name"`
 		HandoffSchema     json.RawMessage `json:"handoff_schema"`
@@ -113,6 +115,7 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 		Task:              a.Task,
 		Provider:          a.Provider,
 		Model:             a.Model,
+		Tools:             a.Tools,
 		MaxSteps:          a.MaxSteps,
 		HandoffSchemaName: a.HandoffSchemaName,
 		HandoffSchema:     a.HandoffSchema,

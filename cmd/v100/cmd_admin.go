@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/tripledoublev/v100/internal/auth"
 	"github.com/tripledoublev/v100/internal/config"
+	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/core/executor"
 	"github.com/tripledoublev/v100/internal/policy"
 	"github.com/tripledoublev/v100/internal/providers"
@@ -120,7 +122,7 @@ func providersHealthCmd(cfgPath *string) *cobra.Command {
 }
 
 func agentsCmd(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "List configured agent roles",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -150,6 +152,216 @@ func agentsCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.AddCommand(agentsRunCmd(cfgPath))
+	return cmd
+}
+
+type agentRunOptions struct {
+	Provider          string
+	Model             string
+	ToolsCSV          string
+	MaxSteps          int
+	Workspace         string
+	HandoffSchemaName string
+	HandoffSchemaFile string
+	JSON              bool
+}
+
+func agentsRunCmd(cfgPath *string) *cobra.Command {
+	var opts agentRunOptions
+	cmd := &cobra.Command{
+		Use:   "run <agent> <task...>",
+		Short: "Run a configured agent role directly",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			role := strings.TrimSpace(args[0])
+			task := strings.TrimSpace(strings.Join(args[1:], " "))
+			return runAgentRoleCommand(cmd.Context(), cfgPath, role, task, opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Provider, "provider", "", "provider override for this agent run")
+	cmd.Flags().StringVar(&opts.Model, "model", "", "model override for this agent run")
+	cmd.Flags().StringVar(&opts.ToolsCSV, "tools", "", "comma-separated tool subset for this agent run")
+	cmd.Flags().IntVar(&opts.MaxSteps, "max-steps", 0, "step limit override for this agent run")
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "workspace directory for the agent run (default: current directory)")
+	cmd.Flags().StringVar(&opts.HandoffSchemaName, "handoff-schema-name", tools.HandoffSchemaStandard, "named handoff schema to require")
+	cmd.Flags().StringVar(&opts.HandoffSchemaFile, "handoff-schema-file", "", "custom JSON schema file for the final handoff")
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "print the structured result JSON only")
+	return cmd
+}
+
+func runAgentRoleCommand(ctx context.Context, cfgPath *string, role, task string, opts agentRunOptions) error {
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(role) == "" {
+		return fmt.Errorf("agent role is required")
+	}
+	if strings.TrimSpace(task) == "" {
+		return fmt.Errorf("task is required")
+	}
+	if _, ok := cfg.Agents[role]; !ok {
+		return fmt.Errorf("%s", formatUnknownAgentRole(cfg, role))
+	}
+
+	workspace := strings.TrimSpace(opts.Workspace)
+	if workspace == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		workspace = cwd
+	}
+	workspace = expandHomePath(workspace)
+	opts.Workspace = workspace
+
+	comp, err := BuildRunComponents(cfg, RunOptions{Workspace: workspace})
+	if err != nil {
+		return err
+	}
+	defer cleanupRunComponents(comp)
+
+	renderer := ui.NewCLIRenderer()
+	var outputFn core.OutputFn
+	var outputFnPtr *core.OutputFn
+	if !opts.JSON {
+		outputFn = core.OutputFn(renderer.RenderEvent)
+		outputFnPtr = &outputFn
+	}
+	confirmFn := buildConfirmFn(cfg.Defaults.ConfirmTools)
+	registerAgentTool(cfg, comp.Registry, comp.Trace, comp.Budget, outputFnPtr, confirmFn, comp.Workspace, comp.Policy.MaxToolCallsPerStep, comp.Session, comp.Mapper, comp.ToolEnv, comp.RedactToolOutput)
+
+	parentLoop := &core.Loop{
+		Run:           comp.Run,
+		Provider:      comp.Provider,
+		Model:         comp.Model,
+		Policy:        comp.Policy,
+		Trace:         comp.Trace,
+		Budget:        comp.Budget,
+		OutputFn:      outputFn,
+		ModelMetadata: comp.ModelMetadata,
+	}
+	if err := parentLoop.EmitRunStart(core.RunStartPayload{
+		Policy:        comp.Policy.Name,
+		Provider:      comp.Provider.Name(),
+		Model:         comp.Model,
+		Workspace:     traceWorkspace(cfg, comp.Workspace),
+		ModelMetadata: comp.ModelMetadata,
+	}); err != nil {
+		return err
+	}
+
+	res, err := runAgentDispatchTool(ctx, comp, role, task, opts)
+	endReason := "completed"
+	if err != nil || !res.OK {
+		endReason = "error"
+	}
+	_ = parentLoop.EmitRunEnd(endReason, "")
+	if err != nil {
+		return err
+	}
+
+	if opts.JSON {
+		if len(res.Structured) > 0 && json.Valid(res.Structured) {
+			fmt.Println(string(res.Structured))
+		} else {
+			raw, _ := json.Marshal(res)
+			fmt.Println(string(raw))
+		}
+	} else {
+		fmt.Print(res.Output)
+		if !strings.HasSuffix(res.Output, "\n") {
+			fmt.Println()
+		}
+		fmt.Println(ui.Dim("trace: ") + comp.Run.TraceFile)
+	}
+	if !res.OK {
+		return fmt.Errorf("agent run failed")
+	}
+	return nil
+}
+
+func runAgentDispatchTool(ctx context.Context, comp *RunComponents, role, task string, opts agentRunOptions) (tools.ToolResult, error) {
+	dispatchTool, ok := comp.Registry.Get("dispatch")
+	if !ok {
+		return tools.ToolResult{}, fmt.Errorf("dispatch tool not registered")
+	}
+	handoffSchema, err := readAgentRunHandoffSchema(opts.HandoffSchemaFile)
+	if err != nil {
+		return tools.ToolResult{}, err
+	}
+	payload := map[string]any{
+		"agent":               role,
+		"task":                task,
+		"provider":            strings.TrimSpace(opts.Provider),
+		"model":               strings.TrimSpace(opts.Model),
+		"max_steps":           opts.MaxSteps,
+		"handoff_schema_name": strings.TrimSpace(opts.HandoffSchemaName),
+	}
+	if toolsList := splitAgentRunCSV(opts.ToolsCSV); len(toolsList) > 0 {
+		payload["tools"] = toolsList
+	}
+	if len(handoffSchema) > 0 {
+		payload["handoff_schema"] = json.RawMessage(handoffSchema)
+	}
+	rawArgs, err := json.Marshal(payload)
+	if err != nil {
+		return tools.ToolResult{}, err
+	}
+	hostWorkspace := strings.TrimSpace(opts.Workspace)
+	if hostWorkspace == "" {
+		hostWorkspace = comp.Workspace
+	}
+	return dispatchTool.Exec(ctx, tools.ToolCallContext{
+		RunID:            comp.Run.ID,
+		StepID:           "operator",
+		CallID:           fmt.Sprintf("operator-%d", time.Now().UnixNano()),
+		WorkspaceDir:     comp.Workspace,
+		HostWorkspaceDir: hostWorkspace,
+		StateDir:         comp.Run.StateDir,
+		Provider:         comp.Provider,
+		EmbedProvider:    comp.EmbedProvider,
+		Registry:         comp.Registry,
+		Session:          comp.Session,
+		Mapper:           comp.Mapper,
+		Env:              append([]string(nil), comp.ToolEnv...),
+		RedactText:       comp.RedactToolOutput,
+	}, rawArgs)
+}
+
+func readAgentRunHandoffSchema(path string) (json.RawMessage, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(expandHomePath(path))
+	if err != nil {
+		return nil, err
+	}
+	raw = []byte(strings.TrimSpace(string(raw)))
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("handoff schema file %s is not valid JSON", path)
+	}
+	return json.RawMessage(raw), nil
+}
+
+func splitAgentRunCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
 }
 
 func configInitCmd() *cobra.Command {
