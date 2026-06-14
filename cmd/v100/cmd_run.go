@@ -488,12 +488,13 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 
 	var providerErr bool
 	var (
-		firstStep        = true
-		voiceInteractive = false
-		contInput        string
-		contImages       []providers.ImageAttachment
-		loopInput        string
-		loopImages       []providers.ImageAttachment
+		firstStep                 = true
+		voiceInteractive          = false
+		initialPromptFailedReason string
+		contInput                 string
+		contImages                []providers.ImageAttachment
+		loopInput                 string
+		loopImages                []providers.ImageAttachment
 	)
 
 	if initialPrompt != "" {
@@ -538,13 +539,19 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 				if errors.As(err, &retryErr) {
 					providerErr = true
 					fmt.Fprintln(os.Stderr, ui.Fail("provider error: "+formatRetryError(retryErr)))
+					initialPromptFailedReason = classifyProviderFailureReason(err)
 				} else {
 					fmt.Fprintln(os.Stderr, ui.Fail("initial step error: "+err.Error()))
+					initialPromptFailedReason = "error"
 				}
 			}
 		}
 		if exitAfterPrompt {
-			reason = "prompt_exit"
+			if initialPromptFailedReason != "" {
+				reason = initialPromptFailedReason
+			} else {
+				reason = "prompt_exit"
+			}
 			goto done
 		}
 	}
