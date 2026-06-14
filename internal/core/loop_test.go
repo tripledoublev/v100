@@ -95,6 +95,28 @@ func (t *secretOutputTool) Exec(_ context.Context, call tools.ToolCallContext, _
 	}, nil
 }
 
+type structuredOutputTool struct{}
+
+func (t *structuredOutputTool) Name() string { return "structured_output" }
+func (t *structuredOutputTool) Description() string {
+	return "Emit separate human and structured output."
+}
+func (t *structuredOutputTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (t *structuredOutputTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`)
+}
+func (t *structuredOutputTool) DangerLevel() tools.DangerLevel { return tools.Safe }
+func (t *structuredOutputTool) Effects() tools.ToolEffects     { return tools.ToolEffects{} }
+func (t *structuredOutputTool) Exec(context.Context, tools.ToolCallContext, json.RawMessage) (tools.ToolResult, error) {
+	return tools.ToolResult{
+		OK:         true,
+		Output:     "human summary",
+		Structured: json.RawMessage(`{"ok":true,"value":"machine"}`),
+	}, nil
+}
+
 func newTestLoop(t *testing.T, prov providers.Provider, enabledTools []string) (*core.Loop, *core.TraceWriter) {
 	t.Helper()
 	dir := t.TempDir()
@@ -189,6 +211,59 @@ func TestLoopRedactsToolSecretsFromTraceAndModelMessages(t *testing.T) {
 	}
 	if !sawToolMessage {
 		t.Fatal("expected redacted tool message in second model request")
+	}
+}
+
+func TestLoopUsesStructuredToolResultForModelMessage(t *testing.T) {
+	prov := &watchdogCapturingProvider{
+		responses: []providers.CompleteResponse{
+			{ToolCalls: []providers.ToolCall{{ID: "call-1", Name: "structured_output", Args: json.RawMessage(`{}`)}}},
+			{AssistantText: "done"},
+		},
+	}
+	loop, trace := newTestLoop(t, prov, []string{"structured_output"})
+	defer func() { _ = trace.Close() }()
+	loop.Tools.Register(&structuredOutputTool{})
+
+	if err := loop.Step(context.Background(), "run structured tool"); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) < 2 {
+		t.Fatalf("provider requests = %d, want at least 2", len(prov.requests))
+	}
+	var sawStructuredMessage bool
+	for _, msg := range prov.requests[1].Messages {
+		if msg.Role != "tool" || msg.ToolCallID != "call-1" {
+			continue
+		}
+		sawStructuredMessage = true
+		if msg.Content != `{"ok":true,"value":"machine"}` {
+			t.Fatalf("tool message content = %q", msg.Content)
+		}
+	}
+	if !sawStructuredMessage {
+		t.Fatal("missing structured tool message in follow-up model call")
+	}
+
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStructuredTrace bool
+	for _, ev := range events {
+		if ev.Type != core.EventToolResult {
+			continue
+		}
+		var payload core.ToolResultPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.CallID == "call-1" && string(payload.Structured) == `{"ok":true,"value":"machine"}` && payload.Output == "human summary" {
+			sawStructuredTrace = true
+		}
+	}
+	if !sawStructuredTrace {
+		t.Fatalf("missing structured tool result trace")
 	}
 }
 

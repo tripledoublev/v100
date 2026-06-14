@@ -54,12 +54,13 @@ type PathTranslator interface {
 
 // ToolResult holds the output of a tool execution.
 type ToolResult struct {
-	OK         bool   `json:"ok"`
-	Output     string `json:"output"`
-	Stdout     string `json:"stdout,omitempty"`
-	Stderr     string `json:"stderr,omitempty"`
-	TaintLevel string `json:"taint_level,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	OK         bool            `json:"ok"`
+	Output     string          `json:"output"`
+	Stdout     string          `json:"stdout,omitempty"`
+	Stderr     string          `json:"stderr,omitempty"`
+	Structured json.RawMessage `json:"structured,omitempty"`
+	TaintLevel string          `json:"taint_level,omitempty"`
+	DurationMS int64           `json:"duration_ms"`
 }
 
 // Tool is the interface all agent tools implement.
@@ -77,6 +78,7 @@ func sanitizeToolResult(call ToolCallContext, result ToolResult) ToolResult {
 	result.Output = sanitizeToolText(call, result.Output)
 	result.Stdout = sanitizeToolText(call, result.Stdout)
 	result.Stderr = sanitizeToolText(call, result.Stderr)
+	result.Structured = sanitizeToolJSON(call, result.Structured)
 	return result
 }
 
@@ -88,6 +90,17 @@ func sanitizeToolText(call ToolCallContext, text string) string {
 		text = call.RedactText(text)
 	}
 	return text
+}
+
+func sanitizeToolJSON(call ToolCallContext, raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	text := sanitizeToolText(call, string(raw))
+	if !json.Valid([]byte(text)) {
+		return nil
+	}
+	return json.RawMessage(text)
 }
 
 func outputDeltaWriter(call ToolCallContext, stream string) io.Writer {

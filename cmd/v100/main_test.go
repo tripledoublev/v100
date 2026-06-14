@@ -82,6 +82,14 @@ func TestBuildSubAgentTask(t *testing.T) {
 	if !strings.Contains(researcher, "## Key Files") {
 		t.Fatalf("researcher contract should include key files section")
 	}
+
+	structured := buildSubAgentTaskWithSchema("", "return json", "bad", []string{"$.summary is required"}, 2, "standard", []byte(`{"type":"object","required":["summary"]}`))
+	if !strings.Contains(structured, "Return the final handoff as a single JSON object") {
+		t.Fatalf("structured prompt missing JSON contract:\n%s", structured)
+	}
+	if !strings.Contains(structured, "$.summary is required") || !strings.Contains(structured, "Previous output:\nbad") {
+		t.Fatalf("structured retry prompt missing diagnostics/output:\n%s", structured)
+	}
 }
 
 func TestExtractLastAssistantText(t *testing.T) {

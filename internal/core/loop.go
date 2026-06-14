@@ -581,11 +581,9 @@ func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.Too
 		})
 	}
 
-	// Add tool result to message history
-	content := result.Output
-	if !result.OK {
-		content = "ERROR: " + result.Output
-	}
+	// Add tool result to message history. Structured tool results stay machine
+	// readable for the next model call instead of being hidden in prose.
+	content := toolResultMessageContent(result)
 	// Layer 0: provider-aware inline truncation of oversized tool results.
 	if maxChars := l.toolResultCharLimit(stepID); maxChars > 0 {
 		content = TruncateToolResult(content, maxChars)
@@ -736,6 +734,7 @@ func (l *Loop) emitToolResult(stepID string, tc providers.ToolCall, result tools
 		OK:         result.OK,
 		Output:     result.Output,
 		Stdout:     result.Stdout,
+		Structured: result.Structured,
 		TaintLevel: result.TaintLevel,
 		DurationMS: result.DurationMS,
 	})
@@ -760,7 +759,33 @@ func (l *Loop) redactToolResult(result tools.ToolResult) tools.ToolResult {
 	result.Output = l.redactText(result.Output)
 	result.Stdout = l.redactText(result.Stdout)
 	result.Stderr = l.redactText(result.Stderr)
+	result.Structured = l.redactJSON(result.Structured)
 	return result
+}
+
+func toolResultMessageContent(result tools.ToolResult) string {
+	if len(result.Structured) > 0 && json.Valid(result.Structured) {
+		return string(result.Structured)
+	}
+	if !result.OK {
+		return "ERROR: " + result.Output
+	}
+	return result.Output
+}
+
+func (l *Loop) redactJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	text := string(raw)
+	if l.Mapper != nil {
+		text = l.Mapper.SanitizeText(text)
+	}
+	text = l.redactText(text)
+	if !json.Valid([]byte(text)) {
+		return nil
+	}
+	return json.RawMessage(text)
 }
 
 func (l *Loop) toolCallTracePayload(toolCalls []providers.ToolCall) []ToolCall {

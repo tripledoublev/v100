@@ -754,6 +754,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			}
 			roleCfg = cfgRole
 		}
+		handoffSchema, handoffSchemaName, err := tools.ResolveHandoffSchema(params.HandoffSchemaName, params.HandoffSchema)
+		if err != nil {
+			return tools.AgentRunResult{
+				OK:          false,
+				Result:      "resolve handoff schema: " + err.Error(),
+				Diagnostics: []string{err.Error()},
+			}
+		}
 
 		modelOverride := strings.TrimSpace(params.Model)
 		if modelOverride == "" {
@@ -927,16 +935,34 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			Snapshots:        buildSnapshotManager(cfg, workspace),
 		}
 
-		var result string
-		var lastErr error
+		var (
+			result      string
+			structured  json.RawMessage
+			diagnostics []string
+			lastErr     error
+		)
 		ok := true
-		taskPrompt := buildSubAgentTask(params.Agent, params.Task, "", 1)
+		taskPrompt := buildSubAgentTaskWithSchema(params.Agent, params.Task, "", nil, 1, handoffSchemaName, handoffSchema)
 		if stepErr := childLoop.Step(ctx, taskPrompt); stepErr != nil {
 			lastErr = stepErr
 		}
 		result = extractLastAssistantText(childLoop.Messages)
 
-		if !isCompliantAgentHandoff(params.Agent, result) && childBudget.RemainingSteps() != 0 {
+		if len(handoffSchema) > 0 {
+			structured, diagnostics = tools.ValidateStructuredHandoff(result, handoffSchema)
+			if len(diagnostics) > 0 && childBudget.RemainingSteps() != 0 {
+				retryPrompt := buildSubAgentTaskWithSchema(params.Agent, params.Task, result, diagnostics, 2, handoffSchemaName, handoffSchema)
+				if stepErr := childLoop.Step(ctx, retryPrompt); stepErr != nil {
+					lastErr = stepErr
+				}
+				result = extractLastAssistantText(childLoop.Messages)
+				structured, diagnostics = tools.ValidateStructuredHandoff(result, handoffSchema)
+			}
+			if len(diagnostics) > 0 {
+				ok = false
+				result = formatStructuredHandoffFailure(result, diagnostics, lastErr)
+			}
+		} else if !isCompliantAgentHandoff(params.Agent, result) && childBudget.RemainingSteps() != 0 {
 			retryPrompt := buildSubAgentTask(params.Agent, params.Task, result, 2)
 			if stepErr := childLoop.Step(ctx, retryPrompt); stepErr != nil {
 				lastErr = stepErr
@@ -972,6 +998,8 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			AgentRunID:   childRunID,
 			OK:           ok,
 			Result:       result,
+			Structured:   structured,
+			Diagnostics:  diagnostics,
 			ToolUses:     toolUseCount,
 			UsedSteps:    cb.UsedSteps,
 			UsedTokens:   cb.UsedTokens,
@@ -981,11 +1009,14 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			params.CallID+"-aend", core.EventAgentEnd, endPayload)
 
 		return tools.AgentRunResult{
-			OK:         ok,
-			Result:     result,
-			UsedSteps:  cb.UsedSteps,
-			UsedTokens: cb.UsedTokens,
-			CostUSD:    cb.UsedCostUSD,
+			OK:          ok,
+			AgentRunID:  childRunID,
+			Result:      result,
+			Structured:  structured,
+			Diagnostics: diagnostics,
+			UsedSteps:   cb.UsedSteps,
+			UsedTokens:  cb.UsedTokens,
+			CostUSD:     cb.UsedCostUSD,
 		}
 	}
 
@@ -1010,9 +1041,42 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 }
 
 func buildSubAgentTask(agent, task, priorOutput string, attempt int) string {
+	return buildSubAgentTaskWithSchema(agent, task, priorOutput, nil, attempt, "", nil)
+}
+
+func buildSubAgentTaskWithSchema(agent, task, priorOutput string, diagnostics []string, attempt int, schemaName string, schema json.RawMessage) string {
 	base := strings.TrimSpace(task)
 	if base == "" {
 		base = "(no task provided)"
+	}
+	if len(schema) > 0 {
+		contract := tools.HandoffSchemaPrompt(schemaName, schema) + `
+
+Rules:
+- Never return an empty response.
+- If tools fail, still return schema-valid JSON and explain failures in errors or blockers.
+- Put operator-facing concerns in warnings.
+- Put source references in citations or findings[].refs.
+- Keep summary concise.
+`
+		if attempt <= 1 {
+			return base + "\n\n" + strings.TrimSpace(contract)
+		}
+		var b strings.Builder
+		b.WriteString(base)
+		b.WriteString("\n\nYour previous response was not valid for the required structured handoff schema.")
+		if len(diagnostics) > 0 {
+			b.WriteString("\nValidation diagnostics:")
+			for _, diagnostic := range diagnostics {
+				b.WriteString("\n- ")
+				b.WriteString(diagnostic)
+			}
+		}
+		b.WriteString("\nPrevious output:\n")
+		b.WriteString(strings.TrimSpace(priorOutput))
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(contract))
+		return b.String()
 	}
 	contract := `
 Return a final handoff with this exact structure:
@@ -1064,6 +1128,32 @@ Rules:
 	}
 	return base + "\n\nYour previous response was not compliant or empty.\nPrevious output:\n" +
 		strings.TrimSpace(priorOutput) + "\n\n" + strings.TrimSpace(contract)
+}
+
+func formatStructuredHandoffFailure(result string, diagnostics []string, lastErr error) string {
+	var b strings.Builder
+	b.WriteString("sub-agent failed to produce a schema-valid structured handoff after 2 attempts")
+	if lastErr != nil {
+		b.WriteString(": ")
+		b.WriteString(lastErr.Error())
+	}
+	if len(diagnostics) > 0 {
+		b.WriteString("\nDiagnostics:")
+		for _, diagnostic := range diagnostics {
+			b.WriteString("\n- ")
+			b.WriteString(diagnostic)
+		}
+	}
+	preview := strings.TrimSpace(result)
+	if len(preview) > 240 {
+		preview = preview[:240] + "…"
+	}
+	if preview == "" {
+		preview = "(empty)"
+	}
+	b.WriteString("\nPartial output: ")
+	b.WriteString(preview)
+	return b.String()
 }
 
 func extractLastAssistantText(msgs []providers.Message) string {

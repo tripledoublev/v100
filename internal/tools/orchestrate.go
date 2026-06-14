@@ -48,7 +48,9 @@ func (t *orchestrateTool) InputSchema() json.RawMessage {
 					"task":{"type":"string"},
 					"provider":{"type":"string"},
 					"model":{"type":"string"},
-					"max_steps":{"type":"integer"}
+					"max_steps":{"type":"integer"},
+					"handoff_schema_name":{"type":"string"},
+					"handoff_schema":{"type":"object"}
 				}
 			}},
 			"max_parallel":{"type":"integer","description":"For fanout only; default 4."}
@@ -60,6 +62,8 @@ func (t *orchestrateTool) OutputSchema() json.RawMessage {
 		"type":"object",
 		"properties":{
 			"ok":{"type":"boolean"},
+			"pattern":{"type":"string"},
+			"results":{"type":"array","items":{"type":"object"}},
 			"result":{"type":"string"}
 		}
 	}`)
@@ -71,11 +75,13 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 		Pattern     string `json:"pattern"`
 		MaxParallel int    `json:"max_parallel"`
 		Tasks       []struct {
-			Agent    string `json:"agent"`
-			Task     string `json:"task"`
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
-			MaxSteps int    `json:"max_steps"`
+			Agent             string          `json:"agent"`
+			Task              string          `json:"task"`
+			Provider          string          `json:"provider"`
+			Model             string          `json:"model"`
+			MaxSteps          int             `json:"max_steps"`
+			HandoffSchemaName string          `json:"handoff_schema_name"`
+			HandoffSchema     json.RawMessage `json:"handoff_schema"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -100,17 +106,19 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 	if a.Pattern == "pipeline" {
 		for i, task := range a.Tasks {
 			res := t.runFn(ctx, AgentRunParams{
-				CallID:       fmt.Sprintf("%s-p%d", call.CallID, i+1),
-				RunID:        call.RunID,
-				StepID:       call.StepID,
-				Agent:        strings.TrimSpace(task.Agent),
-				Pattern:      a.Pattern,
-				Task:         task.Task,
-				Provider:     task.Provider,
-				Model:        task.Model,
-				MaxSteps:     task.MaxSteps,
-				WorkspaceDir: call.WorkspaceDir,
-				StateDir:     call.StateDir,
+				CallID:            fmt.Sprintf("%s-p%d", call.CallID, i+1),
+				RunID:             call.RunID,
+				StepID:            call.StepID,
+				Agent:             strings.TrimSpace(task.Agent),
+				Pattern:           a.Pattern,
+				Task:              task.Task,
+				Provider:          task.Provider,
+				Model:             task.Model,
+				MaxSteps:          task.MaxSteps,
+				HandoffSchemaName: task.HandoffSchemaName,
+				HandoffSchema:     task.HandoffSchema,
+				WorkspaceDir:      call.WorkspaceDir,
+				StateDir:          call.StateDir,
 			})
 			results[i] = res
 			if !res.OK {
@@ -129,17 +137,19 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				res := t.runFn(ctx, AgentRunParams{
-					CallID:       fmt.Sprintf("%s-f%d", call.CallID, i+1),
-					RunID:        call.RunID,
-					StepID:       call.StepID,
-					Agent:        strings.TrimSpace(task.Agent),
-					Pattern:      a.Pattern,
-					Task:         task.Task,
-					Provider:     task.Provider,
-					Model:        task.Model,
-					MaxSteps:     task.MaxSteps,
-					WorkspaceDir: call.WorkspaceDir,
-					StateDir:     call.StateDir,
+					CallID:            fmt.Sprintf("%s-f%d", call.CallID, i+1),
+					RunID:             call.RunID,
+					StepID:            call.StepID,
+					Agent:             strings.TrimSpace(task.Agent),
+					Pattern:           a.Pattern,
+					Task:              task.Task,
+					Provider:          task.Provider,
+					Model:             task.Model,
+					MaxSteps:          task.MaxSteps,
+					HandoffSchemaName: task.HandoffSchemaName,
+					HandoffSchema:     task.HandoffSchema,
+					WorkspaceDir:      call.WorkspaceDir,
+					StateDir:          call.StateDir,
 				})
 				results[i] = res
 				_ = appendBlackboardDispatch(blackboardWorkspaceDir(call), a.Pattern, task.Agent, task.Task, res)
@@ -174,25 +184,20 @@ func (t *orchestrateTool) Exec(ctx context.Context, call ToolCallContext, args j
 	jsonResults := make([]map[string]any, 0, len(a.Tasks))
 	for i, task := range a.Tasks {
 		r := results[i]
-		jsonResults = append(jsonResults, map[string]any{
-			"agent":       task.Agent,
-			"ok":          r.OK,
-			"used_steps":  r.UsedSteps,
-			"used_tokens": r.UsedTokens,
-			"cost_usd":    r.CostUSD,
-			"result":      r.Result,
-		})
+		jsonResults = append(jsonResults, agentToolPayloadMap(task.Agent, r, r.Result))
 	}
+	summary := b.String()
 	payload, _ := json.Marshal(map[string]any{
 		"ok":      ok,
 		"pattern": a.Pattern,
 		"results": jsonResults,
+		"result":  summary,
 	})
-	b.WriteString("\njson=" + string(payload) + "\n")
 
 	return ToolResult{
 		OK:         ok,
-		Output:     b.String(),
+		Output:     summary,
+		Structured: json.RawMessage(payload),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

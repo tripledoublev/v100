@@ -224,9 +224,7 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 				if !p.OK {
 					status = "failed"
 				}
-				rawOutput, _ := json.Marshal(struct {
-					Output string `json:"output"`
-				}{Output: p.Output})
+				rawOutput := acpToolResultRawOutput(p)
 
 				sendUpdate(conn, sessionID, Update{
 					Type:       "tool_call_update",
@@ -237,6 +235,18 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 			}
 		}
 	}
+}
+
+func acpToolResultRawOutput(p core.ToolResultPayload) json.RawMessage {
+	payload := map[string]any{"output": p.Output}
+	if len(p.Structured) > 0 && json.Valid(p.Structured) {
+		var structured any
+		if json.Unmarshal(p.Structured, &structured) == nil {
+			payload["structured"] = structured
+		}
+	}
+	rawOutput, _ := json.Marshal(payload)
+	return json.RawMessage(rawOutput)
 }
 
 func sendUpdate(conn *Conn, sessionID string, update Update) {

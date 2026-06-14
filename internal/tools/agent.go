@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,27 +14,32 @@ type AgentRunFn func(ctx context.Context, params AgentRunParams) AgentRunResult
 
 // AgentRunParams describes the sub-agent invocation.
 type AgentRunParams struct {
-	CallID       string
-	RunID        string
-	StepID       string
-	Agent        string
-	Pattern      string
-	Task         string
-	Provider     string
-	Model        string
-	Tools        []string
-	MaxSteps     int
-	WorkspaceDir string
-	StateDir     string
+	CallID            string
+	RunID             string
+	StepID            string
+	Agent             string
+	Pattern           string
+	Task              string
+	Provider          string
+	Model             string
+	Tools             []string
+	MaxSteps          int
+	HandoffSchemaName string
+	HandoffSchema     json.RawMessage
+	WorkspaceDir      string
+	StateDir          string
 }
 
 // AgentRunResult holds the sub-agent's outcome.
 type AgentRunResult struct {
-	OK         bool
-	Result     string
-	UsedSteps  int
-	UsedTokens int
-	CostUSD    float64
+	OK          bool
+	AgentRunID  string
+	Result      string
+	Structured  json.RawMessage
+	Diagnostics []string
+	UsedSteps   int
+	UsedTokens  int
+	CostUSD     float64
 }
 
 type agentTool struct {
@@ -67,7 +73,9 @@ func (t *agentTool) InputSchema() json.RawMessage {
 			"provider":  {"type": "string", "description": "Provider override (e.g. glm, minimax, gemini, codex). Empty = reuse parent provider."},
 			"model":     {"type": "string", "description": "Model override for the selected provider. Empty = provider default."},
 			"tools":     {"type": "array", "items": {"type": "string"}, "description": "Tool subset for the sub-agent. Default = all parent tools except agent."},
-			"max_steps": {"type": "integer", "description": "Step limit for the sub-agent (default 10)."}
+			"max_steps": {"type": "integer", "description": "Step limit for the sub-agent (default 10)."},
+			"handoff_schema_name": {"type": "string", "description": "Named structured handoff schema to require, e.g. standard."},
+			"handoff_schema": {"type": "object", "description": "Custom JSON Schema subset for the sub-agent final result."}
 		}
 	}`)
 }
@@ -76,8 +84,14 @@ func (t *agentTool) OutputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"ok":     {"type": "boolean"},
-			"result": {"type": "string"}
+			"ok": {"type": "boolean"},
+			"agent_run_id": {"type": "string"},
+			"used_steps": {"type": "integer"},
+			"used_tokens": {"type": "integer"},
+			"cost_usd": {"type": "number"},
+			"result": {"type": "string"},
+			"handoff": {"type": "object"},
+			"diagnostics": {"type": "array", "items": {"type": "string"}}
 		}
 	}`)
 }
@@ -86,11 +100,13 @@ func (t *agentTool) Exec(ctx context.Context, call ToolCallContext, args json.Ra
 	start := time.Now()
 
 	var a struct {
-		Task     string   `json:"task"`
-		Provider string   `json:"provider"`
-		Model    string   `json:"model"`
-		Tools    []string `json:"tools"`
-		MaxSteps int      `json:"max_steps"`
+		Task              string          `json:"task"`
+		Provider          string          `json:"provider"`
+		Model             string          `json:"model"`
+		Tools             []string        `json:"tools"`
+		MaxSteps          int             `json:"max_steps"`
+		HandoffSchemaName string          `json:"handoff_schema_name"`
+		HandoffSchema     json.RawMessage `json:"handoff_schema"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
@@ -107,16 +123,18 @@ func (t *agentTool) Exec(ctx context.Context, call ToolCallContext, args json.Ra
 	}
 
 	res := t.runFn(ctx, AgentRunParams{
-		CallID:       call.CallID,
-		RunID:        call.RunID,
-		StepID:       call.StepID,
-		Task:         a.Task,
-		Provider:     a.Provider,
-		Model:        a.Model,
-		Tools:        a.Tools,
-		MaxSteps:     a.MaxSteps,
-		WorkspaceDir: call.WorkspaceDir,
-		StateDir:     call.StateDir,
+		CallID:            call.CallID,
+		RunID:             call.RunID,
+		StepID:            call.StepID,
+		Task:              a.Task,
+		Provider:          a.Provider,
+		Model:             a.Model,
+		Tools:             a.Tools,
+		MaxSteps:          a.MaxSteps,
+		HandoffSchemaName: a.HandoffSchemaName,
+		HandoffSchema:     a.HandoffSchema,
+		WorkspaceDir:      call.WorkspaceDir,
+		StateDir:          call.StateDir,
 	})
 
 	output := res.Result
@@ -133,6 +151,38 @@ func (t *agentTool) Exec(ctx context.Context, call ToolCallContext, args json.Ra
 	return ToolResult{
 		OK:         res.OK,
 		Output:     summary,
+		Structured: agentToolPayload("", res, output),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func agentToolPayload(agent string, res AgentRunResult, output string) json.RawMessage {
+	payload := agentToolPayloadMap(agent, res, output)
+	raw, _ := json.Marshal(payload)
+	return json.RawMessage(raw)
+}
+
+func agentToolPayloadMap(agent string, res AgentRunResult, output string) map[string]any {
+	payload := map[string]any{
+		"ok":           res.OK,
+		"agent":        strings.TrimSpace(agent),
+		"agent_run_id": res.AgentRunID,
+		"used_steps":   res.UsedSteps,
+		"used_tokens":  res.UsedTokens,
+		"cost_usd":     res.CostUSD,
+		"result":       output,
+	}
+	if payload["agent"] == "" {
+		delete(payload, "agent")
+	}
+	if len(res.Structured) > 0 && json.Valid(res.Structured) {
+		var handoff any
+		if json.Unmarshal(res.Structured, &handoff) == nil {
+			payload["handoff"] = handoff
+		}
+	}
+	if len(res.Diagnostics) > 0 {
+		payload["diagnostics"] = append([]string(nil), res.Diagnostics...)
+	}
+	return payload
 }

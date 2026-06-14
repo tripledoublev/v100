@@ -55,7 +55,9 @@ func (t *dispatchTool) InputSchema() json.RawMessage {
 			"task":      {"type": "string", "description": "Task for the dispatched specialist."},
 			"provider":  {"type": "string", "description": "Optional provider override for this dispatch."},
 			"model":     {"type": "string", "description": "Optional model override for this dispatch."},
-			"max_steps": {"type": "integer", "description": "Optional step cap override for this dispatch."}
+			"max_steps": {"type": "integer", "description": "Optional step cap override for this dispatch."},
+			"handoff_schema_name": {"type": "string", "description": "Named structured handoff schema to require, e.g. standard."},
+			"handoff_schema": {"type": "object", "description": "Custom JSON Schema subset for the dispatched final result."}
 		}
 	}`, agentEnum))
 }
@@ -64,8 +66,15 @@ func (t *dispatchTool) OutputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"ok":     {"type": "boolean"},
-			"result": {"type": "string"}
+			"ok": {"type": "boolean"},
+			"agent": {"type": "string"},
+			"agent_run_id": {"type": "string"},
+			"used_steps": {"type": "integer"},
+			"used_tokens": {"type": "integer"},
+			"cost_usd": {"type": "number"},
+			"result": {"type": "string"},
+			"handoff": {"type": "object"},
+			"diagnostics": {"type": "array", "items": {"type": "string"}}
 		}
 	}`)
 }
@@ -74,11 +83,13 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 	start := time.Now()
 
 	var a struct {
-		Agent    string `json:"agent"`
-		Task     string `json:"task"`
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		MaxSteps int    `json:"max_steps"`
+		Agent             string          `json:"agent"`
+		Task              string          `json:"task"`
+		Provider          string          `json:"provider"`
+		Model             string          `json:"model"`
+		MaxSteps          int             `json:"max_steps"`
+		HandoffSchemaName string          `json:"handoff_schema_name"`
+		HandoffSchema     json.RawMessage `json:"handoff_schema"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return failResult(start, "invalid args: "+err.Error()), nil
@@ -95,16 +106,18 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 	}
 
 	res := t.runFn(ctx, AgentRunParams{
-		CallID:       call.CallID,
-		RunID:        call.RunID,
-		StepID:       call.StepID,
-		Agent:        a.Agent,
-		Task:         a.Task,
-		Provider:     a.Provider,
-		Model:        a.Model,
-		MaxSteps:     a.MaxSteps,
-		WorkspaceDir: call.WorkspaceDir,
-		StateDir:     call.StateDir,
+		CallID:            call.CallID,
+		RunID:             call.RunID,
+		StepID:            call.StepID,
+		Agent:             a.Agent,
+		Task:              a.Task,
+		Provider:          a.Provider,
+		Model:             a.Model,
+		MaxSteps:          a.MaxSteps,
+		HandoffSchemaName: a.HandoffSchemaName,
+		HandoffSchema:     a.HandoffSchema,
+		WorkspaceDir:      call.WorkspaceDir,
+		StateDir:          call.StateDir,
 	})
 
 	output := res.Result
@@ -115,20 +128,13 @@ func (t *dispatchTool) Exec(ctx context.Context, call ToolCallContext, args json
 		output = "(dispatch produced no output)"
 	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"ok":          res.OK,
-		"agent":       a.Agent,
-		"used_steps":  res.UsedSteps,
-		"used_tokens": res.UsedTokens,
-		"cost_usd":    res.CostUSD,
-		"result":      output,
-	})
-	summary := fmt.Sprintf("[dispatch %s done: steps=%d tokens=%d cost=$%.4f]\njson=%s\n\n%s",
-		a.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, string(payload), output)
+	summary := fmt.Sprintf("[dispatch %s done: steps=%d tokens=%d cost=$%.4f]\n\n%s",
+		a.Agent, res.UsedSteps, res.UsedTokens, res.CostUSD, output)
 
 	return ToolResult{
 		OK:         res.OK,
 		Output:     summary,
+		Structured: agentToolPayload(a.Agent, res, output),
 		DurationMS: time.Since(start).Milliseconds(),
 	}, nil
 }

@@ -270,13 +270,14 @@ type ToolOutputDeltaPayload struct {
 
 // ToolResultPayload is the Payload for EventToolResult.
 type ToolResultPayload struct {
-	CallID     string `json:"call_id"`
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	Output     string `json:"output"`
-	Stdout     string `json:"stdout,omitempty"`
-	TaintLevel string `json:"taint_level,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	CallID     string          `json:"call_id"`
+	Name       string          `json:"name"`
+	OK         bool            `json:"ok"`
+	Output     string          `json:"output"`
+	Stdout     string          `json:"stdout,omitempty"`
+	Structured json.RawMessage `json:"structured,omitempty"`
+	TaintLevel string          `json:"taint_level,omitempty"`
+	DurationMS int64           `json:"duration_ms"`
 }
 
 // ToolPredictionPayload is emitted before physical tool execution when
@@ -357,15 +358,17 @@ type AgentDispatchPayload struct {
 
 // AgentEndPayload is the Payload for EventAgentEnd.
 type AgentEndPayload struct {
-	Agent        string  `json:"agent,omitempty"`
-	ParentCallID string  `json:"parent_call_id"`
-	AgentRunID   string  `json:"agent_run_id"`
-	OK           bool    `json:"ok"`
-	Result       string  `json:"result"`
-	ToolUses     int     `json:"tool_uses"`
-	UsedSteps    int     `json:"used_steps"`
-	UsedTokens   int     `json:"used_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
+	Agent        string          `json:"agent,omitempty"`
+	ParentCallID string          `json:"parent_call_id"`
+	AgentRunID   string          `json:"agent_run_id"`
+	OK           bool            `json:"ok"`
+	Result       string          `json:"result"`
+	Structured   json.RawMessage `json:"structured,omitempty"`
+	Diagnostics  []string        `json:"diagnostics,omitempty"`
+	ToolUses     int             `json:"tool_uses"`
+	UsedSteps    int             `json:"used_steps"`
+	UsedTokens   int             `json:"used_tokens"`
+	CostUSD      float64         `json:"cost_usd"`
 }
 
 // GeneratedGoalPayload is the Payload for EventGeneratedGoal.
