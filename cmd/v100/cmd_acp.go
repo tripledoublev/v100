@@ -77,6 +77,8 @@ type acpSession struct {
 	promptActive bool
 	mu           sync.Mutex
 	closing      bool
+	closeReason  string
+	runStarted   bool
 	prompts      []acp.SuggestedPrompt
 	cleanupDone  chan struct{}
 	cleanupOnce  sync.Once
@@ -192,7 +194,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
 			return
 		}
-		closed := s.finalize()
+		closed := s.finalize(params.Reason)
 		_ = s.conn.SendResponse(req.ID, acp.FinalizeResult{ClosedSessions: closed})
 		s.signalShutdown()
 
@@ -403,7 +405,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			_ = s.conn.SendError(req.ID, acp.ErrSessionNotFound, fmt.Sprintf("%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), params.SessionID))
 			return
 		}
-		closeACPSession(session)
+		closeACPSession(session, "session_close")
 		_ = s.conn.SendResponse(req.ID, nil)
 
 	default:
@@ -976,7 +978,7 @@ func hasACPTrace(runDir string) bool {
 	return false
 }
 
-func (s *acpServer) finalize() int {
+func (s *acpServer) finalize(reason string) int {
 	s.mu.Lock()
 	sessions := s.sessions
 	s.sessions = make(map[string]*acpSession)
@@ -988,19 +990,20 @@ func (s *acpServer) finalize() int {
 
 	closed := 0
 	for _, session := range sessions {
-		closeACPSession(session)
+		closeACPSession(session, acpCloseReason(reason, "finalize"))
 		closed++
 	}
 	return closed
 }
 
-func closeACPSession(session *acpSession) {
+func closeACPSession(session *acpSession, reason string) {
 	if session == nil {
 		return
 	}
 	cleanupDone := session.cleanupDoneChan()
 	session.mu.Lock()
 	session.closing = true
+	session.closeReason = acpCloseReason(reason, "session_close")
 	if session.cancel != nil {
 		session.cancel()
 	}
@@ -1096,6 +1099,20 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 	metadata, _ := session.loop.Provider.Metadata(ctxMeta, session.loop.Model)
 	session.loop.ModelMetadata = metadata
 
+	if err := session.emitRunStart(); err != nil {
+		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update: acp.Update{
+				Type: "agent_message_chunk",
+				Content: &acp.ContentBlock{
+					Type: "text",
+					Text: "Error: failed to start run trace: " + err.Error(),
+				},
+			},
+		})
+		return "refusal"
+	}
+
 	if len(images) > 0 {
 		err = session.loop.StepWithImages(ctx, prompt, images)
 	} else {
@@ -1117,12 +1134,99 @@ func (s *acpSession) cleanup() {
 	s.cleanupOnce.Do(func() {
 		s.mu.Lock()
 		comp := s.comp
+		loop := s.loop
+		runStarted := s.runStarted
+		closeReason := s.closeReason
 		s.comp = nil
 		s.loop = nil
 		s.mu.Unlock()
+		if runStarted && loop != nil {
+			_ = loop.EmitRunEnd(acpCloseReason(closeReason, "session_close"), "")
+		}
 		cleanupRunComponents(comp)
 		close(cleanupDone)
 	})
+}
+
+func (s *acpSession) emitRunStart() error {
+	s.mu.Lock()
+	if s.runStarted {
+		s.mu.Unlock()
+		return nil
+	}
+	loop := s.loop
+	comp := s.comp
+	s.runStarted = true
+	s.mu.Unlock()
+
+	if loop == nil {
+		return nil
+	}
+	if err := loop.EmitRunStart(acpRunStartPayload(loop, comp)); err != nil {
+		s.mu.Lock()
+		s.runStarted = false
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func acpRunStartPayload(loop *core.Loop, comp *RunComponents) core.RunStartPayload {
+	var (
+		cfg          *config.Config
+		policyName   string
+		providerName string
+		model        string
+		workspace    string
+		metadata     providers.ModelMetadata
+	)
+	if loop != nil {
+		if loop.Policy != nil {
+			policyName = loop.Policy.Name
+		}
+		if loop.Provider != nil {
+			providerName = loop.Provider.Name()
+		}
+		model = loop.Model
+		metadata = loop.ModelMetadata
+		if loop.Run != nil {
+			workspace = loop.Run.Dir
+		}
+	}
+	if comp != nil {
+		cfg = comp.Config
+		if providerName == "" && comp.Provider != nil {
+			providerName = comp.Provider.Name()
+		}
+		if model == "" {
+			model = comp.Model
+		}
+		if workspace == "" {
+			workspace = comp.Workspace
+		}
+		if metadata == (providers.ModelMetadata{}) {
+			metadata = comp.ModelMetadata
+		}
+	}
+	return core.RunStartPayload{
+		Policy:        policyName,
+		Provider:      providerName,
+		Model:         model,
+		Workspace:     traceWorkspace(cfg, workspace),
+		ModelMetadata: metadata,
+	}
+}
+
+func acpCloseReason(reason, fallback string) string {
+	reason = strings.TrimSpace(reason)
+	if reason != "" {
+		return reason
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback != "" {
+		return fallback
+	}
+	return "session_close"
 }
 
 func (s *acpSession) cleanupDoneChan() chan struct{} {

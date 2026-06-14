@@ -17,6 +17,9 @@ import (
 	"github.com/tripledoublev/v100/internal/config"
 	"github.com/tripledoublev/v100/internal/core"
 	"github.com/tripledoublev/v100/internal/core/executor"
+	"github.com/tripledoublev/v100/internal/policy"
+	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/tools"
 )
 
 func TestACPLifecycleInitializeSuggestedPromptsFinalize(t *testing.T) {
@@ -243,9 +246,91 @@ func TestCloseACPSessionWaitsForActivePromptCleanup(t *testing.T) {
 		session.finishPrompt()
 	}()
 
-	closeACPSession(session)
+	closeACPSession(session, "session_close")
 	if !fakeSession.closed {
 		t.Fatal("active session cleanup did not complete before close returned")
+	}
+}
+
+func TestACPRunPromptEmitsRunLifecycleUpdates(t *testing.T) {
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:    acp.NewConn(strings.NewReader(""), &out),
+		cfgPath: filepath.Join(t.TempDir(), "missing.toml"),
+	}
+
+	workspace := t.TempDir()
+	trace, err := core.OpenTrace(filepath.Join(t.TempDir(), "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &core.Run{ID: "acp-run-1", Dir: workspace, TraceFile: trace.Path()}
+	prov := &acpLifecycleProvider{}
+	reg := tools.NewRegistry(nil)
+	pol := policy.Default()
+	budget := core.NewBudgetTracker(&core.Budget{MaxSteps: 3, MaxTokens: 1000})
+	loop := &core.Loop{
+		Run:       run,
+		Provider:  prov,
+		Model:     "test-model",
+		Tools:     reg,
+		Policy:    pol,
+		Trace:     trace,
+		Budget:    budget,
+		ConfirmFn: func(_, _ string) bool { return true },
+		OutputFn:  acp.NewTranslator(server.conn, "session-1"),
+		Mapper:    core.NewPathMapper(workspace, workspace),
+	}
+	session := &acpSession{
+		comp: &RunComponents{
+			Config:    config.DefaultConfig(),
+			Run:       run,
+			Provider:  prov,
+			Registry:  reg,
+			Policy:    pol,
+			Trace:     trace,
+			Budget:    budget,
+			Workspace: workspace,
+			Model:     "test-model",
+		},
+		loop: loop,
+	}
+
+	if stopReason := server.runPrompt(session, "session-1", "hello", nil); stopReason != "end_turn" {
+		t.Fatalf("stop reason = %q, want end_turn", stopReason)
+	}
+	closeACPSession(session, "test complete")
+
+	updates := acpSessionUpdates(t, out.String())
+	var sawStart, sawEnd bool
+	for _, update := range updates {
+		if update.SessionID != "session-1" || update.Update.Type != "run_status_update" {
+			continue
+		}
+		switch update.Update.Status {
+		case "in_progress":
+			var payload core.RunStartPayload
+			if err := json.Unmarshal(update.Update.RawOutput, &payload); err != nil {
+				t.Fatalf("start raw output: %v", err)
+			}
+			if payload.Provider == "acp-test" && payload.Model == "test-model" && payload.Workspace == workspace {
+				sawStart = true
+			}
+		case "completed":
+			var payload core.RunEndPayload
+			if err := json.Unmarshal(update.Update.RawOutput, &payload); err != nil {
+				t.Fatalf("end raw output: %v", err)
+			}
+			if payload.Reason == "test complete" {
+				sawEnd = true
+			}
+		}
+	}
+	if !sawStart {
+		t.Fatalf("missing run.start ACP update: %#v", updates)
+	}
+	if !sawEnd {
+		t.Fatalf("missing run.end ACP update: %#v", updates)
 	}
 }
 
@@ -392,7 +477,7 @@ max_tool_calls_per_step = 1
 		t.Fatalf("resumed history = %#v", session.loop.Messages[:3])
 	}
 
-	closeACPSession(session)
+	closeACPSession(session, "session_close")
 }
 
 func acpRequest(t *testing.T, id int, method string, params any) acp.Request {
@@ -434,6 +519,15 @@ func acpResponses(t *testing.T, raw string) []acp.Response {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		var envelope struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+			t.Fatalf("response envelope unmarshal %q: %v", line, err)
+		}
+		if len(envelope.ID) == 0 {
+			continue
+		}
 		var res acp.Response
 		if err := json.Unmarshal([]byte(line), &res); err != nil {
 			t.Fatalf("response unmarshal %q: %v", line, err)
@@ -441,6 +535,50 @@ func acpResponses(t *testing.T, raw string) []acp.Response {
 		out = append(out, res)
 	}
 	return out
+}
+
+func acpSessionUpdates(t *testing.T, raw string) []acp.SessionUpdateParams {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	out := make([]acp.SessionUpdateParams, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var n acp.Notification
+		if err := json.Unmarshal([]byte(line), &n); err != nil {
+			t.Fatalf("notification unmarshal %q: %v", line, err)
+		}
+		if n.Method != acp.MethodSessionUpdate {
+			continue
+		}
+		var params acp.SessionUpdateParams
+		if err := json.Unmarshal(n.Params, &params); err != nil {
+			t.Fatalf("session update unmarshal: %v", err)
+		}
+		out = append(out, params)
+	}
+	return out
+}
+
+type acpLifecycleProvider struct{}
+
+func (p *acpLifecycleProvider) Name() string { return "acp-test" }
+
+func (p *acpLifecycleProvider) Capabilities() providers.Capabilities {
+	return providers.Capabilities{}
+}
+
+func (p *acpLifecycleProvider) Complete(context.Context, providers.CompleteRequest) (providers.CompleteResponse, error) {
+	return providers.CompleteResponse{AssistantText: "done"}, nil
+}
+
+func (p *acpLifecycleProvider) Embed(context.Context, providers.EmbedRequest) (providers.EmbedResponse, error) {
+	return providers.EmbedResponse{}, nil
+}
+
+func (p *acpLifecycleProvider) Metadata(_ context.Context, model string) (providers.ModelMetadata, error) {
+	return providers.ModelMetadata{Model: model, ContextSize: 4096}, nil
 }
 
 func decodeACPResult(t *testing.T, res acp.Response, dest any) {
