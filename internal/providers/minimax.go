@@ -17,7 +17,7 @@ import (
 
 const (
 	minimaxBaseURL      = "https://api.minimax.io/anthropic/v1/messages"
-	minimaxDefaultModel = "MiniMax-M2.7"
+	minimaxDefaultModel = "MiniMax-M3"
 )
 
 // MiniMaxProvider implements Provider using MiniMax's Anthropic-compatible
@@ -303,6 +303,7 @@ func (p *MiniMaxProvider) Metadata(ctx context.Context, model string) (ModelMeta
 
 func (p *MiniMaxProvider) Models() []ModelInfo {
 	return []ModelInfo{
+		{Name: "MiniMax-M3", Description: "latest — MiniMax M3"},
 		{Name: "MiniMax-M2.7", Description: "powerful — self-evolving, agent/coding"},
 		{Name: "MiniMax-M2.7-highspeed", Description: "fast — high speed variant"},
 		{Name: "MiniMax-M2.5", Description: "standard — SOTA coding + agents"},
