@@ -970,7 +970,7 @@ func registerAgentTool(cfg *config.Config, reg *tools.Registry, trace *core.Trac
 			result = extractLastAssistantText(childLoop.Messages)
 		}
 
-		if !isCompliantAgentHandoff(params.Agent, result) {
+		if len(handoffSchema) == 0 && !isCompliantAgentHandoff(params.Agent, result) {
 			ok = false
 			if lastErr != nil {
 				result = fmt.Sprintf("sub-agent failed to produce a compliant handoff after 2 attempts: %v", lastErr)

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +184,92 @@ func TestResolveAgentRunDirAndLoadAgentStart(t *testing.T) {
 	fillAgentRerunOptions(&opts, runDir, start)
 	if opts.Provider != "glm" || opts.Model != "glm-4.6" || opts.MaxSteps != 4 || opts.ToolsCSV != "fs_read,git_diff" || opts.Workspace != "/workspace" {
 		t.Fatalf("rerun opts = %#v", opts)
+	}
+}
+
+func TestDispatchStructuredHandoffSkipsLegacyMarkdownCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"created":0,
+			"model":"test-model",
+			"choices":[{
+				"index":0,
+				"message":{
+					"role":"assistant",
+					"content":"{\"status\":\"ok\",\"summary\":\"done\",\"next_steps\":[\"ship\"]}"
+				},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Defaults.Provider = "llamacpp"
+	cfg.Providers["llamacpp"] = config.ProviderConfig{
+		Type:         "llamacpp",
+		BaseURL:      srv.URL + "/v1",
+		DefaultModel: "test-model",
+	}
+	cfg.Agents = map[string]config.AgentConfig{
+		"reviewer": {
+			SystemPrompt: "You return structured handoffs.",
+			BudgetSteps:  1,
+		},
+	}
+
+	runDir := t.TempDir()
+	trace, err := core.OpenTrace(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = trace.Close() }()
+
+	reg := tools.NewRegistry([]string{"dispatch"})
+	budget := core.NewBudgetTracker(&core.Budget{MaxSteps: 4, MaxTokens: 1000})
+	registerAgentTool(cfg, reg, trace, budget, nil, nil, runDir, 0, nil, nil, nil, nil)
+
+	dispatch, ok := reg.Get("dispatch")
+	if !ok {
+		t.Fatal("dispatch tool not registered")
+	}
+	res, err := dispatch.Exec(context.Background(), tools.ToolCallContext{
+		RunID:        "run-structured",
+		StepID:       "step-1",
+		CallID:       "call-1",
+		WorkspaceDir: runDir,
+		StateDir:     filepath.Join(runDir, "state"),
+	}, json.RawMessage(`{
+		"agent":"reviewer",
+		"task":"return a valid structured handoff",
+		"handoff_schema_name":"standard"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("structured handoff was rejected: %s", res.Output)
+	}
+	var payload struct {
+		OK      bool `json:"ok"`
+		Handoff struct {
+			Status  string `json:"status"`
+			Summary string `json:"summary"`
+		} `json:"handoff"`
+	}
+	if err := json.Unmarshal(res.Structured, &payload); err != nil {
+		t.Fatalf("structured payload: %v", err)
+	}
+	if !payload.OK || payload.Handoff.Status != "ok" || payload.Handoff.Summary != "done" {
+		t.Fatalf("structured payload = %+v", payload)
 	}
 }
 

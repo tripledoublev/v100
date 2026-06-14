@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.3 — 2026-06-13
+
+**TUI, ACP, and Sub-Agent Control**
+
+### Features
+
+- Added named TUI themes, a help overlay, and discoverability improvements for the terminal interface.
+- Added structured sub-agent handoff schemas with first-class structured tool results, trace payloads, and ACP translation.
+- Added operator-driven `v100 agents run`, `v100 agents cancel`, and `v100 agents rerun` controls for configured agent roles.
+- Added ACP session listing, resume/load support, and runtime lifecycle updates for run, step, agent, hook, sandbox, and tool-output events.
+
+### Fixes
+
+- Preserved initial-prompt error end reasons and treated exact one-shot step-budget exhaustion as normal completion.
+- Rejected unsupported Codex max-token mappings instead of sending invalid provider parameters.
+- Fixed structured sub-agent handoffs so schema-valid JSON is not rejected by the legacy markdown handoff checker.
+
+### Security
+
+- Added explicit credential environment allowlists for tool execution as local groundwork for secure per-tool credential brokering.
+
 ## v0.3.1 — 2026-05-30
 
 **Research and Inspection Tools**
