@@ -523,6 +523,9 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 			} else {
 				var budgetErr *core.ErrBudgetExceeded
 				if errors.As(err, &budgetErr) {
+					if exitAfterPrompt && isPostStepStepBudgetHit(budgetErr) {
+						goto initialPromptDone
+					}
 					fmt.Fprintln(os.Stderr, ui.Warn("budget exceeded: "+budgetErr.Reason))
 					reason = "budget_" + strings.SplitN(budgetErr.Reason, ":", 2)[0]
 					_ = loop.EmitRunEnd(reason, "")
@@ -546,6 +549,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 				}
 			}
 		}
+	initialPromptDone:
 		if exitAfterPrompt {
 			if initialPromptFailedReason != "" {
 				reason = initialPromptFailedReason
@@ -695,6 +699,13 @@ done:
 	fmt.Println(ui.Dim("run id: ") + run.ID)
 	fmt.Println(ui.Dim("  → v100 stats " + run.ID))
 	return nil
+}
+
+func isPostStepStepBudgetHit(err *core.ErrBudgetExceeded) bool {
+	if err == nil {
+		return false
+	}
+	return strings.HasPrefix(err.Reason, "steps: used ")
 }
 
 func writeRunProvenanceArtifact(tracePath string) error {
