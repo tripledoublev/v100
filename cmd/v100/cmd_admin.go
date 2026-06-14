@@ -152,7 +152,11 @@ func agentsCmd(cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(agentsRunCmd(cfgPath))
+	cmd.AddCommand(
+		agentsRunCmd(cfgPath),
+		agentsCancelCmd(),
+		agentsRerunCmd(cfgPath),
+	)
 	return cmd
 }
 
@@ -179,6 +183,62 @@ func agentsRunCmd(cfgPath *string) *cobra.Command {
 			return runAgentRoleCommand(cmd.Context(), cfgPath, role, task, opts)
 		},
 	}
+	addAgentRunFlags(cmd, &opts)
+	return cmd
+}
+
+func agentsCancelCmd() *cobra.Command {
+	var runRoot string
+	cmd := &cobra.Command{
+		Use:   "cancel <run-id-or-dir>",
+		Short: "Request cancellation of an active operator agent run",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runDir, err := resolveAgentRunDir(args[0], runRoot)
+			if err != nil {
+				return err
+			}
+			if err := requestAgentRunCancel(runDir); err != nil {
+				return err
+			}
+			fmt.Println(ui.OK("Cancel requested for " + runDir))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&runRoot, "run-dir", "runs", "run directory root for run IDs")
+	return cmd
+}
+
+func agentsRerunCmd(cfgPath *string) *cobra.Command {
+	var opts agentRunOptions
+	var runRoot string
+	cmd := &cobra.Command{
+		Use:   "rerun <run-id-or-dir> <agent-run-id>",
+		Short: "Rerun a prior operator sub-agent branch",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runDir, err := resolveAgentRunDir(args[0], runRoot)
+			if err != nil {
+				return err
+			}
+			start, err := loadAgentRunStart(runDir, args[1])
+			if err != nil {
+				return err
+			}
+			fillAgentRerunOptions(&opts, runDir, start)
+			role := strings.TrimSpace(start.Agent)
+			if role == "" {
+				return fmt.Errorf("cannot rerun anonymous agent branch %q without a configured role", start.AgentRunID)
+			}
+			return runAgentRoleCommand(cmd.Context(), cfgPath, role, start.Task, opts)
+		},
+	}
+	addAgentRunFlags(cmd, &opts)
+	cmd.Flags().StringVar(&runRoot, "run-dir", "runs", "run directory root for run IDs")
+	return cmd
+}
+
+func addAgentRunFlags(cmd *cobra.Command, opts *agentRunOptions) {
 	cmd.Flags().StringVar(&opts.Provider, "provider", "", "provider override for this agent run")
 	cmd.Flags().StringVar(&opts.Model, "model", "", "model override for this agent run")
 	cmd.Flags().StringVar(&opts.ToolsCSV, "tools", "", "comma-separated tool subset for this agent run")
@@ -187,7 +247,6 @@ func agentsRunCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&opts.HandoffSchemaName, "handoff-schema-name", tools.HandoffSchemaStandard, "named handoff schema to require")
 	cmd.Flags().StringVar(&opts.HandoffSchemaFile, "handoff-schema-file", "", "custom JSON schema file for the final handoff")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "print the structured result JSON only")
-	return cmd
 }
 
 func runAgentRoleCommand(ctx context.Context, cfgPath *string, role, task string, opts agentRunOptions) error {
@@ -221,6 +280,17 @@ func runAgentRoleCommand(ctx context.Context, cfgPath *string, role, task string
 		return err
 	}
 	defer cleanupRunComponents(comp)
+	if strings.TrimSpace(comp.Run.StateDir) == "" {
+		comp.Run.StateDir = filepath.Join(filepath.Dir(comp.Run.TraceFile), "state")
+	}
+	if err := os.MkdirAll(comp.Run.StateDir, 0o755); err != nil {
+		return err
+	}
+	runCtx, stopCancelWatch, err := agentRunCancellableContext(ctx, comp.Run.StateDir)
+	if err != nil {
+		return err
+	}
+	defer stopCancelWatch()
 
 	renderer := ui.NewCLIRenderer()
 	var outputFn core.OutputFn
@@ -252,14 +322,19 @@ func runAgentRoleCommand(ctx context.Context, cfgPath *string, role, task string
 		return err
 	}
 
-	res, err := runAgentDispatchTool(ctx, comp, role, task, opts)
+	res, err := runAgentDispatchTool(runCtx, comp, role, task, opts)
 	endReason := "completed"
-	if err != nil || !res.OK {
+	if runCtx.Err() == context.Canceled {
+		endReason = "cancelled"
+	} else if err != nil || !res.OK {
 		endReason = "error"
 	}
 	_ = parentLoop.EmitRunEnd(endReason, "")
 	if err != nil {
 		return err
+	}
+	if runCtx.Err() == context.Canceled {
+		return fmt.Errorf("agent run cancelled")
 	}
 
 	if opts.JSON {
@@ -344,6 +419,140 @@ func readAgentRunHandoffSchema(path string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("handoff schema file %s is not valid JSON", path)
 	}
 	return json.RawMessage(raw), nil
+}
+
+func agentRunCancellableContext(parent context.Context, stateDir string) (context.Context, func(), error) {
+	ctx, cancel := context.WithCancel(parent)
+	stateDir = strings.TrimSpace(stateDir)
+	if stateDir == "" {
+		return ctx, cancel, nil
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	cancelPath := agentRunCancelPath(stateDir)
+	_ = os.Remove(cancelPath)
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := os.Stat(cancelPath); err == nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, func() {
+		cancel()
+		close(done)
+	}, nil
+}
+
+func agentRunCancelPath(stateDir string) string {
+	return filepath.Join(stateDir, "operator.cancel")
+}
+
+func requestAgentRunCancel(runDir string) error {
+	stateDir := filepath.Join(runDir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"cancelled_at": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	return os.WriteFile(agentRunCancelPath(stateDir), append(payload, '\n'), 0o644)
+}
+
+func resolveAgentRunDir(runRef, runRoot string) (string, error) {
+	runRef = expandHomePath(strings.TrimSpace(runRef))
+	if runRef == "" {
+		return "", fmt.Errorf("run id or directory is required")
+	}
+	if filepath.Base(runRef) == "trace.jsonl" {
+		runRef = filepath.Dir(runRef)
+	}
+	if hasTraceFile(runRef) {
+		return filepath.Abs(runRef)
+	}
+	runRoot = expandHomePath(strings.TrimSpace(runRoot))
+	if runRoot == "" {
+		runRoot = "runs"
+	}
+	candidate := filepath.Join(runRoot, runRef)
+	if hasTraceFile(candidate) {
+		return filepath.Abs(candidate)
+	}
+	return "", fmt.Errorf("run trace not found for %q", runRef)
+}
+
+func hasTraceFile(runDir string) bool {
+	if strings.TrimSpace(runDir) == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(runDir, "trace.jsonl"))
+	return err == nil && !info.IsDir()
+}
+
+func loadAgentRunStart(runDir, agentRunID string) (core.AgentStartPayload, error) {
+	agentRunID = strings.TrimSpace(agentRunID)
+	if agentRunID == "" {
+		return core.AgentStartPayload{}, fmt.Errorf("agent run id is required")
+	}
+	events, err := core.ReadAll(filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		return core.AgentStartPayload{}, err
+	}
+	for _, ev := range events {
+		if ev.Type != core.EventAgentStart {
+			continue
+		}
+		var payload core.AgentStartPayload
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.AgentRunID == agentRunID {
+			return payload, nil
+		}
+	}
+	return core.AgentStartPayload{}, fmt.Errorf("agent run %q not found in %s", agentRunID, runDir)
+}
+
+func fillAgentRerunOptions(opts *agentRunOptions, runDir string, start core.AgentStartPayload) {
+	if opts.MaxSteps <= 0 {
+		opts.MaxSteps = start.MaxSteps
+	}
+	if strings.TrimSpace(opts.ToolsCSV) == "" {
+		opts.ToolsCSV = strings.Join(start.Tools, ",")
+	}
+	if strings.TrimSpace(opts.Provider) == "" && strings.TrimSpace(opts.Model) == "" {
+		opts.Provider, opts.Model = splitAgentStartModel(start.Model)
+	}
+	if strings.TrimSpace(opts.Workspace) == "" {
+		if meta, err := core.ReadMeta(runDir); err == nil && strings.TrimSpace(meta.SourceWorkspace) != "" {
+			opts.Workspace = meta.SourceWorkspace
+		}
+	}
+}
+
+func splitAgentStartModel(model string) (provider, resolvedModel string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", ""
+	}
+	provider, resolvedModel, ok := strings.Cut(model, ":")
+	if !ok {
+		return "", model
+	}
+	return strings.TrimSpace(provider), strings.TrimSpace(resolvedModel)
 }
 
 func splitAgentRunCSV(value string) []string {

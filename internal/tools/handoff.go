@@ -52,6 +52,7 @@ var standardHandoffSchema = json.RawMessage(`{
 		"errors": {"type": "array", "items": {"type": "string"}},
 		"blockers": {"type": "array", "items": {"type": "string"}},
 		"warnings": {"type": "array", "items": {"type": "string"}},
+		"private_notes": {"type": "array", "items": {"type": "string"}},
 		"next_steps": {"type": "array", "items": {"type": "string"}},
 		"blackboard_updates": {"type": "array", "items": {
 			"type": "object",
@@ -106,7 +107,7 @@ func HandoffSchemaPrompt(name string, schema json.RawMessage) string {
 	b.WriteString("Schema:\n")
 	b.WriteString(string(compactJSON(schema)))
 	b.WriteString("\n\n")
-	b.WriteString("Use these channel conventions when relevant: findings, artifacts, changed_files, citations, patch, warnings, blackboard_updates, errors, blockers, next_steps.")
+	b.WriteString("Use these channel conventions when relevant: findings, artifacts, changed_files, citations, patch, warnings, private_notes, blackboard_updates, errors, blockers, next_steps.")
 	return b.String()
 }
 
