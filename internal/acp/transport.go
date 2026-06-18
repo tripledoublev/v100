@@ -84,6 +84,11 @@ func (c *Conn) SendNotification(method string, params any) error {
 	return c.write(notif)
 }
 
+// Send sends a JSON-RPC message (request, response, or notification).
+func (c *Conn) Send(v any) error {
+	return c.write(v)
+}
+
 func (c *Conn) write(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {

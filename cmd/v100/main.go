@@ -76,6 +76,7 @@ func rootCmd() *cobra.Command {
 		compressCmd(&cfgPath),
 		dogfoodCmd(&cfgPath),
 		acpCmd(&cfgPath),
+		gatewayCmd(&cfgPath),
 	)
 	return root
 }
