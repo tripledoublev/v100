@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.5 — 2026-06-18
+
+**Telegram Gateway Image Posting**
+
+### Fixes
+
+- Saved Telegram photo attachments into the gateway workspace and passed them through ACP as image blocks with tool-usable local paths.
+- Enabled safe gateway execution for `atproto_upload_blob` and `atproto_post` so Telegram image-post requests can upload and publish without a missing-tool failure.
+- Added a Telegram message reaction acknowledgement for actionable gateway messages.
+- Preserved Bluesky image aspect ratios by returning image dimensions from `atproto_upload_blob` and emitting `aspectRatio` in `atproto_post` image embeds.
+
 ## v0.3.4 — 2026-06-18
 
 **Telegram Gateway**
