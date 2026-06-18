@@ -293,9 +293,9 @@ func DefaultConfig() *Config {
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
 				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect",
-				"atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
+				"atproto_feed", "atproto_notifications", "atproto_upload_blob", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
-			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"},
+			Dangerous: []string{"fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_create_record"},
 			Env: ToolEnvConfig{
 				Redact: []string{"*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY", "GH_TOKEN", "GITHUB_TOKEN"},
 			},
@@ -463,8 +463,8 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
-dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_post", "atproto_create_record"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_upload_blob", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_create_record"]
 
 [tools.env]
 allow = []                       # explicit env vars passed to shell tools, e.g. ["GH_TOKEN"]
@@ -585,8 +585,8 @@ func loadConfigFile(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "reflect")
 	ensureString(&cfg.Tools.Enabled, "atproto_feed")
 	ensureString(&cfg.Tools.Enabled, "atproto_notifications")
+	ensureString(&cfg.Tools.Enabled, "atproto_upload_blob")
 	ensureString(&cfg.Tools.Enabled, "atproto_post")
-	ensureString(&cfg.Tools.Dangerous, "atproto_post")
 	ensureString(&cfg.Tools.Enabled, "atproto_create_record")
 	ensureString(&cfg.Tools.Dangerous, "atproto_create_record")
 	ensureString(&cfg.Tools.Enabled, "atproto_resolve")

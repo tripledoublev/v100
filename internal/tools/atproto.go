@@ -285,7 +285,7 @@ func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
 	return "Publish to Bluesky with a dry-run preview and confirm=true requirement for real posts. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt - use atproto_upload_blob first). Quote+images are combined as a recordWithMedia embed. ATProto requests are protected by per-endpoint rate limits and a circuit breaker."
 }
-func (t *atprotoPostTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *atprotoPostTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoPostTool) Effects() ToolEffects {
 	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
 }
@@ -683,7 +683,7 @@ func (t *atprotoUploadBlobTool) Description() string {
 	return "Upload an image blob to Bluesky and return its CID for use in posts. " +
 		"Call this first, then pass the returned cid, mime, size, and optional alt to atproto_post via the images array."
 }
-func (t *atprotoUploadBlobTool) DangerLevel() DangerLevel { return Dangerous }
+func (t *atprotoUploadBlobTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoUploadBlobTool) Effects() ToolEffects {
 	return ToolEffects{NeedsNetwork: true, ExternalSideEffect: true}
 }

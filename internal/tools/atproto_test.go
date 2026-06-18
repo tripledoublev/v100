@@ -54,10 +54,10 @@ func TestATProtoToolMetadata(t *testing.T) {
 	}{
 		{ATProtoFeed(cfg), "atproto_feed", false, true, false},
 		{ATProtoNotifications(cfg), "atproto_notifications", false, true, false},
-		{ATProtoPost(cfg), "atproto_post", true, true, true},
+		{ATProtoPost(cfg), "atproto_post", false, true, true},
 		{ATProtoCreateRecord(cfg), "atproto_create_record", true, true, true},
 		{ATProtoResolve(cfg), "atproto_resolve", false, true, false},
-		{ATProtoUploadBlob(cfg), "atproto_upload_blob", true, true, true},
+		{ATProtoUploadBlob(cfg), "atproto_upload_blob", false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
