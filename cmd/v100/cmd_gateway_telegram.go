@@ -130,7 +130,7 @@ func runTelegramGateway(ctx context.Context, cfgPath *string) error {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 				return nil
 			}
-			fmt.Fprintf(os.Stderr, "telegram gateway poll error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "telegram gateway poll error: %v\n", redactTelegramTokenError(err, gw.token))
 			select {
 			case <-ctx.Done():
 				return nil
@@ -348,7 +348,7 @@ func (g *telegramGateway) pollOnce() error {
 					if g.ctx.Err() != nil {
 						return nil
 					}
-					fmt.Fprintf(os.Stderr, "telegram gateway transcription error: %v\n", terr)
+					fmt.Fprintf(os.Stderr, "telegram gateway transcription error: %v\n", redactTelegramTokenError(terr, g.token))
 					continue
 				}
 				text = strings.TrimSpace(transcript)
@@ -361,7 +361,7 @@ func (g *telegramGateway) pollOnce() error {
 			if g.ctx.Err() != nil {
 				return nil
 			}
-			fmt.Fprintf(os.Stderr, "telegram gateway message error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "telegram gateway message error: %v\n", redactTelegramTokenError(err, g.token))
 			continue
 		}
 	}
@@ -417,6 +417,8 @@ func (g *telegramGateway) handleACPNotification(note acp.Notification) error {
 		if update.Update.Content == nil || strings.TrimSpace(update.Update.Content.Text) == "" {
 			return nil
 		}
+		// Streaming sends from the ACP reader loop; the gateway is currently
+		// single-flight, so a slow Telegram API only delays this in-flight turn.
 		if g.cfg.StreamResponses {
 			return g.sendChunks(state.chatID, splitText(update.Update.Content.Text))
 		}
@@ -512,6 +514,8 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string) error
 }
 
 func (g *telegramGateway) getOrCreateSession(chatID int64) (*telegramGatewaySession, error) {
+	// pollOnce handles updates sequentially today. If per-chat concurrency is
+	// added, this lookup/create path needs singleflight protection.
 	g.sessionsMu.Lock()
 	existing := g.sessionsByChat[chatID]
 	g.sessionsMu.Unlock()
@@ -612,7 +616,7 @@ func (g *telegramGateway) telegramCall(method string, params any, out any) error
 
 	resp, err := g.http.Do(req)
 	if err != nil {
-		return err
+		return redactTelegramTokenError(err, g.token)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -728,7 +732,7 @@ func (g *telegramGateway) downloadAudio(fileID string) (string, error) {
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {
-		return "", err
+		return "", redactTelegramTokenError(err, g.token)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -800,4 +804,16 @@ func splitText(text string) []string {
 		runes = runes[limit:]
 	}
 	return result
+}
+
+func redactTelegramTokenError(err error, token string) error {
+	if err == nil {
+		return nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return err
+	}
+	msg := strings.ReplaceAll(err.Error(), token, "<redacted-telegram-token>")
+	return errors.New(msg)
 }

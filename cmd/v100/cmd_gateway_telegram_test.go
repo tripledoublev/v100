@@ -263,6 +263,33 @@ type telegramVoiceRoundTripper struct {
 	downloadN int
 }
 
+type telegramURLLeakRoundTripper struct {
+	token string
+}
+
+func (r telegramURLLeakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, errors.New("dial failed for " + req.URL.String())
+}
+
+type telegramFileDownloadLeakRoundTripper struct {
+	token string
+}
+
+func (r telegramFileDownloadLeakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Path, "/getFile") {
+		body, _ := json.Marshal(struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				FilePath string `json:"file_path"`
+			} `json:"result"`
+		}{OK: true, Result: struct {
+			FilePath string `json:"file_path"`
+		}{FilePath: "voice/file_1.oga"}})
+		return jsonResp(body), nil
+	}
+	return nil, errors.New("download failed for " + req.URL.String())
+}
+
 func jsonResp(body []byte) *http.Response {
 	return &http.Response{
 		StatusCode: 200,
@@ -328,6 +355,46 @@ func TestTelegramMessageAudioFilePrefersVoice(t *testing.T) {
 
 	if (&telegramMessage{Text: "hi"}).audioFile() != nil {
 		t.Fatal("text-only message should have no audio file")
+	}
+}
+
+func TestTelegramCallRedactsTokenFromTransportErrors(t *testing.T) {
+	token := "123456789:AASecretToken"
+	gw := &telegramGateway{
+		ctx:   context.Background(),
+		http:  &http.Client{Transport: telegramURLLeakRoundTripper{token: token}},
+		token: token,
+	}
+
+	err := gw.telegramCall("getUpdates", map[string]any{"timeout": 1}, nil)
+	if err == nil {
+		t.Fatal("expected telegramCall to return transport error")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("transport error leaked token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted-telegram-token>") {
+		t.Fatalf("transport error did not include redaction marker: %v", err)
+	}
+}
+
+func TestDownloadAudioRedactsTokenFromTransportErrors(t *testing.T) {
+	token := "123456789:AASecretToken"
+	gw := &telegramGateway{
+		ctx:   context.Background(),
+		http:  &http.Client{Transport: telegramFileDownloadLeakRoundTripper{token: token}},
+		token: token,
+	}
+
+	_, err := gw.downloadAudio("voice-1")
+	if err == nil {
+		t.Fatal("expected downloadAudio to return transport error")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("download error leaked token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted-telegram-token>") {
+		t.Fatalf("download error did not include redaction marker: %v", err)
 	}
 }
 
