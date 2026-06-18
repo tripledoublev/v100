@@ -533,9 +533,12 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, image
 			if strings.TrimSpace(img.Path) == "" {
 				continue
 			}
-			fmt.Fprintf(&b, "\n- image %d: %s", i+1, img.Path)
+			fmt.Fprintf(&b, "\n- image %d upload path: %s", i+1, img.Path)
+			if workspacePath := telegramWorkspacePath(g.cfg.Workspace, img.Path); workspacePath != "" {
+				fmt.Fprintf(&b, "\n  workspace path: %s", workspacePath)
+			}
 		}
-		b.WriteString("\nIf the user asks to post an attached image to Bluesky, do not ask for a path. Use atproto_upload_blob with the saved image_path above, then pass the returned cid, mime, size, and alt to atproto_post images[].")
+		b.WriteString("\nIf the user asks to post an attached image to Bluesky, do not ask for a path. Use atproto_upload_blob with the upload path above, then pass the returned cid, mime, size, width, height, and alt to atproto_post images[]. Use the workspace path only for workspace-scoped tools.")
 		promptText = b.String()
 	}
 
@@ -580,6 +583,19 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, image
 		response = "(no response)"
 	}
 	return g.sendChunks(chatID, splitText(response))
+}
+
+func telegramWorkspacePath(workspace, imagePath string) string {
+	workspace = strings.TrimSpace(workspace)
+	imagePath = strings.TrimSpace(imagePath)
+	if workspace == "" || imagePath == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(workspace, imagePath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Join("/workspace", rel))
 }
 
 func (g *telegramGateway) getOrCreateSession(chatID int64) (*telegramGatewaySession, error) {

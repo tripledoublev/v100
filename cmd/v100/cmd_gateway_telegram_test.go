@@ -614,6 +614,12 @@ func TestPollOnceForwardsPhotoAsImagePromptAndReacts(t *testing.T) {
 		if !strings.Contains(got[0].Text, "atproto_upload_blob") || !strings.Contains(got[0].Text, ".v100-telegram-images") {
 			t.Fatalf("expected prompt to include saved image tool guidance, got: %q", got[0].Text)
 		}
+		if !strings.Contains(got[0].Text, "upload path: "+workspace) || !strings.Contains(got[0].Text, "workspace path: /workspace/.v100-telegram-images/") {
+			t.Fatalf("expected prompt to include upload and workspace paths, got: %q", got[0].Text)
+		}
+		if !strings.Contains(got[0].Text, "width, height") {
+			t.Fatalf("expected prompt to preserve image dimensions, got: %q", got[0].Text)
+		}
 		if got[1].Type != "image" || got[1].MimeType != "image/jpeg" || got[1].Data == "" {
 			t.Fatalf("unexpected image prompt block: %#v", got[1])
 		}
@@ -631,6 +637,17 @@ func TestPollOnceForwardsPhotoAsImagePromptAndReacts(t *testing.T) {
 	}
 	if string(data) != string(rt.image) {
 		t.Fatalf("saved image data = %q, want %q", string(data), string(rt.image))
+	}
+}
+
+func TestTelegramWorkspacePath(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "work")
+	got := telegramWorkspacePath(workspace, filepath.Join(workspace, ".v100-telegram-images", "img.jpg"))
+	if got != "/workspace/.v100-telegram-images/img.jpg" {
+		t.Fatalf("workspace path = %q", got)
+	}
+	if got := telegramWorkspacePath(workspace, filepath.Join(t.TempDir(), "outside.jpg")); got != "" {
+		t.Fatalf("outside path should not be mapped, got %q", got)
 	}
 }
 
