@@ -33,6 +33,12 @@ func TestDefaultConfig(t *testing.T) {
 	if !containsString(cfg.Tools.Env.Redact, "*_TOKEN") {
 		t.Error("expected default tool env redaction patterns")
 	}
+	if cfg.Telegram.Enabled {
+		t.Error("expected telegram default to be disabled")
+	}
+	if cfg.Telegram.BotTokenEnv != "V100_TELEGRAM_BOT_TOKEN" {
+		t.Errorf("expected default telegram token env V100_TELEGRAM_BOT_TOKEN, got %q", cfg.Telegram.BotTokenEnv)
+	}
 	if cfg.Tools.Auth.GitHub.Mode != "disabled" {
 		t.Errorf("expected GitHub tool auth disabled by default, got %q", cfg.Tools.Auth.GitHub.Mode)
 	}
@@ -202,6 +208,24 @@ theme = "dracula"
 		t.Errorf("unexpected GitHub tool auth config: %+v", cfg.Tools.Auth.GitHub)
 	}
 
+	cfgEnvPath := filepath.Join(dir, "telegram_env.toml")
+	t.Setenv("V100_TELEGRAM_TOKEN_TEST", "env-token")
+	if err := os.WriteFile(cfgEnvPath, []byte(`
+[telegram]
+enabled = true
+bot_token = ""
+bot_token_env = "V100_TELEGRAM_TOKEN_TEST"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgFromEnv, err := Load(cfgEnvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfgFromEnv.Telegram.Enabled {
+		t.Fatal("expected telegram enabled when explicitly configured, even without inline bot_token")
+	}
+
 	// Verify sh is migrated if missing
 	shEnabled := false
 	for _, tool := range cfg.Tools.Enabled {
@@ -342,6 +366,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	}
 	if !contains(toml, `memory_max_tokens = 256`) {
 		t.Error("default TOML should contain memory_max_tokens")
+	}
+	if !contains(toml, "[telegram]") {
+		t.Error("default TOML should contain telegram config section")
+	}
+	if !contains(toml, `bot_token_env = "V100_TELEGRAM_BOT_TOKEN"`) {
+		t.Error("default TOML should include telegram bot token env fallback")
 	}
 }
 

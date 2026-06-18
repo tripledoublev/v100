@@ -23,8 +23,9 @@ import (
 
 func acpCmd(cfgPath *string) *cobra.Command {
 	var (
-		yoloFlag bool
-		autoFlag bool
+		yoloFlag     bool
+		autoFlag     bool
+		providerFlag string
 	)
 
 	cmd := &cobra.Command{
@@ -37,11 +38,12 @@ func acpCmd(cfgPath *string) *cobra.Command {
 
 			conn := acp.NewConn(os.Stdin, realStdout)
 			server := &acpServer{
-				conn:     conn,
-				yolo:     yoloFlag || autoFlag,
-				sessions: make(map[string]*acpSession),
-				cfgPath:  *cfgPath,
-				cmd:      cmd,
+				conn:             conn,
+				yolo:             yoloFlag || autoFlag,
+				sessions:         make(map[string]*acpSession),
+				cfgPath:          *cfgPath,
+				cmd:              cmd,
+				providerOverride: strings.TrimSpace(providerFlag),
 			}
 
 			return server.serve()
@@ -50,6 +52,7 @@ func acpCmd(cfgPath *string) *cobra.Command {
 
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "auto-approve all tool calls")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls")
+	cmd.Flags().StringVar(&providerFlag, "provider", "", "override defaults.provider for this ACP session")
 
 	return cmd
 }
@@ -67,6 +70,16 @@ type acpServer struct {
 	mu               sync.Mutex
 	cfgPath          string
 	cmd              *cobra.Command
+	providerOverride string
+}
+
+// applyProviderOverride forces cfg.Defaults.Provider to the override supplied on
+// the command line (used by gateways that pin a specific provider).
+func (s *acpServer) applyProviderOverride(cfg *config.Config) {
+	if cfg == nil || s.providerOverride == "" {
+		return
+	}
+	cfg.Defaults.Provider = s.providerOverride
 }
 
 type acpSession struct {
@@ -163,6 +176,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		}
 		cfg, _ := loadConfig(s.cfgPath)
 		if cfg != nil {
+			s.applyProviderOverride(cfg)
 			if prov, err := buildProvider(cfg, cfg.Defaults.Provider); err == nil {
 				res.AgentCapabilities.PromptCapabilities.Image = prov.Capabilities().Images
 			}
@@ -222,6 +236,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			_ = s.conn.SendError(req.ID, acp.ErrProviderConfiguration, err.Error())
 			return
 		}
+		s.applyProviderOverride(cfg)
 
 		if _, ok := cfg.Providers[cfg.Defaults.Provider]; !ok {
 			defaults := config.DefaultConfig()
@@ -232,6 +247,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 
 		opts := RunOptions{
 			Workspace: params.CWD,
+			RunDir:    params.RunDir,
 		}
 
 		comp, err := BuildRunComponents(cfg, opts)

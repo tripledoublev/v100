@@ -49,6 +49,9 @@ const (
 	MethodSessionClose        = "session/close"
 	MethodSessionCancel       = "session/cancel"
 	MethodSessionUpdate       = "session/update"
+	// MethodConnectionClosed is a synthetic notification emitted by the client
+	// when the underlying transport reaches EOF or errors.
+	MethodConnectionClosed = "connection/closed"
 )
 
 const (
@@ -169,6 +172,7 @@ type SessionCapabilities struct {
 type SessionNewParams struct {
 	SessionID string `json:"sessionId,omitempty"`
 	CWD       string `json:"cwd,omitempty"`
+	RunDir    string `json:"runDir,omitempty"`
 }
 
 type SessionNewResult struct {

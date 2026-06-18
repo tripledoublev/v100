@@ -27,6 +27,7 @@ type Config struct {
 	Update     UpdateConfig              `toml:"update"`
 	ATProto    ATProtoConfig             `toml:"atproto"`
 	ATProtoAlt ATProtoConfig             `toml:"alt-atproto"`
+	Telegram   TelegramConfig            `toml:"telegram"`
 	Embedding  EmbeddingConfig           `toml:"embedding"`
 }
 
@@ -42,6 +43,20 @@ type ATProtoConfig struct {
 	AppPassword    string `toml:"app_password"`     // direct value (fallback)
 	AppPasswordEnv string `toml:"app_password_env"` // env var name (preferred)
 	PDSURL         string `toml:"pds_url"`          // default "https://bsky.social"
+}
+
+// TelegramConfig holds credentials and run behavior for Telegram gateway.
+type TelegramConfig struct {
+	Enabled           bool    `toml:"enabled"`
+	BotToken          string  `toml:"bot_token"`               // direct bot token value
+	BotTokenEnv       string  `toml:"bot_token_env"`           // env var name (preferred)
+	PollTimeoutSec    int     `toml:"poll_timeout_seconds"`    // getUpdates timeout
+	RunDir            string  `toml:"run_dir"`                 // optional runs base directory
+	Workspace         string  `toml:"workspace"`               // optional working directory for tool execution
+	StreamResponses   bool    `toml:"stream_responses"`        // send chunk updates as they arrive
+	StatusIntervalSec int     `toml:"status_interval_seconds"` // status update throttle
+	AllowedChatIDs    []int64 `toml:"allowed_chat_ids"`        // whitelist of chat IDs
+	Provider          string  `toml:"provider"`                // override defaults.provider for the ACP child (empty = inherit)
 }
 
 // UpdateConfig defines auto-update behavior.
@@ -339,6 +354,15 @@ func DefaultConfig() *Config {
 			CompressProvider:      "glm",
 			StaleToolElideSteps:   20,
 		},
+		Telegram: TelegramConfig{
+			Enabled:           false,
+			BotTokenEnv:       "V100_TELEGRAM_BOT_TOKEN",
+			PollTimeoutSec:    30,
+			RunDir:            "",
+			Workspace:         "",
+			StreamResponses:   true,
+			StatusIntervalSec: 2,
+		},
 		UI: UIConfig{
 			Theme: "v100",
 		},
@@ -499,6 +523,17 @@ budget_cost_usd = 0.0
 
 [update]
 check_interval = "24h"
+
+[telegram]
+enabled = false
+bot_token = ""
+bot_token_env = "V100_TELEGRAM_BOT_TOKEN"
+poll_timeout_seconds = 30
+run_dir = ""                    # optional override of runs/ base directory
+workspace = ""                  # optional override of workspace used by sessions
+stream_responses = true         # stream agent responses via update notifications
+status_interval_seconds = 2
+allowed_chat_ids = []            # optional allowlist; empty means allow all chats
 `
 }
 
@@ -585,6 +620,7 @@ func loadConfigFile(path string) (*Config, error) {
 	applySandboxDefaults(&cfg.Sandbox, DefaultConfig().Sandbox)
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
+	applyTelegramDefaults(&cfg.Telegram, DefaultConfig().Telegram)
 	if cfg.Embedding.Provider == "" {
 		cfg.Embedding.Provider = DefaultConfig().Embedding.Provider
 	}
@@ -769,6 +805,21 @@ func applyUpdateDefaults(dst *UpdateConfig, defaults UpdateConfig) {
 	}
 	if strings.TrimSpace(dst.CheckInterval) == "" {
 		dst.CheckInterval = defaults.CheckInterval
+	}
+}
+
+func applyTelegramDefaults(dst *TelegramConfig, defaults TelegramConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.BotTokenEnv) == "" {
+		dst.BotTokenEnv = defaults.BotTokenEnv
+	}
+	if dst.PollTimeoutSec <= 0 {
+		dst.PollTimeoutSec = defaults.PollTimeoutSec
+	}
+	if dst.StatusIntervalSec <= 0 {
+		dst.StatusIntervalSec = defaults.StatusIntervalSec
 	}
 }
 
