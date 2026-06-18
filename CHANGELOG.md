@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.4 — 2026-06-18
+
+**Telegram Gateway**
+
+### Features
+
+- Added `v100 gateway telegram`, a Telegram bot gateway that drives v100 through ACP sessions.
+- Added Telegram configuration for bot token environment fallback, chat allowlisting, workspace/run directory selection, streaming responses, status throttling, and provider overrides.
+- Added an ACP client helper for child-process gateway integrations.
+- Added optional voice/audio transcription support through `V100_TRANSCRIBE_CMD` or a `v100-transcribe` shim.
+
+### Fixes
+
+- Kept Telegram gateway `run_dir` and `workspace` separate so run storage does not become the agent working directory.
+- Redacted Telegram bot tokens from transport-level error messages before logging.
+
 ## v0.3.3 — 2026-06-13
 
 **TUI, ACP, and Sub-Agent Control**
