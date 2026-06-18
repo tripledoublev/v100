@@ -101,9 +101,10 @@ func TestNormalizeTelegramConfigCapturesAllowedChats(t *testing.T) {
 type telegramTestClient struct {
 	callCount  atomic.Int32
 	getUpdates []telegramUpdate
+	lastPrompt acp.SessionPromptParams
 }
 
-func (c *telegramTestClient) Call(_ context.Context, method string, _ any, out any) error {
+func (c *telegramTestClient) Call(_ context.Context, method string, params any, out any) error {
 	c.callCount.Add(1)
 	switch method {
 	case acp.MethodSessionNew:
@@ -111,6 +112,9 @@ func (c *telegramTestClient) Call(_ context.Context, method string, _ any, out a
 			params.SessionID = "tg-session"
 		}
 	case acp.MethodSessionPrompt:
+		if p, ok := params.(acp.SessionPromptParams); ok {
+			c.lastPrompt = p
+		}
 		if res, ok := out.(*acp.SessionPromptResult); ok {
 			res.StopReason = "end_turn"
 		}
@@ -187,12 +191,16 @@ type telegramCallCapture struct {
 	mu      sync.Mutex
 	methods []string
 	texts   []string
+	params  []map[string]any
 }
 
 func (c *telegramCallCapture) call(method string, params any, _ any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.methods = append(c.methods, method)
+	if m, ok := params.(map[string]any); ok {
+		c.params = append(c.params, m)
+	}
 	if method == "sendMessage" {
 		if m, ok := params.(map[string]any); ok {
 			if text, ok := m["text"].(string); ok {
@@ -207,6 +215,17 @@ func (c *telegramCallCapture) methodsCalled() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.methods)
+}
+
+func (c *telegramCallCapture) calledMethod(method string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, got := range c.methods {
+		if got == method {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *telegramCallCapture) sentTexts() []string {
@@ -259,6 +278,15 @@ type telegramVoiceRoundTripper struct {
 	updates   []telegramUpdate
 	filePath  string
 	audio     []byte
+	getFileN  int
+	downloadN int
+}
+
+type telegramPhotoRoundTripper struct {
+	mu        sync.Mutex
+	updates   []telegramUpdate
+	filePath  string
+	image     []byte
 	getFileN  int
 	downloadN int
 }
@@ -334,6 +362,44 @@ func (r *telegramVoiceRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	}
 }
 
+func (r *telegramPhotoRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	p := req.URL.Path
+	switch {
+	case strings.HasSuffix(p, "/getUpdates"):
+		body, _ := json.Marshal(struct {
+			OK     bool             `json:"ok"`
+			Result []telegramUpdate `json:"result"`
+		}{OK: true, Result: r.updates})
+		return jsonResp(body), nil
+	case strings.HasSuffix(p, "/getFile"):
+		r.mu.Lock()
+		r.getFileN++
+		r.mu.Unlock()
+		body, _ := json.Marshal(struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				FilePath string `json:"file_path"`
+			} `json:"result"`
+		}{OK: true, Result: struct {
+			FilePath string `json:"file_path"`
+		}{FilePath: r.filePath}})
+		return jsonResp(body), nil
+	case strings.Contains(p, "/file/bot"):
+		r.mu.Lock()
+		r.downloadN++
+		r.mu.Unlock()
+		resp := jsonResp(r.image)
+		resp.Header.Set("Content-Type", "image/jpeg")
+		return resp, nil
+	default: // sendMessage / sendChatAction / setMessageReaction
+		body, _ := json.Marshal(struct {
+			OK     bool `json:"ok"`
+			Result bool `json:"result"`
+		}{OK: true, Result: true})
+		return jsonResp(body), nil
+	}
+}
+
 func TestTelegramMessageAudioFilePrefersVoice(t *testing.T) {
 	m := &telegramMessage{
 		Voice: &telegramFile{FileID: "voice-1"},
@@ -355,6 +421,29 @@ func TestTelegramMessageAudioFilePrefersVoice(t *testing.T) {
 
 	if (&telegramMessage{Text: "hi"}).audioFile() != nil {
 		t.Fatal("text-only message should have no audio file")
+	}
+}
+
+func TestTelegramMessageTextContentPrefersTextOverCaption(t *testing.T) {
+	m := &telegramMessage{Text: " text ", Caption: "caption"}
+	if got := m.textContent(); got != " text " {
+		t.Fatalf("textContent = %q, want text", got)
+	}
+	m = &telegramMessage{Caption: "caption"}
+	if got := m.textContent(); got != "caption" {
+		t.Fatalf("textContent = %q, want caption", got)
+	}
+}
+
+func TestTelegramMessagePhotoFileSelectsLargest(t *testing.T) {
+	m := &telegramMessage{Photo: []telegramPhotoSize{
+		{FileID: "small", Width: 100, Height: 100},
+		{FileID: "large", Width: 640, Height: 480},
+		{FileID: "   ", Width: 9999, Height: 9999},
+	}}
+	got := m.photoFile()
+	if got == nil || got.FileID != "large" {
+		t.Fatalf("photoFile = %+v, want large", got)
 	}
 }
 
@@ -429,8 +518,9 @@ func TestPollOnceTranscribesVoiceMessage(t *testing.T) {
 		updates: []telegramUpdate{{
 			UpdateID: 7001,
 			Message: &telegramMessage{
-				Voice: &telegramFile{FileID: "voice-abc"},
-				Chat:  telegramChat{ID: 123},
+				Voice:     &telegramFile{FileID: "voice-abc"},
+				MessageID: 44,
+				Chat:      telegramChat{ID: 123},
 			},
 		}},
 		filePath: "voice/file_1.oga",
@@ -468,6 +558,79 @@ func TestPollOnceTranscribesVoiceMessage(t *testing.T) {
 	}
 	if !foundEcho {
 		t.Fatalf("expected transcript echo in sent messages, got %v", callCapture.sentTexts())
+	}
+	if !callCapture.calledMethod("setMessageReaction") {
+		t.Fatalf("expected ack reaction for actionable voice message")
+	}
+}
+
+func TestPollOnceForwardsPhotoAsImagePromptAndReacts(t *testing.T) {
+	workspace := t.TempDir()
+	rt := &telegramPhotoRoundTripper{
+		updates: []telegramUpdate{{
+			UpdateID: 7101,
+			Message: &telegramMessage{
+				MessageID: 55,
+				Caption:   "post this to bluesky",
+				Photo: []telegramPhotoSize{
+					{FileID: "photo-small", Width: 90, Height: 90},
+					{FileID: "photo-large", Width: 1280, Height: 720, FileSize: 1234},
+				},
+				Chat: telegramChat{ID: 123},
+			},
+		}},
+		filePath: "photos/file_1.jpg",
+		image:    []byte("\xff\xd8\xff\xe0fake-jpeg"),
+	}
+	client := &telegramTestClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx:             context.Background(),
+		cfg:             telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1, Workspace: workspace},
+		http:            &http.Client{Transport: rt},
+		token:           "123:test",
+		cli:             client,
+		telegramCallFn:  callCapture.call,
+		sessionsByChat:  make(map[int64]*telegramGatewaySession),
+		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+	}
+
+	if err := gw.pollOnce(); err != nil {
+		t.Fatalf("pollOnce returned error: %v", err)
+	}
+
+	if rt.getFileN != 1 || rt.downloadN != 1 {
+		t.Fatalf("expected one getFile + one download, got getFile=%d download=%d", rt.getFileN, rt.downloadN)
+	}
+	if !callCapture.calledMethod("setMessageReaction") {
+		t.Fatalf("expected ack reaction for actionable photo message")
+	}
+	if got := client.lastPrompt.Prompt; len(got) != 2 {
+		t.Fatalf("prompt blocks = %d, want 2: %#v", len(got), got)
+	} else {
+		if got[0].Type != "text" || !strings.Contains(got[0].Text, "post this to bluesky") {
+			t.Fatalf("unexpected text prompt block: %#v", got[0])
+		}
+		if !strings.Contains(got[0].Text, "atproto_upload_blob") || !strings.Contains(got[0].Text, ".v100-telegram-images") {
+			t.Fatalf("expected prompt to include saved image tool guidance, got: %q", got[0].Text)
+		}
+		if got[1].Type != "image" || got[1].MimeType != "image/jpeg" || got[1].Data == "" {
+			t.Fatalf("unexpected image prompt block: %#v", got[1])
+		}
+	}
+	matches, err := filepath.Glob(filepath.Join(workspace, ".v100-telegram-images", "*"))
+	if err != nil {
+		t.Fatalf("glob saved image: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("saved image count = %d, want 1 in %s", len(matches), workspace)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read saved image: %v", err)
+	}
+	if string(data) != string(rt.image) {
+		t.Fatalf("saved image data = %q, want %q", string(data), string(rt.image))
 	}
 }
 
@@ -533,7 +696,7 @@ func TestHandleTelegramMessageRejectsDisallowedChat(t *testing.T) {
 		sessionsByAcpID: make(map[string]*telegramGatewaySession),
 	}
 
-	if err := gw.handleTelegramMessage(999, "should be ignored"); err != nil {
+	if err := gw.handleTelegramMessage(999, "should be ignored", nil); err != nil {
 		t.Fatalf("handleTelegramMessage returned error: %v", err)
 	}
 	if client.callCount.Load() != 0 {

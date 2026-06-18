@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -25,8 +27,10 @@ const (
 	telegramAPIBase               = "https://api.telegram.org/bot"
 	telegramFileBase              = "https://api.telegram.org/file/bot"
 	telegramMaxAudioBytes         = 20 << 20 // Telegram bot download cap (~20MB)
+	telegramMaxImageBytes         = 20 << 20 // Telegram bot download cap (~20MB)
 	telegramChunkChars            = 3900
 	telegramBusyMessage           = "Still processing previous request. Please wait for my reply first."
+	telegramAckReaction           = "👍"
 	telegramDefaultPollTimeoutSec = 30
 	telegramDefaultStatusInterval = 2 * time.Second
 	telegramPollRetryBase         = 1 * time.Second
@@ -82,6 +86,12 @@ type telegramGatewaySession struct {
 	output     strings.Builder
 	lastStatus time.Time
 	mu         sync.Mutex
+}
+
+type telegramImageAttachment struct {
+	MIMEType string
+	Data     []byte
+	Path     string
 }
 
 type telegramGateway struct {
@@ -340,7 +350,34 @@ func (g *telegramGateway) pollOnce() error {
 			continue
 		}
 
-		text := strings.TrimSpace(update.Message.Text)
+		text := strings.TrimSpace(update.Message.textContent())
+		var images []telegramImageAttachment
+		if photo := update.Message.photoFile(); photo != nil {
+			data, mimeType, perr := g.downloadImage(photo.FileID)
+			if perr != nil {
+				if g.ctx.Err() != nil {
+					return nil
+				}
+				_ = g.sendChunks(chat.ID, []string{"Couldn't download your image."})
+				fmt.Fprintf(os.Stderr, "telegram gateway image download error: %v\n", redactTelegramTokenError(perr, g.token))
+				continue
+			}
+			img := telegramImageAttachment{MIMEType: mimeType, Data: data}
+			path, werr := g.saveTelegramImage(chat.ID, update.Message.MessageID, len(images), img)
+			if werr != nil {
+				if g.ctx.Err() != nil {
+					return nil
+				}
+				_ = g.sendChunks(chat.ID, []string{"Couldn't save your image for tool use."})
+				fmt.Fprintf(os.Stderr, "telegram gateway image save error: %v\n", werr)
+				continue
+			}
+			img.Path = path
+			images = append(images, img)
+			if text == "" {
+				text = "User sent an image."
+			}
+		}
 		if text == "" {
 			if audio := update.Message.audioFile(); audio != nil {
 				transcript, terr := g.transcribeVoice(chat.ID, audio)
@@ -357,7 +394,10 @@ func (g *telegramGateway) pollOnce() error {
 		if text == "" {
 			continue
 		}
-		if err := g.handleTelegramMessage(chat.ID, text); err != nil {
+		if err := g.reactToMessage(chat.ID, update.Message.MessageID); err != nil {
+			fmt.Fprintf(os.Stderr, "telegram gateway reaction error: %v\n", redactTelegramTokenError(err, g.token))
+		}
+		if err := g.handleTelegramMessage(chat.ID, text, images); err != nil {
 			if g.ctx.Err() != nil {
 				return nil
 			}
@@ -459,7 +499,7 @@ func (g *telegramGateway) chatAllowed(chatID int64) bool {
 	return ok
 }
 
-func (g *telegramGateway) handleTelegramMessage(chatID int64, text string) error {
+func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, images []telegramImageAttachment) error {
 	if !g.chatAllowed(chatID) {
 		return nil
 	}
@@ -484,7 +524,36 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string) error
 		state.mu.Unlock()
 	}()
 
-	prompt := []acp.ContentBlock{{Type: "text", Text: text}}
+	promptText := text
+	if len(images) > 0 {
+		var b strings.Builder
+		b.WriteString(text)
+		b.WriteString("\n\nTelegram image attachments were saved as local files for tool use:")
+		for i, img := range images {
+			if strings.TrimSpace(img.Path) == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "\n- image %d: %s", i+1, img.Path)
+		}
+		b.WriteString("\nIf the user asks to post an attached image to Bluesky, do not ask for a path. Use atproto_upload_blob with the saved image_path above, then pass the returned cid, mime, size, and alt to atproto_post images[].")
+		promptText = b.String()
+	}
+
+	prompt := []acp.ContentBlock{{Type: "text", Text: promptText}}
+	for _, img := range images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mimeType := strings.TrimSpace(img.MIMEType)
+		if mimeType == "" {
+			mimeType = "image/jpeg"
+		}
+		prompt = append(prompt, acp.ContentBlock{
+			Type:     "image",
+			Data:     base64.StdEncoding.EncodeToString(img.Data),
+			MimeType: mimeType,
+		})
+	}
 	var promptRes acp.SessionPromptResult
 	if err := g.cli.Call(g.ctx, acp.MethodSessionPrompt, acp.SessionPromptParams{
 		SessionID: state.sessionID,
@@ -602,6 +671,20 @@ func (g *telegramGateway) sendChatAction(chatID int64) error {
 	return g.telegramCallFn("sendChatAction", map[string]any{"chat_id": chatID, "action": "typing"}, nil)
 }
 
+func (g *telegramGateway) reactToMessage(chatID int64, messageID int) error {
+	if g.telegramCallFn == nil || messageID == 0 {
+		return nil
+	}
+	return g.telegramCallFn("setMessageReaction", map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"reaction": []map[string]string{{
+			"type":  "emoji",
+			"emoji": telegramAckReaction,
+		}},
+	}, nil)
+}
+
 func (g *telegramGateway) telegramCall(method string, params any, out any) error {
 	payload, err := json.Marshal(params)
 	if err != nil {
@@ -651,10 +734,23 @@ type telegramUpdate struct {
 }
 
 type telegramMessage struct {
-	Text  string        `json:"text"`
-	Voice *telegramFile `json:"voice"`
-	Audio *telegramFile `json:"audio"`
-	Chat  telegramChat  `json:"chat"`
+	MessageID int                 `json:"message_id"`
+	Text      string              `json:"text"`
+	Caption   string              `json:"caption"`
+	Photo     []telegramPhotoSize `json:"photo"`
+	Voice     *telegramFile       `json:"voice"`
+	Audio     *telegramFile       `json:"audio"`
+	Chat      telegramChat        `json:"chat"`
+}
+
+func (m *telegramMessage) textContent() string {
+	if m == nil {
+		return ""
+	}
+	if strings.TrimSpace(m.Text) != "" {
+		return m.Text
+	}
+	return m.Caption
 }
 
 // audioFile returns the voice note or audio attachment on the message, if any,
@@ -672,10 +768,43 @@ func (m *telegramMessage) audioFile() *telegramFile {
 	return nil
 }
 
+// photoFile returns the largest available photo size for image prompts.
+func (m *telegramMessage) photoFile() *telegramPhotoSize {
+	if m == nil || len(m.Photo) == 0 {
+		return nil
+	}
+	best := -1
+	bestScore := -1
+	for i := range m.Photo {
+		if strings.TrimSpace(m.Photo[i].FileID) == "" {
+			continue
+		}
+		score := m.Photo[i].FileSize
+		if score <= 0 {
+			score = m.Photo[i].Width * m.Photo[i].Height
+		}
+		if score > bestScore {
+			best = i
+			bestScore = score
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &m.Photo[best]
+}
+
 type telegramFile struct {
 	FileID   string `json:"file_id"`
 	MimeType string `json:"mime_type"`
 	Duration int    `json:"duration"`
+}
+
+type telegramPhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int    `json:"file_size"`
 }
 
 type telegramChat struct {
@@ -757,6 +886,88 @@ func (g *telegramGateway) downloadAudio(fileID string) (string, error) {
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+func (g *telegramGateway) downloadImage(fileID string) ([]byte, string, error) {
+	var info struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := g.telegramCall("getFile", map[string]any{"file_id": fileID}, &info); err != nil {
+		return nil, "", err
+	}
+	if strings.TrimSpace(info.FilePath) == "" {
+		return nil, "", fmt.Errorf("telegram getFile returned empty file_path")
+	}
+
+	req, err := http.NewRequestWithContext(g.ctx, http.MethodGet, telegramFileBase+g.token+"/"+info.FilePath, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return nil, "", redactTelegramTokenError(err, g.token)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("telegram file download failed: status=%d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, telegramMaxImageBytes+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(data) > telegramMaxImageBytes {
+		return nil, "", fmt.Errorf("telegram image exceeds %d bytes", telegramMaxImageBytes)
+	}
+
+	mimeType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if semi := strings.IndexByte(mimeType, ';'); semi >= 0 {
+		mimeType = strings.TrimSpace(mimeType[:semi])
+	}
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = mime.TypeByExtension(filepath.Ext(info.FilePath))
+	}
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = http.DetectContentType(data)
+	}
+	if !strings.HasPrefix(mimeType, "image/") {
+		return nil, "", fmt.Errorf("telegram file is not an image: %s", mimeType)
+	}
+	return data, mimeType, nil
+}
+
+func (g *telegramGateway) saveTelegramImage(chatID int64, messageID int, index int, img telegramImageAttachment) (string, error) {
+	if len(img.Data) == 0 {
+		return "", fmt.Errorf("empty image data")
+	}
+	dir := strings.TrimSpace(g.cfg.Workspace)
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = cwd
+	}
+	dir = filepath.Join(dir, ".v100-telegram-images")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+
+	ext := ".jpg"
+	if exts, _ := mime.ExtensionsByType(strings.TrimSpace(img.MIMEType)); len(exts) > 0 {
+		ext = exts[0]
+	}
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+	default:
+		ext = ".jpg"
+	}
+	name := fmt.Sprintf("telegram-%d-%d-%d-%d%s", chatID, messageID, index+1, time.Now().UnixNano(), ext)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, img.Data, 0o600); err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
 }
 
 // transcribeVoice downloads and transcribes a voice/audio attachment, replying
