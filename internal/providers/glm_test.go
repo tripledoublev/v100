@@ -46,10 +46,10 @@ func TestEstimateCostGLM(t *testing.T) {
 		output       int
 		expectedCost float64
 	}{
-		{"GLM-4.7", 1_000_000, 1_000_000, 0.0},      // subscription-based
-		{"GLM-4.5-air", 1_000_000, 1_000_000, 0.0},  // subscription-based
-		{"GLM-5-Turbo", 1_000_000, 1_000_000, 0.0},  // subscription-based
-		{"GLM-5.1", 1_000_000, 1_000_000, 0.0},      // subscription-based
+		{"GLM-4.7", 1_000_000, 1_000_000, 0.0},       // subscription-based
+		{"GLM-4.5-air", 1_000_000, 1_000_000, 0.0},   // subscription-based
+		{"GLM-5-Turbo", 1_000_000, 1_000_000, 0.0},   // subscription-based
+		{"GLM-5.1", 1_000_000, 1_000_000, 0.0},       // subscription-based
 		{"unknown-model", 1_000_000, 1_000_000, 0.0}, // default to 0
 	}
 
@@ -76,6 +76,43 @@ func TestGLMCapabilities(t *testing.T) {
 	}
 	if !caps.Streaming {
 		t.Error("expected Streaming=true")
+	}
+	if caps.Images {
+		t.Error("default GLM text model should not advertise Images=true")
+	}
+}
+
+func TestGLMCapabilitiesVisionModel(t *testing.T) {
+	t.Setenv("ZHIPU_API_KEY", "test-key")
+	p, err := NewGLMProvider("", "", "glm-5v-turbo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caps := p.Capabilities()
+	if !caps.Images {
+		t.Error("expected Images=true for GLM vision model")
+	}
+}
+
+func TestIsGLMVisionModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"glm-5v-turbo", true},
+		{"glm-4.6v", true},
+		{"GLM-4.6V-Flash", true},
+		{"glm-5.2", false},
+		{"glm-5.1", false},
+		{"glm-4.7-flash", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			if got := isGLMVisionModel(tt.model); got != tt.want {
+				t.Fatalf("isGLMVisionModel(%q) = %v, want %v", tt.model, got, tt.want)
+			}
+		})
 	}
 }
 

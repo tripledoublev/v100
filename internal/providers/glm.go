@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -36,6 +37,12 @@ func NewGLMProvider(authEnv, baseURL, model string) (*GLMProvider, error) {
 }
 
 func (p *GLMProvider) Name() string { return "glm" }
+
+func (p *GLMProvider) Capabilities() Capabilities {
+	caps := p.OpenAIProvider.Capabilities()
+	caps.Images = isGLMVisionModel(p.defaultModel)
+	return caps
+}
 
 func (p *GLMProvider) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
 	resp, err := p.OpenAIProvider.Complete(ctx, req)
@@ -90,6 +97,9 @@ func (p *GLMProvider) Metadata(ctx context.Context, model string) (ModelMetadata
 
 func (p *GLMProvider) Models() []ModelInfo {
 	return []ModelInfo{
+		{Name: "glm-5v-turbo", Description: "vision — image/video/text multimodal coding"},
+		{Name: "glm-4.6v", Description: "vision — image/text multimodal reasoning"},
+		{Name: "glm-4.5v", Description: "vision — image/text multimodal reasoning"},
 		{Name: "glm-5.1", Description: "flagship — long-horizon agents"},
 		{Name: "glm-5", Description: "powerful — agentic + coding"},
 		{Name: "glm-4.7", Description: "standard — enhanced coding + reasoning"},
@@ -101,6 +111,11 @@ func (p *GLMProvider) Models() []ModelInfo {
 		{Name: "glm-4.5-airx", Description: "reasoning — lightweight + fast"},
 		{Name: "glm-4.5-flash", Description: "reasoning — free"},
 	}
+}
+
+func isGLMVisionModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(m, "v-") || strings.HasSuffix(m, "v") || strings.Contains(m, "-v")
 }
 
 // estimateCostGLM returns a USD cost estimate for GLM models.
