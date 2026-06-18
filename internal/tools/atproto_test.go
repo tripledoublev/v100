@@ -1,8 +1,12 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -685,10 +689,12 @@ func TestATProtoPost_ImageOnlyPost(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{
 		"confirm": true,
 		"images": []map[string]any{{
-			"cid":  "bafkimg",
-			"mime": "image/png",
-			"size": 42,
-			"alt":  "a diagram",
+			"cid":    "bafkimg",
+			"mime":   "image/png",
+			"size":   42,
+			"alt":    "a diagram",
+			"width":  1080,
+			"height": 370,
 		}},
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
@@ -716,6 +722,13 @@ func TestATProtoPost_ImageOnlyPost(t *testing.T) {
 	if item["alt"] != "a diagram" {
 		t.Errorf("alt text mismatch: %v", item["alt"])
 	}
+	aspect, ok := item["aspectRatio"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected aspectRatio, got: %#v", item)
+	}
+	if aspect["width"] != float64(1080) || aspect["height"] != float64(370) {
+		t.Fatalf("aspectRatio mismatch: %#v", aspect)
+	}
 }
 
 func TestATProtoPost_QuoteWithImagesUsesRecordWithMedia(t *testing.T) {
@@ -740,9 +753,11 @@ func TestATProtoPost_QuoteWithImagesUsesRecordWithMedia(t *testing.T) {
 		"quote_cid": "origcid",
 		"confirm":   true,
 		"images": []map[string]any{{
-			"cid":  "bafkimg",
-			"mime": "image/jpeg",
-			"size": 99,
+			"cid":    "bafkimg",
+			"mime":   "image/jpeg",
+			"size":   99,
+			"width":  2,
+			"height": 1,
 		}},
 	})
 	result, err := tool.Exec(context.Background(), emptyCallCtx(), args)
@@ -766,6 +781,18 @@ func TestATProtoPost_QuoteWithImagesUsesRecordWithMedia(t *testing.T) {
 	media, ok := embed["media"].(map[string]any)
 	if !ok || media["$type"] != "app.bsky.embed.images" {
 		t.Fatalf("expected images media embed, got: %#v", embed["media"])
+	}
+	images, ok := media["images"].([]any)
+	if !ok || len(images) != 1 {
+		t.Fatalf("expected one image in media embed, got: %#v", media["images"])
+	}
+	item := images[0].(map[string]any)
+	aspect, ok := item["aspectRatio"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected aspectRatio in media image, got: %#v", item)
+	}
+	if aspect["width"] != float64(2) || aspect["height"] != float64(1) {
+		t.Fatalf("aspectRatio mismatch: %#v", aspect)
 	}
 }
 
@@ -920,7 +947,7 @@ func TestATProtoUploadBlob_RawBody(t *testing.T) {
 
 	dir := t.TempDir()
 	imagePath := filepath.Join(dir, "image.png")
-	data := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 1, 2, 3}
+	data := testPNG(t, 2, 1)
 	if err := os.WriteFile(imagePath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -950,6 +977,20 @@ func TestATProtoUploadBlob_RawBody(t *testing.T) {
 	if !strings.Contains(result.Output, `"cid":"bafkblob"`) || !strings.Contains(result.Output, `"alt":"alt"`) {
 		t.Fatalf("unexpected output: %s", result.Output)
 	}
+	if !strings.Contains(result.Output, `"width":2`) || !strings.Contains(result.Output, `"height":1`) {
+		t.Fatalf("expected image dimensions in output: %s", result.Output)
+	}
+}
+
+func testPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 // ---------------------------------------------------------------------------

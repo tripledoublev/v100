@@ -1,9 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
 	"net/url"
 	"os"
@@ -261,10 +266,12 @@ type atprotoPostArgs struct {
 	RepostURI  string `json:"repost_uri"`
 	RepostCID  string `json:"repost_cid"`
 	Images     []struct {
-		CID  string `json:"cid"`
-		Mime string `json:"mime"`
-		Size int64  `json:"size"`
-		Alt  string `json:"alt"`
+		CID    string `json:"cid"`
+		Mime   string `json:"mime"`
+		Size   int64  `json:"size"`
+		Alt    string `json:"alt"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
 	} `json:"images"`
 	Account string `json:"account"`
 	DryRun  bool   `json:"dry_run"`
@@ -283,7 +290,7 @@ func ATProtoCreateRecord(cfg *config.Config) Tool { return &atprotoCreateRecordT
 
 func (t *atprotoPostTool) Name() string { return "atproto_post" }
 func (t *atprotoPostTool) Description() string {
-	return "Publish to Bluesky with a dry-run preview and confirm=true requirement for real posts. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt - use atproto_upload_blob first). Quote+images are combined as a recordWithMedia embed. ATProto requests are protected by per-endpoint rate limits and a circuit breaker."
+	return "Publish to Bluesky with a dry-run preview and confirm=true requirement for real posts. Supports plain posts, replies (reply_to_uri + reply_to_cid), quote posts (quote_uri + quote_cid), reposts (repost_uri + repost_cid; text ignored), and image posts via the images array (each item: cid, mime, size, optional alt/width/height - use atproto_upload_blob first). Quote+images are combined as a recordWithMedia embed. ATProto requests are protected by per-endpoint rate limits and a circuit breaker."
 }
 func (t *atprotoPostTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoPostTool) Effects() ToolEffects {
@@ -402,7 +409,7 @@ func (t *atprotoPostTool) InputSchema() json.RawMessage {
 			"quote_cid":    {"type": "string",  "description": "CID of the post to quote (required with quote_uri)."},
 			"repost_uri":   {"type": "string",  "description": "AT URI of the post to repost (text not required)."},
 			"repost_cid":   {"type": "string",  "description": "CID of the post to repost (required with repost_uri)."},
-			"images":       {"type": "array",   "description": "Optional image attachments. Each item: {cid, mime, size, alt?}. Obtain cid/mime/size by calling atproto_upload_blob first.", "items": {"type": "object", "properties": {"cid": {"type": "string"}, "mime": {"type": "string"}, "size": {"type": "integer"}, "alt": {"type": "string"}}, "required": ["cid", "mime", "size"]}},
+			"images":       {"type": "array",   "description": "Optional image attachments. Each item: {cid, mime, size, alt?, width?, height?}. Obtain cid/mime/size/width/height by calling atproto_upload_blob first and pass width+height through to preserve Bluesky aspectRatio.", "items": {"type": "object", "properties": {"cid": {"type": "string"}, "mime": {"type": "string"}, "size": {"type": "integer"}, "alt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}}, "required": ["cid", "mime", "size"]}},
 			"account":      {"type": "string",  "description": "Which account to post from: \"main\" (default, charlebois.info) or \"alt\" (xx-c.art)."},
 			"dry_run":      {"type": "boolean", "description": "When true, return the exact post/repost preview without publishing."},
 			"confirm":      {"type": "boolean", "description": "Must be true to publish. When omitted or false, the tool returns a dry-run preview instead of posting."}
@@ -526,7 +533,7 @@ func buildATProtoPostPlan(in atprotoPostArgs, now time.Time) (atprotoPostPlan, e
 			if img.CID == "" || img.Mime == "" || img.Size <= 0 {
 				return atprotoPostPlan{}, fmt.Errorf("images[%d]: cid, mime, and size are required", i)
 			}
-			items[i] = map[string]any{
+			item := map[string]any{
 				"alt": img.Alt,
 				"image": map[string]any{
 					"$type":    "blob",
@@ -535,6 +542,13 @@ func buildATProtoPostPlan(in atprotoPostArgs, now time.Time) (atprotoPostPlan, e
 					"size":     img.Size,
 				},
 			}
+			if img.Width > 0 && img.Height > 0 {
+				item["aspectRatio"] = map[string]int{
+					"width":  img.Width,
+					"height": img.Height,
+				}
+			}
+			items[i] = item
 		}
 		imagesEmbed = map[string]any{
 			"$type":  "app.bsky.embed.images",
@@ -681,7 +695,7 @@ func ATProtoUploadBlob(cfg *config.Config) Tool { return &atprotoUploadBlobTool{
 func (t *atprotoUploadBlobTool) Name() string { return "atproto_upload_blob" }
 func (t *atprotoUploadBlobTool) Description() string {
 	return "Upload an image blob to Bluesky and return its CID for use in posts. " +
-		"Call this first, then pass the returned cid, mime, size, and optional alt to atproto_post via the images array."
+		"Call this first, then pass the returned cid, mime, size, width, height, and optional alt to atproto_post via the images array."
 }
 func (t *atprotoUploadBlobTool) DangerLevel() DangerLevel { return Safe }
 func (t *atprotoUploadBlobTool) Effects() ToolEffects {
@@ -708,7 +722,9 @@ func (t *atprotoUploadBlobTool) OutputSchema() json.RawMessage {
 			"cid":  {"type": "string"},
 			"mime": {"type": "string"},
 			"size": {"type": "integer"},
-			"alt":  {"type": "string"}
+			"alt":  {"type": "string"},
+			"width":  {"type": "integer"},
+			"height": {"type": "integer"}
 		}
 	}`)
 }
@@ -739,6 +755,7 @@ func (t *atprotoUploadBlobTool) Exec(_ context.Context, _ ToolCallContext, args 
 	if err != nil {
 		return ToolResult{OK: false, Output: "failed to read image file: " + err.Error()}, nil
 	}
+	width, height := imageDimensions(data)
 
 	// Detect MIME from file contents (magic bytes); fall back / cross-check
 	// against extension. http.DetectContentType reads up to the first 512 bytes.
@@ -764,13 +781,26 @@ func (t *atprotoUploadBlobTool) Exec(_ context.Context, _ ToolCallContext, args 
 		return ToolResult{OK: false, Output: err.Error()}, nil
 	}
 
-	out, _ := json.Marshal(map[string]any{
+	output := map[string]any{
 		"cid":  blob.CID,
 		"mime": blob.Mime,
 		"size": blob.Size,
 		"alt":  in.AltText,
-	})
+	}
+	if width > 0 && height > 0 {
+		output["width"] = width
+		output["height"] = height
+	}
+	out, _ := json.Marshal(output)
 	return CapToolResult(ToolResult{OK: true, Output: string(out)}), nil
+}
+
+func imageDimensions(data []byte) (int, int) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
 }
 
 func isSupportedBskyImage(mime string) bool {
