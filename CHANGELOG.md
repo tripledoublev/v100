@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.6 — 2026-06-19
+
+**Vision-Capable Gateway**
+
+### Fixes
+
+- Gated GLM image capability by model so text-only GLM models no longer advertise vision support; vision-capable GLM `*v*` models report `Images: true`.
+- Surfaced both the host upload path and the `/workspace/...` path for Telegram image attachments, and instructed the model to carry image `width`/`height` through to `atproto_post` so Bluesky `aspectRatio` is preserved deterministically.
+
 ## v0.3.5 — 2026-06-18
 
 **Telegram Gateway Image Posting**
