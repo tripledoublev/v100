@@ -1,0 +1,29 @@
+[defaults]
+provider = "glm"
+solver = "react"
+
+[signal]
+enabled = true
+account = "+1XXXXXXXXXX"
+socket = "/run/signal-cli.sock"
+rpc_mode = "socket"
+profile = "signal-vincent"
+allowed_numbers = ["+1XXXXXXXXXX"]
+stream_responses = true
+
+[atproto]
+handle = "your-handle.bsky.social"
+app_password_env = "V100_BSKY_APP_PASSWORD"
+
+[gateway.profiles.signal-vincent]
+tools = ["web_search", "web_extract", "wiki", "translate", "atproto_feed", "atproto_notifications", "atproto_resolve"]
+dangerous = []
+provider = "glm"
+solver = "react"
+network_tier = "research"
+budget_steps = 20
+budget_tokens = 40000
+system_prompt_path = "system_prompt_fr.md"
+allowed_commands = ["help", "reset"]
+reaction_mode = "random"
+reaction_emojis = ["👍", "😂", "🤔", "👀", "🔥", "💯", "🙂", "😅", "😁", "😆", "😎", "🙃", "😉", "😊", "😌", "😍", "🥰", "😘", "😋", "🤪", "🤓", "😴", "🤯", "🥳", "🫡", "😬", "😇", "😏", "😐", "😶", "😮", "😯", "😲", "😳", "🥺", "😭", "😤", "😡", "🤬", "🤭", "🫢", "🫣", "🙄", "😵", "😵‍💫", "🤠", "👋", "✌️", "🤙", "👌", "👏", "🙏", "💪", "🫶", "🫰", "🤝", "💥", "✨", "🌟", "⚡", "🔥", "💫", "🍿", "🍻", "🥂", "☕", "🍕", "🌮", "🍟", "🍩", "🍪", "🎯", "🎲", "🎮", "🎵", "🎉", "🥸", "🦊", "🧠", "🫠", "🫶🏻", "🫶🏽", "🫶🏿", "🤍", "🖤", "💙", "💚", "💛", "🧡", "❤️", "💜", "🤎", "💖", "💘", "💝", "💞", "💟", "✅", "❌", "⚠️", "⭐"]

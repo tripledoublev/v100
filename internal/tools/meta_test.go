@@ -9,9 +9,10 @@ import (
 )
 
 func TestInspectTool(t *testing.T) {
-	reg := tools.NewRegistry([]string{"fs_read", "inspect_tool"})
+	reg := tools.NewRegistry([]string{"fs_read", "inspect_tool", "translate"})
 	reg.Register(tools.FSRead())
 	reg.Register(tools.InspectTool())
+	reg.Register(tools.Translate())
 
 	ctx := context.Background()
 	call := tools.ToolCallContext{
@@ -40,6 +41,21 @@ func TestInspectTool(t *testing.T) {
 	}
 	if out.Description == "" {
 		t.Error("expected non-empty description")
+	}
+
+	args = json.RawMessage(`{"tool_name": "translate"}`)
+	res, err = tools.InspectTool().Exec(ctx, call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("translate inspect failed: %s", res.Output)
+	}
+	if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "translate" {
+		t.Errorf("expected name translate, got %s", out.Name)
 	}
 
 	// Test inspecting non-existent tool

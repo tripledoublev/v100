@@ -521,6 +521,7 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.NewDeepResearch(nil))
 	reg.Register(tools.SourceCode())
 	reg.Register(tools.NewsFetch())
+	reg.Register(tools.Translate())
 	reg.Register(tools.PatchApply())
 	reg.Register(tools.ProjectSearch())
 	reg.Register(tools.NewAgent(nil))
@@ -553,7 +554,23 @@ func buildToolRegistry(cfg *config.Config) *tools.Registry {
 	reg.Register(tools.ATProtoIndex(cfg))
 	reg.Register(tools.ATProtoRecall(cfg))
 	reg.Register(tools.ATProtoAnonSynth(cfg))
+	applyDangerousToolAllowlist(cfg, reg)
 	return reg
+}
+
+func applyDangerousToolAllowlist(cfg *config.Config, reg *tools.Registry) {
+	if cfg == nil || reg == nil {
+		return
+	}
+	allowed := map[string]bool{}
+	for _, name := range cfg.Tools.Dangerous {
+		allowed[strings.TrimSpace(name)] = true
+	}
+	for _, name := range reg.List() {
+		if reg.IsDangerous(name) && !allowed[name] {
+			reg.Disable(name)
+		}
+	}
 }
 
 func enabledToolSummary(reg *tools.Registry) string {

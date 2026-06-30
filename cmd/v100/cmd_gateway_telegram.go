@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tripledoublev/v100/internal/acp"
 	"github.com/tripledoublev/v100/internal/config"
+	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
 )
 
 const (
@@ -74,18 +77,15 @@ type telegramRuntimeConfig struct {
 	RunDir          string
 	Workspace       string
 	StreamResponses bool
+	VoiceReplies    bool
+	VoiceReplyMode  string
 	StatusInterval  time.Duration
 	AllowedChatIDs  map[int64]struct{}
 	Provider        string
-}
-
-type telegramGatewaySession struct {
-	chatID     int64
-	sessionID  string
-	inFlight   bool
-	output     strings.Builder
-	lastStatus time.Time
-	mu         sync.Mutex
+	Profile         string
+	ChatProfiles    map[string]string
+	Profiles        map[string]config.GatewayProfile
+	PromptBaseDir   string
 }
 
 type telegramImageAttachment struct {
@@ -100,18 +100,104 @@ type telegramGateway struct {
 	token      string
 	cfg        telegramRuntimeConfig
 	cli        telegramClient
+	core       *gatewaycore.Core
 	pollOffset int64
 
 	telegramCallFn func(method string, params any, out any) error
-
-	sessionsByChat  map[int64]*telegramGatewaySession
-	sessionsByAcpID map[string]*telegramGatewaySession
-	sessionsMu      sync.RWMutex
 
 	// acpClosed is closed exactly once when the ACP transport drops, so the
 	// poll loop can exit instead of prompting against a dead client.
 	acpClosed     chan struct{}
 	acpClosedOnce sync.Once
+}
+
+func (g *telegramGateway) gatewayCore() *gatewaycore.Core {
+	if g.core != nil {
+		return g.core
+	}
+	g.core = gatewaycore.NewCore(gatewaycore.Config{
+		SessionIDPrefix: "tg-",
+		RunDir:          g.cfg.RunDir,
+		Workspace:       g.cfg.Workspace,
+		StreamResponses: g.cfg.StreamResponses,
+		VoiceReplies:    g.cfg.VoiceReplies,
+		VoiceReplyMode:  g.cfg.VoiceReplyMode,
+		StatusInterval:  g.cfg.StatusInterval,
+		PollRetryBase:   telegramPollRetryBase,
+		PollRetryMax:    telegramPollRetryMax,
+		ChunkChars:      telegramChunkChars,
+		BusyMessage:     telegramBusyMessage,
+		PrepareSession: func(chatID string, params *acp.SessionNewParams) error {
+			return g.applyProfileToSessionParams(chatID, params)
+		},
+		BuildPrompt: telegramBuildPrompt,
+		VoiceSettings: func(chatID string) gatewaycore.VoiceConfig {
+			return gatewayVoiceConfig(g.cfg.VoiceReplies, g.cfg.VoiceReplyMode, g.effectiveGatewayProfile(chatID))
+		},
+	}, g.cli)
+	return g.core
+}
+
+func (g *telegramGateway) Name() string { return "telegram" }
+
+func (g *telegramGateway) SendText(_ context.Context, chatID string, chunks []string) error {
+	id, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return err
+	}
+	return g.sendChunks(id, chunks)
+}
+
+func (g *telegramGateway) SendVoice(ctx context.Context, chatID, audioPath string) error {
+	id, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return err
+	}
+	return g.sendVoice(ctx, id, audioPath)
+}
+
+func (g *telegramGateway) SendTyping(_ context.Context, chatID string) error {
+	id, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return err
+	}
+	return g.sendChatAction(id)
+}
+
+func (g *telegramGateway) React(_ context.Context, chatID, messageID, emoji string) error {
+	id, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return err
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return nil
+	}
+	msgID, err := strconv.Atoi(messageID)
+	if err != nil {
+		return fmt.Errorf("parse telegram message id %q: %w", messageID, err)
+	}
+	return g.reactToMessage(id, msgID)
+}
+
+func (g *telegramGateway) Allowed(chatID string) bool {
+	id, err := parseTelegramChatID(chatID)
+	if err != nil {
+		return false
+	}
+	return g.chatAllowed(id)
+}
+
+func parseTelegramChatID(chatID string) (int64, error) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return 0, fmt.Errorf("telegram chat id is required")
+	}
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse telegram chat id %q: %w", chatID, err)
+	}
+	return id, nil
 }
 
 func (g *telegramGateway) markACPClosed() {
@@ -128,37 +214,24 @@ func runTelegramGateway(ctx context.Context, cfgPath *string) error {
 	}
 	defer func() { _ = stop() }()
 
-	backoff := telegramPollRetryBase
-	for {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
 		select {
 		case <-gw.acpClosed:
-			return fmt.Errorf("telegram gateway: ACP connection closed")
-		default:
+			cancel()
+		case <-runCtx.Done():
 		}
-
-		if err := gw.pollOnce(); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-				return nil
-			}
-			fmt.Fprintf(os.Stderr, "telegram gateway poll error: %v\n", redactTelegramTokenError(err, gw.token))
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-gw.acpClosed:
-				return fmt.Errorf("telegram gateway: ACP connection closed")
-			case <-time.After(backoff):
-			}
-			if backoff < telegramPollRetryMax {
-				backoff *= 2
-				if backoff > telegramPollRetryMax {
-					backoff = telegramPollRetryMax
-				}
-			}
-			continue
-		}
-
-		backoff = telegramPollRetryBase
+	}()
+	if err := gw.gatewayCore().Run(runCtx, gw); err != nil {
+		return err
 	}
+	select {
+	case <-gw.acpClosed:
+		return fmt.Errorf("telegram gateway: ACP connection closed")
+	default:
+	}
+	return nil
 }
 
 func runTelegramGatewayOnce(ctx context.Context, cfgPath *string) error {
@@ -177,6 +250,8 @@ func setupTelegramGateway(ctx context.Context, cfgPath *string) (*telegramGatewa
 	}
 
 	normalizedCfg := normalizeTelegramConfig(cfg.Telegram)
+	normalizedCfg.Profiles = cfg.Gateway.Profiles
+	normalizedCfg.PromptBaseDir = cfg.PromptBaseDir()
 
 	token := strings.TrimSpace(cfg.Telegram.BotToken)
 	if token == "" && strings.TrimSpace(cfg.Telegram.BotTokenEnv) != "" {
@@ -190,28 +265,31 @@ func setupTelegramGateway(ctx context.Context, cfgPath *string) (*telegramGatewa
 	}
 
 	gw := &telegramGateway{
-		ctx:             ctx,
-		http:            &http.Client{Timeout: telegramHTTPClientTimeout(normalizedCfg.PollTimeout)},
-		token:           token,
-		cfg:             normalizedCfg,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
-		telegramCallFn:  nil,
-		acpClosed:       make(chan struct{}),
+		ctx:            ctx,
+		http:           &http.Client{Timeout: telegramHTTPClientTimeout(normalizedCfg.PollTimeout)},
+		token:          token,
+		cfg:            normalizedCfg,
+		telegramCallFn: nil,
+		acpClosed:      make(chan struct{}),
 	}
 
-	cli, stopServer, err := runACPServer(ctx, *cfgPath, normalizedCfg.Provider, func(note acp.Notification) {
-		_ = gw.handleACPNotification(note)
+	proc, err := gatewaycore.StartACPProcess(ctx, gatewaycore.ACPProcessOptions{
+		ConfigPath:      *cfgPath,
+		Provider:        normalizedCfg.Provider,
+		ShutdownTimeout: telegramShutdownTimeout,
+		OnNotification: func(note acp.Notification) {
+			_ = gw.handleACPNotification(note)
+		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	gw.cli = cli
+	gw.cli = proc.Client
 	gw.telegramCallFn = gw.telegramCall
 
 	return gw, func() error {
 		_ = gw.closeAllSessions()
-		return stopServer()
+		return proc.Stop()
 	}, nil
 }
 
@@ -244,10 +322,25 @@ func normalizeTelegramConfig(cfg config.TelegramConfig) telegramRuntimeConfig {
 		RunDir:          strings.TrimSpace(cfg.RunDir),
 		Workspace:       strings.TrimSpace(cfg.Workspace),
 		StreamResponses: cfg.StreamResponses,
+		VoiceReplies:    cfg.VoiceReplies,
+		VoiceReplyMode:  strings.TrimSpace(cfg.VoiceReplyMode),
 		StatusInterval:  statusInterval,
 		AllowedChatIDs:  allowedChatIDs,
 		Provider:        strings.TrimSpace(cfg.Provider),
+		Profile:         strings.TrimSpace(cfg.Profile),
+		ChatProfiles:    copyStringMap(cfg.ChatProfiles),
 	}
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func telegramHTTPClientTimeout(pollTimeoutSeconds int) time.Duration {
@@ -257,84 +350,13 @@ func telegramHTTPClientTimeout(pollTimeoutSeconds int) time.Duration {
 	return time.Duration(pollTimeoutSeconds+10) * time.Second
 }
 
-func runACPServer(ctx context.Context, cfgPath, provider string, onNotification func(acp.Notification)) (*acp.Client, func() error, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolve executable: %w", err)
-	}
-	exe, _ = filepath.EvalSymlinks(exe)
-
-	args := []string{"acp"}
-	if strings.TrimSpace(cfgPath) != "" {
-		args = append(args, "--config", cfgPath)
-	}
-	if strings.TrimSpace(provider) != "" {
-		args = append(args, "--provider", provider)
-	}
-
-	child := exec.CommandContext(ctx, exe, args...)
-	child.Stderr = os.Stderr
-
-	stdin, err := child.StdinPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("acp stdin: %w", err)
-	}
-	stdout, err := child.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, nil, fmt.Errorf("acp stdout: %w", err)
-	}
-
-	if err := child.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, nil, fmt.Errorf("start acp process: %w", err)
-	}
-
-	client := acp.NewClient(stdout, stdin, onNotification)
-	client.StartLaunch()
-
-	initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := initializeACP(initCtx, client); err != nil {
-		_ = child.Process.Kill()
-		_ = child.Wait()
-		return nil, nil, fmt.Errorf("initialize acp server: %w", err)
-	}
-
-	stop := func() error {
-		if ctx.Err() == nil {
-			finalizeCtx, cancel := context.WithTimeout(context.Background(), telegramShutdownTimeout)
-			_ = client.Call(finalizeCtx, acp.MethodFinalize, acp.FinalizeParams{Reason: "gateway_exit"}, nil)
-			cancel()
-		}
-		_ = child.Process.Kill()
-		return child.Wait()
-	}
-
-	return client, stop, nil
-}
-
-func initializeACP(ctx context.Context, cli *acp.Client) error {
-	var initRes acp.InitializeResult
-	return cli.Call(ctx, acp.MethodInitialize, acp.InitializeParams{
-		ProtocolVersion: acp.ProtocolVersion,
-		ClientInfo: acp.ClientInfo{
-			Name:    "v100-gateway",
-			Version: "dev",
-		},
-		ClientCapabilities: acp.ClientCapabilities{},
-	}, &initRes)
-}
-
-func (g *telegramGateway) pollOnce() error {
-	// pollOnce is intentionally single-flight: updates are handled sequentially.
-	// Concurrency per chat is not supported yet.
+func (g *telegramGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) {
 	updates, err := g.fetchUpdates()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	out := make([]gatewaycore.Update, 0, len(updates))
 	for _, update := range updates {
 		if update.UpdateID < g.pollOffset {
 			continue
@@ -355,8 +377,8 @@ func (g *telegramGateway) pollOnce() error {
 		if photo := update.Message.photoFile(); photo != nil {
 			data, mimeType, perr := g.downloadImage(photo.FileID)
 			if perr != nil {
-				if g.ctx.Err() != nil {
-					return nil
+				if ctx.Err() != nil {
+					return nil, nil
 				}
 				_ = g.sendChunks(chat.ID, []string{"Couldn't download your image."})
 				fmt.Fprintf(os.Stderr, "telegram gateway image download error: %v\n", redactTelegramTokenError(perr, g.token))
@@ -365,8 +387,8 @@ func (g *telegramGateway) pollOnce() error {
 			img := telegramImageAttachment{MIMEType: mimeType, Data: data}
 			path, werr := g.saveTelegramImage(chat.ID, update.Message.MessageID, len(images), img)
 			if werr != nil {
-				if g.ctx.Err() != nil {
-					return nil
+				if ctx.Err() != nil {
+					return nil, nil
 				}
 				_ = g.sendChunks(chat.ID, []string{"Couldn't save your image for tool use."})
 				fmt.Fprintf(os.Stderr, "telegram gateway image save error: %v\n", werr)
@@ -382,8 +404,8 @@ func (g *telegramGateway) pollOnce() error {
 			if audio := update.Message.audioFile(); audio != nil {
 				transcript, terr := g.transcribeVoice(chat.ID, audio)
 				if terr != nil {
-					if g.ctx.Err() != nil {
-						return nil
+					if ctx.Err() != nil {
+						return nil, nil
 					}
 					fmt.Fprintf(os.Stderr, "telegram gateway transcription error: %v\n", redactTelegramTokenError(terr, g.token))
 					continue
@@ -394,10 +416,39 @@ func (g *telegramGateway) pollOnce() error {
 		if text == "" {
 			continue
 		}
-		if err := g.reactToMessage(chat.ID, update.Message.MessageID); err != nil {
-			fmt.Fprintf(os.Stderr, "telegram gateway reaction error: %v\n", redactTelegramTokenError(err, g.token))
+		if command, ok := gatewaycore.ParseCommand(text); ok {
+			if err := g.reactToMessage(chat.ID, update.Message.MessageID); err != nil {
+				fmt.Fprintf(os.Stderr, "telegram gateway reaction error: %v\n", redactTelegramTokenError(err, g.token))
+			}
+			if err := g.handleTelegramCommand(chat.ID, command); err != nil {
+				if ctx.Err() != nil {
+					return nil, nil
+				}
+				fmt.Fprintf(os.Stderr, "telegram gateway command error: %v\n", redactTelegramTokenError(err, g.token))
+				continue
+			}
+			continue
 		}
-		if err := g.handleTelegramMessage(chat.ID, text, images); err != nil {
+		out = append(out, gatewaycore.Update{
+			ChatID:    strconv.FormatInt(chat.ID, 10),
+			MessageID: strconv.Itoa(update.Message.MessageID),
+			Text:      text,
+			Images:    telegramGatewayImages(images),
+		})
+	}
+
+	return out, nil
+}
+
+func (g *telegramGateway) pollOnce() error {
+	// pollOnce is intentionally single-flight: updates are handled sequentially.
+	// Concurrency per chat is not supported yet.
+	updates, err := g.Poll(g.ctx)
+	if err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if err := g.gatewayCore().Handle(g.ctx, g, update); err != nil {
 			if g.ctx.Err() != nil {
 				return nil
 			}
@@ -405,7 +456,6 @@ func (g *telegramGateway) pollOnce() error {
 			continue
 		}
 	}
-
 	return nil
 }
 
@@ -431,62 +481,7 @@ func (g *telegramGateway) handleACPNotification(note acp.Notification) error {
 		g.markACPClosed()
 		return nil
 	}
-	if note.Method != acp.MethodSessionUpdate {
-		return nil
-	}
-
-	var update acp.SessionUpdateParams
-	if err := json.Unmarshal(note.Params, &update); err != nil {
-		fmt.Fprintf(os.Stderr, "telegram gateway: dropping malformed %s payload: %v\n", note.Method, err)
-		return nil
-	}
-
-	if strings.TrimSpace(update.SessionID) == "" {
-		return nil
-	}
-
-	g.sessionsMu.RLock()
-	state := g.sessionsByAcpID[update.SessionID]
-	g.sessionsMu.RUnlock()
-	if state == nil {
-		return nil
-	}
-
-	switch update.Update.Type {
-	case "agent_message_chunk":
-		if update.Update.Content == nil || strings.TrimSpace(update.Update.Content.Text) == "" {
-			return nil
-		}
-		// Streaming sends from the ACP reader loop; the gateway is currently
-		// single-flight, so a slow Telegram API only delays this in-flight turn.
-		if g.cfg.StreamResponses {
-			return g.sendChunks(state.chatID, splitText(update.Update.Content.Text))
-		}
-		state.mu.Lock()
-		state.output.WriteString(update.Update.Content.Text)
-		state.mu.Unlock()
-	case "run_status_update":
-		if update.Update.Status != "in_progress" {
-			return nil
-		}
-		state.mu.Lock()
-		since := time.Since(state.lastStatus)
-		state.mu.Unlock()
-		if since < g.cfg.StatusInterval {
-			return nil
-		}
-		if err := g.sendChatAction(state.chatID); err == nil {
-			state.mu.Lock()
-			state.lastStatus = time.Now()
-			state.mu.Unlock()
-		}
-	case "run_error":
-		if strings.TrimSpace(update.Update.Status) == "failed" {
-			return g.sendChunkToChat(state.chatID, "Run failed. Check the run log for details.")
-		}
-	}
-
-	return nil
+	return g.gatewayCore().HandleNotification(g.ctx, g, note)
 }
 
 // chatAllowed reports whether the gateway should act on messages from chatID.
@@ -503,38 +498,48 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, image
 	if !g.chatAllowed(chatID) {
 		return nil
 	}
-
-	state, err := g.getOrCreateSession(chatID)
-	if err != nil {
-		return err
+	if command, ok := gatewaycore.ParseCommand(text); ok {
+		return g.handleTelegramCommand(chatID, command)
 	}
 
-	state.mu.Lock()
-	if state.inFlight {
-		state.mu.Unlock()
-		return g.sendChunks(chatID, []string{telegramBusyMessage})
+	return g.gatewayCore().Handle(g.ctx, g, gatewaycore.Update{
+		ChatID: strconv.FormatInt(chatID, 10),
+		Text:   text,
+		Images: telegramGatewayImages(images),
+	})
+}
+
+func telegramWorkspacePath(workspace, imagePath string) string {
+	return gatewaycore.WorkspacePath(workspace, imagePath)
+}
+
+func telegramGatewayImages(images []telegramImageAttachment) []gatewaycore.ImageAttachment {
+	if len(images) == 0 {
+		return nil
 	}
-	state.inFlight = true
-	state.output.Reset()
-	state.mu.Unlock()
+	out := make([]gatewaycore.ImageAttachment, 0, len(images))
+	for _, img := range images {
+		out = append(out, gatewaycore.ImageAttachment{
+			MIMEType: img.MIMEType,
+			Data:     img.Data,
+			Path:     img.Path,
+		})
+	}
+	return out
+}
 
-	defer func() {
-		state.mu.Lock()
-		state.inFlight = false
-		state.mu.Unlock()
-	}()
-
-	promptText := text
-	if len(images) > 0 {
+func telegramBuildPrompt(workspace string, update gatewaycore.Update) []acp.ContentBlock {
+	promptText := update.Text
+	if len(update.Images) > 0 {
 		var b strings.Builder
-		b.WriteString(text)
+		b.WriteString(update.Text)
 		b.WriteString("\n\nTelegram image attachments were saved as local files for tool use:")
-		for i, img := range images {
+		for i, img := range update.Images {
 			if strings.TrimSpace(img.Path) == "" {
 				continue
 			}
 			fmt.Fprintf(&b, "\n- image %d upload path: %s", i+1, img.Path)
-			if workspacePath := telegramWorkspacePath(g.cfg.Workspace, img.Path); workspacePath != "" {
+			if workspacePath := telegramWorkspacePath(workspace, img.Path); workspacePath != "" {
 				fmt.Fprintf(&b, "\n  workspace path: %s", workspacePath)
 			}
 		}
@@ -543,7 +548,7 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, image
 	}
 
 	prompt := []acp.ContentBlock{{Type: "text", Text: promptText}}
-	for _, img := range images {
+	for _, img := range update.Images {
 		if len(img.Data) == 0 {
 			continue
 		}
@@ -557,104 +562,167 @@ func (g *telegramGateway) handleTelegramMessage(chatID int64, text string, image
 			MimeType: mimeType,
 		})
 	}
-	var promptRes acp.SessionPromptResult
-	if err := g.cli.Call(g.ctx, acp.MethodSessionPrompt, acp.SessionPromptParams{
-		SessionID: state.sessionID,
-		Prompt:    prompt,
-	}, &promptRes); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		return g.sendChunks(chatID, []string{fmt.Sprintf("v100 error: %v", err)})
+	return prompt
+}
+
+func (g *telegramGateway) handleTelegramCommand(chatID int64, command gatewaycore.Command) error {
+	if !g.commandAllowed(chatID, command.Name) {
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Command /%s is not allowed for this chat.", command.Name))
 	}
 
-	if g.cfg.StreamResponses {
-		if promptRes.StopReason != "" && promptRes.StopReason != "end_turn" {
-			return g.sendChunks(chatID, []string{fmt.Sprintf("Stopped: %s", promptRes.StopReason)})
+	switch command.Name {
+	case "help":
+		return g.sendChunkToChat(chatID, g.telegramCommandHelp(chatID))
+	case "whoami":
+		return g.sendChunkToChat(chatID, g.telegramCommandWhoami(chatID))
+	case "status":
+		return g.sendChunkToChat(chatID, g.telegramCommandStatus(chatID))
+	case "provider", "model", "solver":
+		return g.reconfigureTelegramSession(chatID, command)
+	case "profile":
+		return g.switchTelegramProfile(chatID, command.Arg)
+	case "reset":
+		return g.resetTelegramSession(chatID)
+	default:
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Unknown command /%s. Try /help.", command.Name))
+	}
+}
+
+func (g *telegramGateway) commandAllowed(chatID int64, command string) bool {
+	runtime := g.effectiveGatewayProfile(strconv.FormatInt(chatID, 10))
+	return gatewaycore.CommandAllowed(runtime.Profile, strings.TrimSpace(runtime.Name) != "", command)
+}
+
+func (g *telegramGateway) telegramCommandHelp(chatID int64) string {
+	commands := []string{"help", "whoami", "status", "reset"}
+	if runtime := g.effectiveGatewayProfile(strconv.FormatInt(chatID, 10)); runtime.OK {
+		commands = runtime.Profile.AllowedCommands
+	}
+	if len(commands) == 0 {
+		return "No commands are enabled for this chat."
+	}
+	var b strings.Builder
+	b.WriteString("Available commands:")
+	for _, command := range commands {
+		command = gatewaycore.NormalizeCommandName(command)
+		if command == "" {
+			continue
 		}
+		fmt.Fprintf(&b, "\n/%s", command)
+	}
+	return b.String()
+}
+
+func (g *telegramGateway) telegramCommandWhoami(chatID int64) string {
+	runtime := g.effectiveGatewayProfile(strconv.FormatInt(chatID, 10))
+	profileName := runtime.Name
+	if !runtime.OK {
+		profileName = "(none)"
+	}
+	profile := runtime.Profile
+	sessionID := "(none)"
+	if info, ok := g.gatewayCore().SessionInfo(strconv.FormatInt(chatID, 10)); ok {
+		sessionID = info.SessionID
+	}
+	provider := strings.TrimSpace(profile.Provider)
+	if provider == "" {
+		provider = "(default)"
+	}
+	model := strings.TrimSpace(profile.Model)
+	if model == "" {
+		model = "(default)"
+	}
+	solver := strings.TrimSpace(profile.Solver)
+	if solver == "" {
+		solver = "(default)"
+	}
+	return fmt.Sprintf("ChatID: %d\nProfile: %s\nProvider: %s\nModel: %s\nSolver: %s\nTools: %d\nSession: %s", chatID, profileName, provider, model, solver, len(profile.Tools), sessionID)
+}
+
+func (g *telegramGateway) telegramCommandStatus(chatID int64) string {
+	info, ok := g.gatewayCore().SessionInfo(strconv.FormatInt(chatID, 10))
+	if !ok {
+		return "No active session for this chat."
+	}
+	status := "idle"
+	if info.InFlight {
+		status = "busy"
+	}
+	last := "never"
+	if !info.LastStatus.IsZero() {
+		last = info.LastStatus.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("Status: %s\nSession: %s\nRun dir: %s\nLast activity: %s", status, info.SessionID, g.cfg.RunDir, last)
+}
+
+func (g *telegramGateway) reconfigureTelegramSession(chatID int64, command gatewaycore.Command) error {
+	res, err := g.gatewayCore().ReconfigureSession(g.ctx, strconv.FormatInt(chatID, 10), command)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "usage:") {
+			return g.sendChunkToChat(chatID, fmt.Sprintf("Usage: /%s <value>", command.Name))
+		}
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Reconfigure failed: %v", err))
+	}
+	if res.SessionID == "" && res.Provider == "" && res.Model == "" && res.Solver == "" {
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Usage: /%s <value>", command.Name))
+	}
+	return g.sendChunkToChat(chatID, fmt.Sprintf("Runtime updated.\nProvider: %s\nModel: %s\nSolver: %s", res.Provider, res.Model, res.Solver))
+}
+
+func (g *telegramGateway) switchTelegramProfile(chatID int64, profileName string) error {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		return g.sendChunkToChat(chatID, "Usage: /profile <name>")
+	}
+	if _, ok := g.cfg.Profiles[profileName]; !ok {
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Unknown profile %q.", profileName))
+	}
+	if g.cfg.ChatProfiles == nil {
+		g.cfg.ChatProfiles = map[string]string{}
+	}
+	g.cfg.ChatProfiles[strconv.FormatInt(chatID, 10)] = profileName
+	if _, err := g.gatewayCore().CloseSession(g.ctx, strconv.FormatInt(chatID, 10)); err != nil {
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Profile switch failed: %v", err))
+	}
+	if _, err := g.gatewayCore().GetOrCreateSession(g.ctx, strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
+	return g.sendChunkToChat(chatID, fmt.Sprintf("Profile set to %s. Started a fresh session.", profileName))
+}
+
+func (g *telegramGateway) resetTelegramSession(chatID int64) error {
+	closed, err := g.gatewayCore().CloseSession(g.ctx, strconv.FormatInt(chatID, 10))
+	if err != nil {
+		return g.sendChunkToChat(chatID, fmt.Sprintf("Reset failed: %v", err))
+	}
+	if !closed {
+		return g.sendChunkToChat(chatID, "No active session to reset.")
+	}
+	return g.sendChunkToChat(chatID, "Reset complete. The next message will start a fresh session.")
+}
+
+func (g *telegramGateway) getOrCreateSession(chatID int64) (*gatewaycore.Session, error) {
+	return g.gatewayCore().GetOrCreateSession(g.ctx, strconv.FormatInt(chatID, 10))
+}
+
+func (g *telegramGateway) applyProfileToSessionParams(chatID string, params *acp.SessionNewParams) error {
+	if g == nil || params == nil {
 		return nil
 	}
-
-	state.mu.Lock()
-	response := strings.TrimSpace(state.output.String())
-	state.output.Reset()
-	state.mu.Unlock()
-	if response == "" {
-		response = "(no response)"
-	}
-	return g.sendChunks(chatID, splitText(response))
+	return gatewaycore.ApplyProfileToSessionNew(params, g.effectiveGatewayProfile(chatID), g.cfg.PromptBaseDir)
 }
 
-func telegramWorkspacePath(workspace, imagePath string) string {
-	workspace = strings.TrimSpace(workspace)
-	imagePath = strings.TrimSpace(imagePath)
-	if workspace == "" || imagePath == "" {
-		return ""
+func (g *telegramGateway) effectiveGatewayProfile(chatID string) gatewaycore.ProfileRuntime {
+	if g == nil {
+		return gatewaycore.ProfileRuntime{}
 	}
-	rel, err := filepath.Rel(workspace, imagePath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return ""
-	}
-	return filepath.ToSlash(filepath.Join("/workspace", rel))
-}
-
-func (g *telegramGateway) getOrCreateSession(chatID int64) (*telegramGatewaySession, error) {
-	// pollOnce handles updates sequentially today. If per-chat concurrency is
-	// added, this lookup/create path needs singleflight protection.
-	g.sessionsMu.Lock()
-	existing := g.sessionsByChat[chatID]
-	g.sessionsMu.Unlock()
-	if existing != nil {
-		return existing, nil
-	}
-
-	sessionID := fmt.Sprintf("tg-%d", chatID)
-	params := acp.SessionNewParams{
-		SessionID: sessionID,
-		CWD:       g.cfg.Workspace,
-		RunDir:    g.cfg.RunDir,
-	}
-
-	var res acp.SessionNewResult
-	if err := g.cli.Call(g.ctx, acp.MethodSessionNew, params, &res); err != nil {
-		return nil, fmt.Errorf("create acp session: %w", err)
-	}
-	if strings.TrimSpace(res.SessionID) != "" {
-		sessionID = strings.TrimSpace(res.SessionID)
-	}
-
-	state := &telegramGatewaySession{chatID: chatID, sessionID: sessionID}
-	g.sessionsMu.Lock()
-	g.sessionsByChat[chatID] = state
-	g.sessionsByAcpID[sessionID] = state
-	g.sessionsMu.Unlock()
-
-	return state, nil
+	return gatewaycore.ResolveProfile(g.cfg.Profiles, g.cfg.Profile, g.cfg.ChatProfiles, chatID)
 }
 
 func (g *telegramGateway) closeAllSessions() error {
-	g.sessionsMu.RLock()
-	states := make([]*telegramGatewaySession, 0, len(g.sessionsByAcpID))
-	for _, state := range g.sessionsByAcpID {
-		states = append(states, state)
-	}
-	g.sessionsMu.RUnlock()
-
-	for _, state := range states {
-		state.mu.Lock()
-		sessionID := state.sessionID
-		state.mu.Unlock()
-		if sessionID == "" {
-			continue
-		}
-		closeCtx, cancel := context.WithTimeout(context.Background(), telegramShutdownTimeout)
-		_ = g.cli.Call(closeCtx, acp.MethodSessionClose, struct {
-			SessionID string `json:"sessionId"`
-		}{SessionID: sessionID}, nil)
-		cancel()
-	}
-
-	return nil
+	closeCtx, cancel := context.WithTimeout(context.Background(), telegramShutdownTimeout)
+	defer cancel()
+	return g.gatewayCore().CloseAllSessions(closeCtx)
 }
 
 func (g *telegramGateway) sendChunks(chatID int64, chunks []string) error {
@@ -740,6 +808,68 @@ func (g *telegramGateway) telegramCall(method string, params any, out any) error
 		if err := json.Unmarshal(envelope.Result, out); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (g *telegramGateway) sendVoice(ctx context.Context, chatID int64, audioPath string) error {
+	audioPath = strings.TrimSpace(audioPath)
+	if audioPath == "" {
+		return fmt.Errorf("audio path is required")
+	}
+	info, err := os.Stat(audioPath)
+	if err != nil {
+		return err
+	}
+	if info.Size() > telegramMaxAudioBytes {
+		return fmt.Errorf("telegram voice reply exceeds %d bytes", telegramMaxAudioBytes)
+	}
+	f, err := os.Open(audioPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
+	part, err := writer.CreateFormFile("voice", filepath.Base(audioPath))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, telegramAPIBase+g.token+"/sendVoice", &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return redactTelegramTokenError(err, g.token)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram sendVoice failed: status=%d body=%q", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var envelope struct {
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if !envelope.OK {
+		return fmt.Errorf("telegram sendVoice failed: code=%d desc=%s", envelope.ErrorCode, envelope.Description)
 	}
 	return nil
 }
@@ -1017,20 +1147,7 @@ func (g *telegramGateway) transcribeVoice(chatID int64, file *telegramFile) (str
 }
 
 func splitText(text string) []string {
-	if text == "" {
-		return nil
-	}
-	result := make([]string, 0)
-	runes := []rune(text)
-	for len(runes) > 0 {
-		limit := telegramChunkChars
-		if len(runes) < limit {
-			limit = len(runes)
-		}
-		result = append(result, string(runes[:limit]))
-		runes = runes[limit:]
-	}
-	return result
+	return gatewaycore.SplitText(text, telegramChunkChars)
 }
 
 func redactTelegramTokenError(err error, token string) error {

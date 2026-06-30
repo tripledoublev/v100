@@ -101,7 +101,19 @@ Response:
   "jsonrpc": "2.0",
   "id": 3,
   "method": "session/new",
-  "params": { "cwd": "/path/to/workspace" }
+  "params": {
+    "cwd": "/path/to/workspace",
+    "provider": "ollama",
+    "model": "llama3.1",
+    "solver": "react",
+    "tools": ["news_fetch", "translate"],
+    "dangerous": [],
+    "system_prompt": "Reply in French.",
+    "network_tier": "research",
+    "budget_steps": 12,
+    "budget_tokens": 40000,
+    "budget_cost_usd": 0
+  }
 }
 ```
 
@@ -111,7 +123,67 @@ Response:
 { "jsonrpc": "2.0", "id": 3, "result": { "sessionId": "run-..." } }
 ```
 
+`provider`, `model`, and `solver` are optional per-session overrides. Omit them
+to inherit the ACP server config. `provider` selects the provider for this
+session only, using configured providers or built-in provider defaults. `model`
+overrides that provider's default model for this session. `solver` accepts the
+same solver names as the CLI (`react`, `plan_execute`, `router`,
+`dual_channel`, `rlm`, `miniglm`).
+
+Invalid provider/model/solver combinations fail the request with a provider
+configuration error and do not create a session.
+
+Gateway clients may also pass profile-scoped controls:
+
+- `tools`: per-session tool allowlist. If present, only these tools are exposed
+  to the model for this session.
+- `dangerous`: dangerous-tool allowlist. Send `[]` to permit no dangerous tools.
+  Dangerous tools listed in `tools` but omitted from `dangerous` are removed
+  from the session registry.
+- `system_prompt`: inline session prompt override.
+- `network_tier`: `off`, `research`, or `open`; overrides the loop network tier
+  for this ACP session.
+- `budget_steps`, `budget_tokens`, `budget_cost_usd`: per-session budgets.
+
 v100 may also send `session/update` notifications with available slash commands.
+
+### session/reconfigure
+
+Switch the active runtime for an existing session without clearing conversation
+history.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "session/reconfigure",
+  "params": {
+    "sessionId": "run-...",
+    "provider": "ollama",
+    "model": "llama3.1",
+    "solver": "dual_channel"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "sessionId": "run-...",
+    "provider": "ollama",
+    "model": "llama3.1",
+    "solver": "dual_channel"
+  }
+}
+```
+
+All fields except `sessionId` are optional; omitted fields keep the current
+session value. Reconfigure fails if the session is busy, closing, missing, or if
+the requested runtime cannot be built.
 
 ### session/list
 
@@ -279,3 +351,4 @@ terminates the ACP server process.
 | `-32003` | Session busy |
 | `-32004` | Session closing |
 | `-32020` | Provider configuration error |
+| `-32021` | Invalid session config |

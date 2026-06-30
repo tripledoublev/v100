@@ -1629,6 +1629,7 @@ func buildScopedToolRegistry(cfg *config.Config, toolNames ...string) *tools.Reg
 	reg.Register(tools.NewDeepResearch(nil))
 	reg.Register(tools.SourceCode())
 	reg.Register(tools.NewsFetch())
+	reg.Register(tools.Translate())
 	reg.Register(tools.Wiki())
 	reg.Register(tools.ProjectSearch())
 	reg.Register(tools.ProvenanceLookup())

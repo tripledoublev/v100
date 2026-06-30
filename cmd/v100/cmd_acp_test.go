@@ -356,6 +356,234 @@ func TestACPErrorsUseProtocolCodes(t *testing.T) {
 	}
 }
 
+func TestACPSessionNewAppliesProviderModelSolverOverrides(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	writeACPSessionOverrideConfig(t, cfgPath)
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionNew, acp.SessionNewParams{
+		SessionID: "override-session",
+		CWD:       workspace,
+		RunDir:    filepath.Join(root, "runs"),
+		Provider:  "ollama",
+		Model:     "chat-model",
+		Solver:    "router",
+	}))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var result acp.SessionNewResult
+	decodeACPResult(t, responses[0], &result)
+	if result.SessionID != "override-session" {
+		t.Fatalf("session ID = %q, want override-session", result.SessionID)
+	}
+	session := server.sessions["override-session"]
+	if session == nil || session.loop == nil || session.comp == nil {
+		t.Fatalf("session not registered correctly: %#v", server.sessions)
+	}
+	if got := session.loop.Provider.Name(); got != "ollama" {
+		t.Fatalf("provider = %q, want ollama", got)
+	}
+	if session.loop.Model != "chat-model" || session.comp.Model != "chat-model" {
+		t.Fatalf("model loop/comp = %q/%q, want chat-model", session.loop.Model, session.comp.Model)
+	}
+	if got := session.loop.Solver.Name(); got != "router" {
+		t.Fatalf("solver = %q, want router", got)
+	}
+
+	closeACPSession(session, "session_close")
+}
+
+func TestACPSessionNewRejectsInvalidOverridesWithoutCreatingSession(t *testing.T) {
+	tests := []struct {
+		name   string
+		params acp.SessionNewParams
+	}{
+		{
+			name: "solver",
+			params: acp.SessionNewParams{
+				SessionID: "bad-solver-session",
+				Solver:    "bogus",
+			},
+		},
+		{
+			name: "provider",
+			params: acp.SessionNewParams{
+				SessionID: "bad-provider-session",
+				Provider:  "definitely-not-a-provider",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			workspace := filepath.Join(root, "workspace")
+			if err := os.MkdirAll(workspace, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfgPath := filepath.Join(root, "config.toml")
+			writeACPSessionOverrideConfig(t, cfgPath)
+
+			var out bytes.Buffer
+			server := &acpServer{
+				conn:     acp.NewConn(strings.NewReader(""), &out),
+				sessions: make(map[string]*acpSession),
+				cfgPath:  cfgPath,
+				cmd:      &cobra.Command{},
+			}
+			tt.params.CWD = workspace
+			tt.params.RunDir = filepath.Join(root, "runs")
+			server.handleRequest(acpRequest(t, 1, acp.MethodSessionNew, tt.params))
+
+			responses := acpResponses(t, out.String())
+			if len(responses) != 1 {
+				t.Fatalf("responses = %#v", responses)
+			}
+			if responses[0].Error == nil || responses[0].Error.Code != acp.ErrInvalidSessionConfig {
+				t.Fatalf("error = %#v, want invalid session config", responses[0].Error)
+			}
+			if _, ok := server.sessions[tt.params.SessionID]; ok {
+				t.Fatalf("invalid session was registered: %#v", server.sessions[tt.params.SessionID])
+			}
+		})
+	}
+}
+
+func TestACPSessionReconfigureSwitchesRuntimeAndPreservesHistory(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	writeACPSessionOverrideConfig(t, cfgPath)
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionNew, acp.SessionNewParams{
+		SessionID: "reconfigure-session",
+		CWD:       workspace,
+		RunDir:    filepath.Join(root, "runs"),
+	}))
+	session := server.sessions["reconfigure-session"]
+	if session == nil || session.loop == nil {
+		t.Fatalf("session not registered: %#v", server.sessions)
+	}
+	session.loop.Messages = []providers.Message{{Role: "user", Content: "keep this"}}
+
+	server.handleRequest(acpRequest(t, 2, acp.MethodSessionReconfigure, acp.SessionReconfigureParams{
+		SessionID: "reconfigure-session",
+		Provider:  "ollama",
+		Model:     "chat-model",
+		Solver:    "dual_channel",
+	}))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) != 2 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var result acp.SessionReconfigureResult
+	decodeACPResult(t, responses[1], &result)
+	if result.Provider != "ollama" || result.Model != "chat-model" || result.Solver != "dual_channel" {
+		t.Fatalf("reconfigure result = %#v", result)
+	}
+	if got := session.loop.Provider.Name(); got != "ollama" {
+		t.Fatalf("provider = %q, want ollama", got)
+	}
+	if session.loop.Model != "chat-model" || session.comp.Model != "chat-model" {
+		t.Fatalf("model loop/comp = %q/%q, want chat-model", session.loop.Model, session.comp.Model)
+	}
+	if got := session.loop.Solver.Name(); got != "dual_channel" {
+		t.Fatalf("solver = %q, want dual_channel", got)
+	}
+	if len(session.loop.Messages) != 1 || session.loop.Messages[0].Content != "keep this" {
+		t.Fatalf("history was not preserved: %#v", session.loop.Messages)
+	}
+
+	closeACPSession(session, "session_close")
+}
+
+func TestACPSessionNewProfileToolsFailClosed(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	writeACPSessionOverrideConfig(t, cfgPath)
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionNew, acp.SessionNewParams{
+		SessionID:    "profile-session",
+		CWD:          workspace,
+		RunDir:       filepath.Join(root, "runs"),
+		Tools:        []string{"news_fetch", "sh"},
+		Dangerous:    []string{},
+		SystemPrompt: "profile prompt",
+		NetworkTier:  "research",
+		BudgetSteps:  7,
+		BudgetTokens: 1234,
+	}))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var result acp.SessionNewResult
+	decodeACPResult(t, responses[0], &result)
+	session := server.sessions["profile-session"]
+	if session == nil || session.loop == nil || session.comp == nil {
+		t.Fatalf("session not registered correctly: %#v", server.sessions)
+	}
+	if names := session.comp.Registry.List(); len(names) != 1 || names[0] != "news_fetch" {
+		t.Fatalf("registry tools = %v, want only [news_fetch]", names)
+	}
+	if _, ok := session.comp.Registry.Get("sh"); ok {
+		t.Fatal("profile-scoped registry exposed sh")
+	}
+	for _, spec := range session.comp.Registry.Specs() {
+		if spec.Name == "sh" {
+			t.Fatalf("profile-scoped specs exposed sh: %#v", session.comp.Registry.Specs())
+		}
+	}
+	if session.comp.Policy.SystemPrompt != "profile prompt" {
+		t.Fatalf("policy prompt = %q, want profile prompt", session.comp.Policy.SystemPrompt)
+	}
+	if session.loop.NetworkTier != "research" {
+		t.Fatalf("network tier = %q, want research", session.loop.NetworkTier)
+	}
+	if session.comp.Run.Budget.MaxSteps != 7 || session.comp.Run.Budget.MaxTokens != 1234 {
+		t.Fatalf("budget = %+v", session.comp.Run.Budget)
+	}
+
+	closeACPSession(session, "session_close")
+}
+
 func TestACPListSessionsIncludesActiveAndRestorableRuns(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "runs")
@@ -493,6 +721,38 @@ func writeACPRequest(t *testing.T, w io.Writer, id int, method string, params an
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(acpRequest(t, id, method, params)); err != nil {
 		t.Fatalf("write ACP request %s: %v", method, err)
+	}
+}
+
+func writeACPSessionOverrideConfig(t *testing.T, cfgPath string) {
+	t.Helper()
+	if err := os.WriteFile(cfgPath, []byte(`
+[providers.llamacpp]
+type = "llamacpp"
+default_model = "test-model"
+base_url = "http://127.0.0.1:19091/v1"
+
+[providers.ollama]
+type = "ollama"
+default_model = "ollama-default"
+base_url = "http://127.0.0.1:11434"
+
+[embedding]
+provider = "llamacpp"
+model = "test-model"
+
+[defaults]
+provider = "llamacpp"
+cheap_provider = "llamacpp"
+smart_provider = "ollama"
+compress_provider = "llamacpp"
+confirm_tools = "dangerous"
+budget_steps = 1
+budget_tokens = 1000
+max_tool_calls_per_step = 1
+solver = "react"
+`), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

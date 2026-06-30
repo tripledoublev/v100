@@ -14,6 +14,7 @@ func TestErrorMessageCoversACPErrorCodes(t *testing.T) {
 		ErrSessionBusy:                "session busy",
 		ErrSessionClosing:             "session closing",
 		ErrUnsupportedProtocolVersion: "unsupported protocol version",
+		ErrInvalidSessionConfig:       "invalid session config",
 		ErrProviderConfiguration:      "provider configuration error",
 		1234:                          "unknown error",
 	}

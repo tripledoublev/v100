@@ -5,6 +5,8 @@ coverage.out
 /v100
 /.v100/
 /v100_binary
+.tools/
+.signal-cli-data/
 .gocache/
 .gomodcache/
 /.cache/

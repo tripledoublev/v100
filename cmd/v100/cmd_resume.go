@@ -195,7 +195,7 @@ func resumeCmd(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&tuiNoAltFlag, "tui-no-alt", false, "disable alternate screen mode in TUI (for terminal compatibility)")
 	cmd.Flags().BoolVar(&tuiPlainFlag, "tui-plain", false, "force plain monochrome TUI rendering for terminal compatibility")
 	cmd.Flags().BoolVar(&tuiDebugFlag, "tui-debug", false, "write TUI startup/runtime debug log to run directory")
-	cmd.Flags().StringVar(&themeFlag, "theme", "", "UI theme: v100|mono|dracula|catppuccin (overrides [ui].theme and V100_THEME)")
+	cmd.Flags().StringVar(&themeFlag, "theme", "", "UI theme: v100|mono|dracula|catppuccin|gruvbox|nord|rose-pine|tokyonight (overrides [ui].theme and V100_THEME)")
 	cmd.Flags().BoolVar(&autoFlag, "auto", false, "auto-approve all tool calls (no confirmation)")
 	cmd.Flags().BoolVar(&unsafeFlag, "unsafe", false, "acknowledge host workspace risk (required with --auto outside sandbox)")
 	cmd.Flags().BoolVar(&yoloFlag, "yolo", false, "shorthand for --auto --unsafe")
