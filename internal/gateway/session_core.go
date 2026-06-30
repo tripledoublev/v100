@@ -181,7 +181,6 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 		return nil
 	}
 
-
 	state, err := c.GetOrCreateSession(ctx, chatID)
 	if err != nil {
 		return err
@@ -223,7 +222,10 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 			}
 		}
 		if promptRes.StopReason != "" && promptRes.StopReason != "end_turn" && t != nil {
-			return t.SendText(ctx, chatID, []string{fmt.Sprintf("Stopped: %s", promptRes.StopReason)})
+			if promptRes.StopReason == "refusal" {
+				return t.SendText(ctx, chatID, []string{"Non."})
+			}
+			return t.SendText(ctx, chatID, []string{"Pas moyen."})
 		}
 		if t != nil && c.voiceConfig(chatID).Enabled {
 			state.mu.Lock()

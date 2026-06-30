@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"os/exec"
@@ -214,6 +214,11 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			continue
 		}
 		msgID := signalTimestampString(env.Envelope.Timestamp)
+		displayName := strings.TrimSpace(env.Envelope.SourceName)
+		if displayName == "" {
+			displayName = number
+		}
+		log.Printf("signal %s (%s): %s", displayName, number, msg)
 		go func(cID, mID, text string) {
 			if emoji := g.chooseReaction(ctx, cID, text); emoji != "" {
 				_ = g.React(ctx, cID, mID, emoji)
@@ -297,7 +302,7 @@ func (g *signalGateway) chooseReaction(ctx context.Context, chatID, text string)
 		}
 		ctxTimeout, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		
+
 		providerName := profile.Provider
 		if providerName == "" {
 			providerName = g.globalCfg.Defaults.Provider
@@ -331,6 +336,11 @@ func (g *signalGateway) chooseReaction(ctx context.Context, chatID, text string)
 	}
 }
 
+func (g *signalGateway) commandAllowed(chatID, command string) bool {
+	runtime := g.effectiveGatewayProfile(chatID)
+	return gatewaycore.CommandAllowed(runtime.Profile, strings.TrimSpace(runtime.Name) != "", command)
+}
+
 func (g *signalGateway) Allowed(chatID string) bool {
 	if len(g.cfg.AllowedNumbers) == 0 {
 		return true
@@ -344,15 +354,133 @@ func (g *signalGateway) effectiveGatewayProfile(chatID string) gatewaycore.Profi
 }
 
 func (g *signalGateway) handleSignalCommand(ctx context.Context, number string, command gatewaycore.Command) error {
+	if !g.commandAllowed(number, command.Name) {
+		return g.SendText(ctx, number, []string{fmt.Sprintf("Command /%s is not allowed for this chat.", command.Name)})
+	}
 	switch command.Name {
 	case "help":
-		return g.SendText(ctx, number, []string{"Available commands:\n/help\n/reset"})
+		return g.SendText(ctx, number, []string{g.signalCommandHelp(number)})
+	case "whoami":
+		return g.SendText(ctx, number, []string{g.signalCommandWhoami(number)})
+	case "status":
+		return g.SendText(ctx, number, []string{g.signalCommandStatus(number)})
+	case "provider", "model", "solver":
+		return g.reconfigureSignalSession(ctx, number, command)
+	case "profile":
+		return g.switchSignalProfile(ctx, number, command.Arg)
 	case "reset":
-		_, err := g.gatewayCore().CloseSession(ctx, number)
-		return err
+		return g.resetSignalSession(ctx, number)
 	default:
 		return g.SendText(ctx, number, []string{fmt.Sprintf("Unknown command /%s. Try /help.", command.Name)})
 	}
+}
+
+func (g *signalGateway) signalCommandHelp(chatID string) string {
+	commands := []string{"help", "whoami", "status", "reset"}
+	if runtime := g.effectiveGatewayProfile(chatID); runtime.OK {
+		commands = runtime.Profile.AllowedCommands
+	}
+	if len(commands) == 0 {
+		return "No commands are enabled for this chat."
+	}
+	var b strings.Builder
+	b.WriteString("Available commands:")
+	for _, command := range commands {
+		command = gatewaycore.NormalizeCommandName(command)
+		if command == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "\n/%s", command)
+	}
+	return b.String()
+}
+
+func (g *signalGateway) signalCommandWhoami(chatID string) string {
+	runtime := g.effectiveGatewayProfile(chatID)
+	profileName := runtime.Name
+	if !runtime.OK {
+		profileName = "(none)"
+	}
+	profile := runtime.Profile
+	sessionID := "(none)"
+	if info, ok := g.gatewayCore().SessionInfo(chatID); ok {
+		sessionID = info.SessionID
+	}
+	provider := strings.TrimSpace(profile.Provider)
+	if provider == "" {
+		provider = "(default)"
+	}
+	model := strings.TrimSpace(profile.Model)
+	if model == "" {
+		model = "(default)"
+	}
+	solver := strings.TrimSpace(profile.Solver)
+	if solver == "" {
+		solver = "(default)"
+	}
+	return fmt.Sprintf("ChatID: %s\nProfile: %s\nProvider: %s\nModel: %s\nSolver: %s\nTools: %d\nSession: %s", chatID, profileName, provider, model, solver, len(profile.Tools), sessionID)
+}
+
+func (g *signalGateway) signalCommandStatus(chatID string) string {
+	info, ok := g.gatewayCore().SessionInfo(chatID)
+	if !ok {
+		return "No active session for this chat."
+	}
+	status := "idle"
+	if info.InFlight {
+		status = "busy"
+	}
+	last := "never"
+	if !info.LastStatus.IsZero() {
+		last = info.LastStatus.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("Status: %s\nSession: %s\nRun dir: %s\nLast activity: %s", status, info.SessionID, g.cfg.RunDir, last)
+}
+
+func (g *signalGateway) reconfigureSignalSession(ctx context.Context, chatID string, command gatewaycore.Command) error {
+	res, err := g.gatewayCore().ReconfigureSession(ctx, chatID, command)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "usage:") {
+			return g.SendText(ctx, chatID, []string{fmt.Sprintf("Usage: /%s <value>", command.Name)})
+		}
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Reconfigure failed: %v", err)})
+	}
+	if res.SessionID == "" && res.Provider == "" && res.Model == "" && res.Solver == "" {
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Usage: /%s <value>", command.Name)})
+	}
+	return g.SendText(ctx, chatID, []string{fmt.Sprintf("Runtime updated.\nProvider: %s\nModel: %s\nSolver: %s", res.Provider, res.Model, res.Solver)})
+}
+
+func (g *signalGateway) switchSignalProfile(ctx context.Context, chatID, profileName string) error {
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		return g.SendText(ctx, chatID, []string{"Usage: /profile <name>"})
+	}
+	if _, ok := g.cfg.Profiles[profileName]; !ok {
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Unknown profile %q.", profileName)})
+	}
+	if g.cfg.ChatProfiles == nil {
+		g.cfg.ChatProfiles = map[string]string{}
+	}
+	g.cfg.ChatProfiles[chatID] = profileName
+	if _, err := g.gatewayCore().CloseSession(ctx, chatID); err != nil {
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
+	}
+	if _, err := g.gatewayCore().GetOrCreateSession(ctx, chatID); err != nil {
+		return err
+	}
+	return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile set to %s. Started a fresh session.", profileName)})
+}
+
+func (g *signalGateway) resetSignalSession(ctx context.Context, chatID string) error {
+	closed, err := g.gatewayCore().CloseSession(ctx, chatID)
+	if err != nil {
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Reset failed: %v", err)})
+	}
+	if !closed {
+		return g.SendText(ctx, chatID, []string{"No active session to reset."})
+	}
+	return g.SendText(ctx, chatID, []string{"Reset complete. The next message will start a fresh session."})
 }
 
 type signalReceiveEnvelope struct {
@@ -362,6 +490,7 @@ type signalReceiveEnvelope struct {
 type signalEnvelope struct {
 	Source       string             `json:"source"`
 	SourceNumber string             `json:"sourceNumber"`
+	SourceName   string             `json:"sourceName"`
 	Timestamp    any                `json:"timestamp"`
 	DataMessage  *signalDataMessage `json:"dataMessage"`
 }
@@ -478,8 +607,8 @@ func (c *signalJSONRPC) Call(ctx context.Context, method string, params any, out
 	if _, err := c.conn.Write(payload); err != nil {
 		return err
 	}
-	scanner := bufio.NewScanner(c.conn)
-	for scanner.Scan() {
+	dec := json.NewDecoder(c.conn)
+	for {
 		var res struct {
 			ID     string          `json:"id"`
 			Result json.RawMessage `json:"result"`
@@ -488,8 +617,8 @@ func (c *signalJSONRPC) Call(ctx context.Context, method string, params any, out
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &res); err != nil {
-			continue
+		if err := dec.Decode(&res); err != nil {
+			return err
 		}
 		if res.ID != id {
 			continue
@@ -502,10 +631,6 @@ func (c *signalJSONRPC) Call(ctx context.Context, method string, params any, out
 		}
 		return json.Unmarshal(res.Result, out)
 	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return io.EOF
 }
 
 func redactSignalAccountError(err error, account string) error {

@@ -27,11 +27,15 @@ type signalRPCCall struct {
 
 type fakeSignalACPClient struct {
 	mu         sync.Mutex
+	calls      []string
 	lastNew    acp.SessionNewParams
 	lastPrompt acp.SessionPromptParams
 }
 
 func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any, out any) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, method)
+	f.mu.Unlock()
 	switch method {
 	case acp.MethodSessionNew:
 		if p, ok := params.(acp.SessionNewParams); ok {
@@ -51,6 +55,17 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 		if res, ok := out.(*acp.SessionPromptResult); ok {
 			res.StopReason = "end_turn"
 		}
+	case acp.MethodSessionReconfigure:
+		if p, ok := params.(acp.SessionReconfigureParams); ok {
+			if res, ok := out.(*acp.SessionReconfigureResult); ok {
+				res.SessionID = p.SessionID
+				res.Provider = p.Provider
+				res.Model = p.Model
+				res.Solver = p.Solver
+			}
+		}
+	case acp.MethodSessionClose:
+		// no-op for tests
 	}
 	return nil
 }
@@ -73,7 +88,8 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
 		Envelope: signalEnvelope{
-			Source: "+15145550000",
+			Source:     "+15145550000",
+			SourceName: "Alice",
 			DataMessage: &signalDataMessage{
 				Message: "bonjour",
 			},
@@ -95,6 +111,9 @@ func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	}
 	if updates[0].ChatID != "+15145550000" || updates[0].Text != "bonjour" {
 		t.Fatalf("update = %#v", updates[0])
+	}
+	if got := updates[0]; got.MessageID != "" {
+		t.Fatalf("unexpected message id = %q", got.MessageID)
 	}
 }
 
@@ -181,7 +200,8 @@ func TestSignalJSONRPCReceive(t *testing.T) {
 			"id":      req["id"],
 			"result": []map[string]any{{
 				"envelope": map[string]any{
-					"source": "+15145550000",
+					"source":     "+15145550000",
+					"sourceName": "Alice",
 					"dataMessage": map[string]any{
 						"message": "bonjour",
 					},
@@ -197,8 +217,123 @@ func TestSignalJSONRPCReceive(t *testing.T) {
 		t.Fatalf("Receive returned error: %v", err)
 	}
 	<-done
-	if len(got) != 1 || got[0].Envelope.Source != "+15145550000" || got[0].Envelope.DataMessage.Message != "bonjour" {
+	if len(got) != 1 || got[0].Envelope.Source != "+15145550000" || got[0].Envelope.SourceName != "Alice" || got[0].Envelope.DataMessage.Message != "bonjour" {
 		t.Fatalf("receive = %#v", got)
+	}
+}
+
+func TestSignalJSONRPCReceiveLargePayload(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = clientConn.Close() }()
+	defer func() { _ = serverConn.Close() }()
+	rpc := &signalJSONRPC{conn: clientConn, account: "+15145551234"}
+	huge := strings.Repeat("x", 70000)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var req map[string]any
+		dec := json.NewDecoder(serverConn)
+		if err := dec.Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		res := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req["id"],
+			"result": []map[string]any{{
+				"envelope": map[string]any{
+					"source":     "+15145550000",
+					"sourceName": "Alice",
+					"dataMessage": map[string]any{
+						"message": huge,
+					},
+				},
+			}},
+		}
+		if err := json.NewEncoder(serverConn).Encode(res); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}()
+	got, err := rpc.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("Receive returned error: %v", err)
+	}
+	<-done
+	if len(got) != 1 || got[0].Envelope.DataMessage.Message != huge || got[0].Envelope.SourceName != "Alice" {
+		t.Fatalf("receive = %#v", got)
+	}
+}
+
+func TestSignalCommandControlPlaneHonorsProfileAllowlist(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account: "+15145551234",
+			Profile: "signal-vincent",
+			Profiles: map[string]config.GatewayProfile{
+				"signal-vincent": {
+					AllowedCommands: []string{"help", "whoami", "status", "model", "provider", "solver", "profile", "reset"},
+					Provider:        "glm",
+					Model:           "glm-5.1",
+					Solver:          "react",
+				},
+				"locked": {
+					AllowedCommands: []string{"help"},
+				},
+			},
+			ChatProfiles: map[string]string{},
+		},
+		rpc: rpc,
+		cli: cli,
+	}
+
+	if err := gw.handleSignalCommand(context.Background(), "+15145550000", gatewaycore.Command{Name: "help"}); err != nil {
+		t.Fatalf("help command failed: %v", err)
+	}
+	rpc.mu.Lock()
+	if len(rpc.calls) == 0 || rpc.calls[0].method != "send" {
+		t.Fatalf("help did not send a reply: %#v", rpc.calls)
+	}
+	rpc.calls = nil
+	rpc.mu.Unlock()
+
+	if err := gw.handleSignalCommand(context.Background(), "+15145550000", gatewaycore.Command{Name: "model", Arg: "glm-4.6"}); err != nil {
+		t.Fatalf("model command failed: %v", err)
+	}
+	cli.mu.Lock()
+	if !containsString(cli.calls, acp.MethodSessionNew) || !containsString(cli.calls, acp.MethodSessionReconfigure) {
+		t.Fatalf("model command did not reconfigure session: %v", cli.calls)
+	}
+	cli.calls = nil
+	cli.mu.Unlock()
+
+	if err := gw.handleSignalCommand(context.Background(), "+15145550000", gatewaycore.Command{Name: "profile", Arg: "locked"}); err != nil {
+		t.Fatalf("profile command failed: %v", err)
+	}
+	if got := gw.cfg.ChatProfiles["+15145550000"]; got != "locked" {
+		t.Fatalf("chat profile = %q, want locked", got)
+	}
+	cli.mu.Lock()
+	if !containsString(cli.calls, acp.MethodSessionClose) {
+		t.Fatalf("profile command did not close current session: %v", cli.calls)
+	}
+	cli.calls = nil
+	cli.mu.Unlock()
+
+	if err := gw.handleSignalCommand(context.Background(), "+15145550000", gatewaycore.Command{Name: "provider", Arg: "ollama"}); err != nil {
+		t.Fatalf("provider command failed: %v", err)
+	}
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.calls) == 0 {
+		t.Fatal("expected refusal reply for locked profile")
+	}
+	last := rpc.calls[len(rpc.calls)-1]
+	text, _ := last.params.(map[string]any)["message"].(string)
+	if !strings.Contains(text, "not allowed") {
+		t.Fatalf("expected refusal reply, got %q", text)
 	}
 }
 
