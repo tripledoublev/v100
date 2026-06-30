@@ -6,6 +6,10 @@ BINARY="${ROOT_DIR}/v100"
 
 cd "${ROOT_DIR}"
 
+export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
+export GOMODCACHE="${GOMODCACHE:-$ROOT_DIR/.gomodcache}"
+export GOWORK=off
+
 echo "building ${BINARY}"
 go build -o "${BINARY}" ./cmd/v100
 

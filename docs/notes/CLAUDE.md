@@ -25,6 +25,8 @@ make build
 
 Avoid raw `go build ./...` or `go test ./...` from this checkout. The repo root can contain an ignored local `go/pkg/mod` tree, which makes those patterns walk cache files and fail with module-path errors.
 
+For a direct binary build, `./scripts/build.sh` now exports workspace-safe `GOCACHE` and `GOMODCACHE` before calling `go build`.
+
 ---
 
 ## Test
