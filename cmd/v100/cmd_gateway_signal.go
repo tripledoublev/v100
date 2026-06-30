@@ -462,12 +462,23 @@ func (g *signalGateway) switchSignalProfile(ctx context.Context, chatID, profile
 	if g.cfg.ChatProfiles == nil {
 		g.cfg.ChatProfiles = map[string]string{}
 	}
+	oldProfile, hadOld := g.cfg.ChatProfiles[chatID]
 	g.cfg.ChatProfiles[chatID] = profileName
 	if _, err := g.gatewayCore().CloseSession(ctx, chatID); err != nil {
+		if hadOld {
+			g.cfg.ChatProfiles[chatID] = oldProfile
+		} else {
+			delete(g.cfg.ChatProfiles, chatID)
+		}
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
 	}
 	if _, err := g.gatewayCore().GetOrCreateSession(ctx, chatID); err != nil {
-		return err
+		if hadOld {
+			g.cfg.ChatProfiles[chatID] = oldProfile
+		} else {
+			delete(g.cfg.ChatProfiles, chatID)
+		}
+		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
 	}
 	return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile set to %s. Started a fresh session.", profileName)})
 }

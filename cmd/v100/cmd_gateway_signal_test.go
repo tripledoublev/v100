@@ -30,6 +30,7 @@ type fakeSignalACPClient struct {
 	calls      []string
 	lastNew    acp.SessionNewParams
 	lastPrompt acp.SessionPromptParams
+	newErr     error
 }
 
 func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any, out any) error {
@@ -38,6 +39,9 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 	f.mu.Unlock()
 	switch method {
 	case acp.MethodSessionNew:
+		if f.newErr != nil {
+			return f.newErr
+		}
 		if p, ok := params.(acp.SessionNewParams); ok {
 			f.mu.Lock()
 			f.lastNew = p
@@ -334,6 +338,48 @@ func TestSignalCommandControlPlaneHonorsProfileAllowlist(t *testing.T) {
 	text, _ := last.params.(map[string]any)["message"].(string)
 	if !strings.Contains(text, "not allowed") {
 		t.Fatalf("expected refusal reply, got %q", text)
+	}
+}
+
+func TestSignalProfileSwitchFailureStaysInChat(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{newErr: context.DeadlineExceeded}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account: "+15145551234",
+			Profile: "signal-vincent",
+			Profiles: map[string]config.GatewayProfile{
+				"signal-vincent": {
+					AllowedCommands: []string{"help", "profile"},
+				},
+				"broken": {
+					AllowedCommands: []string{"help", "profile"},
+				},
+			},
+			ChatProfiles: map[string]string{
+				"+15145550000": "signal-vincent",
+			},
+		},
+		rpc: rpc,
+		cli: cli,
+	}
+
+	if err := gw.handleSignalCommand(context.Background(), "+15145550000", gatewaycore.Command{Name: "profile", Arg: "broken"}); err != nil {
+		t.Fatalf("profile command returned error: %v", err)
+	}
+	if got := gw.cfg.ChatProfiles["+15145550000"]; got != "signal-vincent" {
+		t.Fatalf("chat profile = %q, want signal-vincent", got)
+	}
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.calls) == 0 {
+		t.Fatal("expected profile switch failure reply")
+	}
+	last := rpc.calls[len(rpc.calls)-1]
+	text, _ := last.params.(map[string]any)["message"].(string)
+	if !strings.Contains(text, "Profile switch failed") {
+		t.Fatalf("expected failure reply, got %q", text)
 	}
 }
 
