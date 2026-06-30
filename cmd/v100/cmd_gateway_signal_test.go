@@ -383,6 +383,61 @@ func TestSignalProfileSwitchFailureStaysInChat(t *testing.T) {
 	}
 }
 
+func TestSignalProfileSwitchAndReadsAreConcurrentSafe(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account: "+15145551234",
+			Profile: "signal-vincent",
+			Profiles: map[string]config.GatewayProfile{
+				"signal-vincent": {
+					AllowedCommands: []string{"help", "profile"},
+				},
+				"locked": {
+					AllowedCommands: []string{"help", "profile"},
+				},
+			},
+			ChatProfiles: map[string]string{
+				"+15145550000": "signal-vincent",
+			},
+		},
+		rpc: rpc,
+		cli: cli,
+	}
+
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			_ = gw.effectiveGatewayProfile("+15145550000")
+			_ = gw.commandAllowed("+15145550000", "profile")
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		name := "locked"
+		if i%2 == 1 {
+			name = "signal-vincent"
+		}
+		if err := gw.switchSignalProfile(context.Background(), "+15145550000", name); err != nil {
+			errCh <- err
+			break
+		}
+	}
+
+	<-done
+	select {
+	case err := <-errCh:
+		t.Fatalf("concurrent profile switch failed: %v", err)
+	default:
+	}
+	_ = rpc
+	_ = cli
+}
+
 func TestSignalGatewayImplementsTransport(t *testing.T) {
 	var _ gatewaycore.Transport = (*signalGateway)(nil)
 }

@@ -64,6 +64,7 @@ type signalJSONRPC struct {
 type signalGateway struct {
 	ctx       context.Context
 	cfg       signalRuntimeConfig
+	cfgMu     sync.RWMutex
 	rpc       signalRPC
 	cli       gatewaycore.ACPClient
 	core      *gatewaycore.Core
@@ -350,7 +351,10 @@ func (g *signalGateway) Allowed(chatID string) bool {
 }
 
 func (g *signalGateway) effectiveGatewayProfile(chatID string) gatewaycore.ProfileRuntime {
-	return gatewaycore.ResolveProfile(g.cfg.Profiles, g.cfg.Profile, g.cfg.ChatProfiles, chatID)
+	g.cfgMu.RLock()
+	chatProfiles := copyStringMap(g.cfg.ChatProfiles)
+	g.cfgMu.RUnlock()
+	return gatewaycore.ResolveProfile(g.cfg.Profiles, g.cfg.Profile, chatProfiles, chatID)
 }
 
 func (g *signalGateway) handleSignalCommand(ctx context.Context, number string, command gatewaycore.Command) error {
@@ -459,28 +463,39 @@ func (g *signalGateway) switchSignalProfile(ctx context.Context, chatID, profile
 	if _, ok := g.cfg.Profiles[profileName]; !ok {
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Unknown profile %q.", profileName)})
 	}
+	g.cfgMu.Lock()
 	if g.cfg.ChatProfiles == nil {
 		g.cfg.ChatProfiles = map[string]string{}
 	}
 	oldProfile, hadOld := g.cfg.ChatProfiles[chatID]
 	g.cfg.ChatProfiles[chatID] = profileName
+	g.cfgMu.Unlock()
 	if _, err := g.gatewayCore().CloseSession(ctx, chatID); err != nil {
-		if hadOld {
-			g.cfg.ChatProfiles[chatID] = oldProfile
-		} else {
-			delete(g.cfg.ChatProfiles, chatID)
-		}
+		g.restoreSignalChatProfile(chatID, hadOld, oldProfile)
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
 	}
 	if _, err := g.gatewayCore().GetOrCreateSession(ctx, chatID); err != nil {
-		if hadOld {
-			g.cfg.ChatProfiles[chatID] = oldProfile
-		} else {
-			delete(g.cfg.ChatProfiles, chatID)
-		}
+		g.restoreSignalChatProfile(chatID, hadOld, oldProfile)
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
 	}
 	return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile set to %s. Started a fresh session.", profileName)})
+}
+
+func (g *signalGateway) restoreSignalChatProfile(chatID string, hadOld bool, oldProfile string) {
+	g.cfgMu.Lock()
+	defer g.cfgMu.Unlock()
+	if g.cfg.ChatProfiles == nil {
+		if hadOld {
+			g.cfg.ChatProfiles = map[string]string{}
+			g.cfg.ChatProfiles[chatID] = oldProfile
+		}
+		return
+	}
+	if hadOld {
+		g.cfg.ChatProfiles[chatID] = oldProfile
+		return
+	}
+	delete(g.cfg.ChatProfiles, chatID)
 }
 
 func (g *signalGateway) resetSignalSession(ctx context.Context, chatID string) error {
