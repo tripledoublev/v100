@@ -17,30 +17,32 @@ v100 is a terminal-native AI agent harness written in Go. It orchestrates LLM pr
 go build -o v100 ./cmd/v100
 ```
 
-Build the whole module (no binary):
+Use the repo targets for full verification in this worktree:
 
 ```bash
-go build ./...
+make build
 ```
+
+Avoid raw `go build ./...` or `go test ./...` from this checkout. The repo root can contain an ignored local `go/pkg/mod` tree, which makes those patterns walk cache files and fail with module-path errors.
 
 ---
 
 ## Test
 
 ```bash
-env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./...
+make test
 ```
 
 With race detector (matches CI):
 
 ```bash
-env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test -race ./...
+make test
 ```
 
 With coverage:
 
 ```bash
-env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test -race -coverprofile=coverage.out ./...
+make test
 go tool cover -func=coverage.out | tail -1
 ```
 
@@ -84,9 +86,9 @@ Every new feature or bug fix should follow this pipeline:
    - Unit tests for new functions/methods in the relevant package
    - Integration-style tests in `cmd/v100/main_test.go` for CLI-level behaviour
    - If touching providers, add cases to the existing provider or retry tests
-4. **Run the full suite** — `env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go test ./...` must be green
+4. **Run the full suite** — `make test` must be green
 5. **Run lint** — `bash scripts/lint.sh` must report 0 issues
-6. **Build** — `env GOCACHE="$PWD/.gocache" GOMODCACHE="$PWD/.gomodcache" go build ./...` must succeed
+6. **Build** — `make build` must succeed
 
 Do not open a PR if tests or lint fail.
 
