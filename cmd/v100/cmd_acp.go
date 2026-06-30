@@ -82,6 +82,106 @@ func (s *acpServer) applyProviderOverride(cfg *config.Config) {
 	cfg.Defaults.Provider = s.providerOverride
 }
 
+func applyACPSessionNewOverrides(cfg *config.Config, params acp.SessionNewParams) error {
+	if cfg == nil {
+		return acpStatus(acp.ErrProviderConfiguration, "missing config")
+	}
+
+	providerName := strings.TrimSpace(params.Provider)
+	if providerName != "" {
+		if !acpProviderKnown(cfg, providerName) {
+			return acpStatus(acp.ErrInvalidSessionConfig, "unknown provider %q", providerName)
+		}
+		cfg.Defaults.Provider = providerName
+	}
+	ensureProviderConfig(cfg, cfg.Defaults.Provider)
+
+	model := strings.TrimSpace(params.Model)
+	if model != "" {
+		pc := cfg.Providers[cfg.Defaults.Provider]
+		pc.DefaultModel = model
+		cfg.Providers[cfg.Defaults.Provider] = pc
+	}
+
+	if solverName := strings.TrimSpace(params.Solver); solverName != "" {
+		if _, err := buildSolver(cfg, solverName); err != nil {
+			return acpStatus(acp.ErrInvalidSessionConfig, "%s", err.Error())
+		}
+		cfg.Defaults.Solver = solverName
+	}
+	if params.Tools != nil {
+		cfg.Tools.Enabled = append([]string(nil), params.Tools...)
+	}
+	if params.Dangerous != nil {
+		cfg.Tools.Dangerous = append([]string(nil), params.Dangerous...)
+	}
+	if systemPrompt := strings.TrimSpace(params.SystemPrompt); systemPrompt != "" {
+		if cfg.Policies == nil {
+			cfg.Policies = map[string]config.PolicyConfig{}
+		}
+		pc := cfg.Policies["default"]
+		pc.SystemPrompt = systemPrompt
+		pc.SystemPromptPath = ""
+		cfg.Policies["default"] = pc
+	}
+	if networkTier := strings.ToLower(strings.TrimSpace(params.NetworkTier)); networkTier != "" {
+		switch networkTier {
+		case "off", "research", "open":
+			cfg.Sandbox.NetworkTier = networkTier
+		default:
+			return acpStatus(acp.ErrInvalidSessionConfig, "unsupported network_tier %q", params.NetworkTier)
+		}
+	}
+	if params.BudgetSteps > 0 {
+		cfg.Defaults.BudgetSteps = params.BudgetSteps
+	}
+	if params.BudgetTokens > 0 {
+		cfg.Defaults.BudgetTokens = params.BudgetTokens
+	}
+	if params.BudgetCostUSD > 0 {
+		cfg.Defaults.BudgetCostUSD = params.BudgetCostUSD
+	}
+
+	return nil
+}
+
+func acpSessionNetworkTier(cfg *config.Config, params acp.SessionNewParams) string {
+	if tier := strings.ToLower(strings.TrimSpace(params.NetworkTier)); tier != "" {
+		switch tier {
+		case "off", "research", "open":
+			return tier
+		default:
+			return "off"
+		}
+	}
+	return loopNetworkTier(cfg)
+}
+
+func acpProviderKnown(cfg *config.Config, providerName string) bool {
+	if cfg != nil {
+		if _, ok := cfg.Providers[providerName]; ok {
+			return true
+		}
+	}
+	defaults := config.DefaultConfig()
+	_, ok := defaults.Providers[providerName]
+	return ok
+}
+
+func cloneACPConfig(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	clone := *cfg
+	if cfg.Providers != nil {
+		clone.Providers = make(map[string]config.ProviderConfig, len(cfg.Providers))
+		for name, pc := range cfg.Providers {
+			clone.Providers[name] = pc
+		}
+	}
+	return &clone
+}
+
 type acpSession struct {
 	comp         *RunComponents
 	loop         *core.Loop
@@ -237,17 +337,16 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			return
 		}
 		s.applyProviderOverride(cfg)
-
-		if _, ok := cfg.Providers[cfg.Defaults.Provider]; !ok {
-			defaults := config.DefaultConfig()
-			if pc, ok := defaults.Providers[cfg.Defaults.Provider]; ok {
-				cfg.Providers[cfg.Defaults.Provider] = pc
-			}
+		if err := applyACPSessionNewOverrides(cfg, params); err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
 		}
 
 		opts := RunOptions{
-			Workspace: params.CWD,
-			RunDir:    params.RunDir,
+			Workspace:  params.CWD,
+			RunDir:     params.RunDir,
+			Model:      strings.TrimSpace(params.Model),
+			SolverName: strings.TrimSpace(params.Solver),
 		}
 
 		comp, err := BuildRunComponents(cfg, opts)
@@ -293,7 +392,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			Mapper:           comp.Mapper,
 			ToolEnv:          append([]string(nil), comp.ToolEnv...),
 			RedactToolOutput: comp.RedactToolOutput,
-			NetworkTier:      loopNetworkTier(cfg),
+			NetworkTier:      acpSessionNetworkTier(cfg, params),
 			Snapshots:        buildSnapshotManager(cfg, comp.Workspace),
 			Solver:           comp.Solver,
 			GenParams:        comp.GenParams,
@@ -336,6 +435,19 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		}
 		_ = s.conn.SendResponse(req.ID, res)
 		s.sendAvailableCommands(res.SessionID)
+
+	case acp.MethodSessionReconfigure:
+		var params acp.SessionReconfigureParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		res, err := s.reconfigureSession(params)
+		if err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
+		}
+		_ = s.conn.SendResponse(req.ID, res)
 
 	case acp.MethodSessionPrompt:
 		var params acp.SessionPromptParams
@@ -500,6 +612,107 @@ func acpErrorCode(err error) int {
 
 func acpStatus(code int, format string, args ...any) error {
 	return acpStatusError{code: code, msg: fmt.Sprintf(format, args...)}
+}
+
+func (s *acpServer) reconfigureSession(params acp.SessionReconfigureParams) (acp.SessionReconfigureResult, error) {
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrInvalidParams, "sessionId is required")
+	}
+
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), sessionID)
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.closing {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrSessionClosing, "%s: %s", acp.ErrorMessage(acp.ErrSessionClosing), sessionID)
+	}
+	if session.promptActive {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrSessionBusy, "%s: %s", acp.ErrorMessage(acp.ErrSessionBusy), sessionID)
+	}
+	if session.comp == nil || session.loop == nil {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), sessionID)
+	}
+
+	cfg := cloneACPConfig(session.comp.Config)
+	if cfg == nil {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrProviderConfiguration, "missing session config")
+	}
+
+	providerName := strings.TrimSpace(params.Provider)
+	if providerName != "" && !acpProviderKnown(cfg, providerName) {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrInvalidSessionConfig, "unknown provider %q", providerName)
+	}
+	if providerName == "" {
+		if session.loop.Provider != nil {
+			providerName = strings.TrimSpace(session.loop.Provider.Name())
+		}
+		if providerName == "" && session.comp.Provider != nil {
+			providerName = strings.TrimSpace(session.comp.Provider.Name())
+		}
+		if providerName == "" {
+			providerName = strings.TrimSpace(cfg.Defaults.Provider)
+		}
+	}
+	cfg.Defaults.Provider = providerName
+	ensureProviderConfig(cfg, providerName)
+
+	model := strings.TrimSpace(params.Model)
+	if model == "" {
+		currentProvider := ""
+		if session.loop.Provider != nil {
+			currentProvider = strings.TrimSpace(session.loop.Provider.Name())
+		}
+		if providerName == currentProvider {
+			model = strings.TrimSpace(session.loop.Model)
+		}
+	}
+	if model == "" {
+		model = strings.TrimSpace(cfg.Providers[providerName].DefaultModel)
+	}
+	if model != "" {
+		pc := cfg.Providers[providerName]
+		pc.DefaultModel = model
+		cfg.Providers[providerName] = pc
+	}
+
+	solverName := strings.TrimSpace(params.Solver)
+	if solverName == "" {
+		solverName = solverDisplayName(session.loop.Solver)
+	}
+	cfg.Defaults.Solver = solverName
+
+	prov, err := buildProviderWithModel(cfg, providerName, model)
+	if err != nil {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrProviderConfiguration, "%s", err.Error())
+	}
+	solver, err := buildSolver(cfg, solverName)
+	if err != nil {
+		return acp.SessionReconfigureResult{}, acpStatus(acp.ErrInvalidSessionConfig, "%s", err.Error())
+	}
+
+	session.comp.Config = cfg
+	session.comp.Provider = prov
+	session.comp.Model = model
+	session.comp.Solver = solver
+	session.comp.ModelMetadata = providers.ModelMetadata{}
+	session.loop.Provider = prov
+	session.loop.Model = model
+	session.loop.Solver = solver
+	session.loop.CompressProvider = buildCompressProvider(cfg)
+	session.loop.ModelMetadata = providers.ModelMetadata{}
+
+	return acp.SessionReconfigureResult{
+		SessionID: sessionID,
+		Provider:  prov.Name(),
+		Model:     model,
+		Solver:    solverDisplayName(solver),
+	}, nil
 }
 
 func (s *acpServer) setSuggestedPrompts(params acp.SetSuggestedPromptsParams) error {

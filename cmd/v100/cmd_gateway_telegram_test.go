@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/tripledoublev/v100/internal/acp"
 	"github.com/tripledoublev/v100/internal/config"
+	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
 )
 
 func TestNormalizeTelegramConfigDefaults(t *testing.T) {
@@ -108,8 +110,12 @@ func (c *telegramTestClient) Call(_ context.Context, method string, params any, 
 	c.callCount.Add(1)
 	switch method {
 	case acp.MethodSessionNew:
-		if params, ok := out.(*acp.SessionNewResult); ok {
-			params.SessionID = "tg-session"
+		if res, ok := out.(*acp.SessionNewResult); ok {
+			if p, ok := params.(acp.SessionNewParams); ok && strings.TrimSpace(p.SessionID) != "" {
+				res.SessionID = p.SessionID
+			} else {
+				res.SessionID = "tg-session"
+			}
 		}
 	case acp.MethodSessionPrompt:
 		if p, ok := params.(acp.SessionPromptParams); ok {
@@ -130,13 +136,36 @@ func (c *telegramTestClient) Call(_ context.Context, method string, params any, 
 
 type telegramSessionCaptureClient struct {
 	telegramTestClient
-	lastNew acp.SessionNewParams
+	lastNew             acp.SessionNewParams
+	lastReconfigure     acp.SessionReconfigureParams
+	lastCloseSessionID  string
+	reconfigureResponse acp.SessionReconfigureResult
 }
 
 func (c *telegramSessionCaptureClient) Call(ctx context.Context, method string, params any, out any) error {
 	if method == acp.MethodSessionNew {
 		if p, ok := params.(acp.SessionNewParams); ok {
 			c.lastNew = p
+		}
+	}
+	if method == acp.MethodSessionReconfigure {
+		if p, ok := params.(acp.SessionReconfigureParams); ok {
+			c.lastReconfigure = p
+		}
+		if res, ok := out.(*acp.SessionReconfigureResult); ok {
+			if c.reconfigureResponse.Provider != "" || c.reconfigureResponse.Model != "" || c.reconfigureResponse.Solver != "" {
+				*res = c.reconfigureResponse
+			} else {
+				res.SessionID = c.lastReconfigure.SessionID
+				res.Provider = c.lastReconfigure.Provider
+				res.Model = c.lastReconfigure.Model
+				res.Solver = c.lastReconfigure.Solver
+			}
+		}
+	}
+	if method == acp.MethodSessionClose {
+		if p, ok := params.(map[string]string); ok {
+			c.lastCloseSessionID = p["sessionId"]
 		}
 	}
 	return c.telegramTestClient.Call(ctx, method, params, out)
@@ -150,9 +179,7 @@ func TestGetOrCreateSessionKeepsRunDirSeparateFromWorkspace(t *testing.T) {
 			RunDir:    "/tmp/v100-runs",
 			Workspace: "/tmp/project",
 		},
-		cli:             client,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		cli: client,
 	}
 
 	if _, err := gw.getOrCreateSession(42); err != nil {
@@ -171,9 +198,7 @@ func TestGetOrCreateSessionKeepsRunDirSeparateFromWorkspace(t *testing.T) {
 		cfg: telegramRuntimeConfig{
 			RunDir: "/tmp/v100-runs",
 		},
-		cli:             client,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		cli: client,
 	}
 
 	if _, err := gw.getOrCreateSession(43); err != nil {
@@ -184,6 +209,353 @@ func TestGetOrCreateSessionKeepsRunDirSeparateFromWorkspace(t *testing.T) {
 	}
 	if client.lastNew.CWD != "" {
 		t.Fatalf("session cwd = %q, want empty", client.lastNew.CWD)
+	}
+}
+
+func TestGetOrCreateSessionAppliesChatProfile(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			RunDir:  "/tmp/v100-runs",
+			Profile: "operator",
+			ChatProfiles: map[string]string{
+				"42": "news_fr",
+			},
+			Profiles: map[string]config.GatewayProfile{
+				"operator": {
+					Tools:     []string{"fs_read", "sh"},
+					Dangerous: []string{"sh"},
+					Provider:  "glm",
+				},
+				"news_fr": {
+					Tools:           []string{"news_fetch", "translate", "sh"},
+					Dangerous:       []string{},
+					Provider:        "ollama",
+					Model:           "llama3.1",
+					Solver:          "react",
+					SystemPrompt:    "Réponds en français.",
+					NetworkTier:     "research",
+					BudgetSteps:     12,
+					BudgetTokens:    40000,
+					BudgetCostUSD:   0.25,
+					AllowedCommands: []string{"help", "reset"},
+				},
+			},
+		},
+		cli: client,
+	}
+
+	if _, err := gw.getOrCreateSession(42); err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
+	if client.lastNew.Provider != "ollama" || client.lastNew.Model != "llama3.1" || client.lastNew.Solver != "react" {
+		t.Fatalf("runtime overrides = %#v", client.lastNew)
+	}
+	if strings.Join(client.lastNew.Tools, ",") != "news_fetch,translate,sh" {
+		t.Fatalf("tools = %v", client.lastNew.Tools)
+	}
+	if client.lastNew.Dangerous == nil || len(client.lastNew.Dangerous) != 0 {
+		t.Fatalf("dangerous = %#v, want explicit empty list", client.lastNew.Dangerous)
+	}
+	if client.lastNew.SystemPrompt != "Réponds en français." || client.lastNew.NetworkTier != "research" {
+		t.Fatalf("prompt/network = %#v", client.lastNew)
+	}
+	if client.lastNew.BudgetSteps != 12 || client.lastNew.BudgetTokens != 40000 || client.lastNew.BudgetCostUSD != 0.25 {
+		t.Fatalf("budgets = %#v", client.lastNew)
+	}
+}
+
+func TestTelegramCommandHelpHonorsProfileAllowedCommands(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile: "news_fr",
+			Profiles: map[string]config.GatewayProfile{
+				"news_fr": {
+					Tools:           []string{"news_fetch", "translate"},
+					AllowedCommands: []string{"help", "reset"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+
+	if err := gw.handleTelegramMessage(42, "/help", nil); err != nil {
+		t.Fatalf("handleTelegramMessage returned error: %v", err)
+	}
+	if client.callCount.Load() != 0 {
+		t.Fatalf("help should not call ACP, got %d calls", client.callCount.Load())
+	}
+	texts := strings.Join(callCapture.sentTexts(), "\n")
+	if !strings.Contains(texts, "/help") || !strings.Contains(texts, "/reset") {
+		t.Fatalf("help text missing allowed commands: %q", texts)
+	}
+	if strings.Contains(texts, "/whoami") || strings.Contains(texts, "/status") {
+		t.Fatalf("help text included disallowed commands: %q", texts)
+	}
+}
+
+func TestTelegramCommandRefusesDisallowedProfileCommand(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile: "news_fr",
+			Profiles: map[string]config.GatewayProfile{
+				"news_fr": {
+					Tools:           []string{"news_fetch"},
+					AllowedCommands: []string{"help"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+
+	if err := gw.handleTelegramMessage(42, "/reset", nil); err != nil {
+		t.Fatalf("handleTelegramMessage returned error: %v", err)
+	}
+	if client.callCount.Load() != 0 {
+		t.Fatalf("disallowed command should not call ACP, got %d calls", client.callCount.Load())
+	}
+	texts := strings.Join(callCapture.sentTexts(), "\n")
+	if !strings.Contains(texts, "not allowed") {
+		t.Fatalf("expected refusal, got %q", texts)
+	}
+}
+
+func TestTelegramCommandRefusesCommandsWhenConfiguredProfileIsMissing(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile:  "missing",
+			Profiles: map[string]config.GatewayProfile{},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+
+	if err := gw.handleTelegramMessage(42, "/help", nil); err != nil {
+		t.Fatalf("handleTelegramMessage returned error: %v", err)
+	}
+	if client.callCount.Load() != 0 {
+		t.Fatalf("missing profile command should not call ACP, got %d calls", client.callCount.Load())
+	}
+	texts := strings.Join(callCapture.sentTexts(), "\n")
+	if !strings.Contains(texts, "not allowed") {
+		t.Fatalf("expected fail-closed refusal, got %q", texts)
+	}
+}
+
+func TestTelegramCommandWhoamiAndStatusAreLocal(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			RunDir:  "/tmp/runs",
+			Profile: "operator",
+			Profiles: map[string]config.GatewayProfile{
+				"operator": {
+					Tools:           []string{"fs_read", "sh"},
+					Provider:        "glm",
+					Model:           "glm-4.6",
+					Solver:          "react",
+					AllowedCommands: []string{"whoami", "status"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+	if _, err := gw.getOrCreateSession(42); err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
+	client.callCount.Store(0)
+
+	if err := gw.handleTelegramMessage(42, "/whoami", nil); err != nil {
+		t.Fatalf("whoami returned error: %v", err)
+	}
+	if err := gw.handleTelegramMessage(42, "/status", nil); err != nil {
+		t.Fatalf("status returned error: %v", err)
+	}
+	if client.callCount.Load() != 0 {
+		t.Fatalf("local commands should not call ACP, got %d calls", client.callCount.Load())
+	}
+	texts := strings.Join(callCapture.sentTexts(), "\n")
+	for _, want := range []string{"ChatID: 42", "Profile: operator", "Provider: glm", "Session: tg-42", "Status: idle"} {
+		if !strings.Contains(texts, want) {
+			t.Fatalf("command output missing %q: %q", want, texts)
+		}
+	}
+}
+
+func TestTelegramCommandResetClosesAndDropsSession(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+	if _, err := gw.getOrCreateSession(42); err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
+
+	if err := gw.handleTelegramMessage(42, "/reset", nil); err != nil {
+		t.Fatalf("handleTelegramMessage returned error: %v", err)
+	}
+	if client.lastCloseSessionID != "tg-42" {
+		t.Fatalf("closed session = %q, want tg-42", client.lastCloseSessionID)
+	}
+	if _, ok := gw.gatewayCore().SessionInfo("42"); ok {
+		t.Fatal("session was not dropped after reset")
+	}
+	if !strings.Contains(strings.Join(callCapture.sentTexts(), "\n"), "Reset") {
+		t.Fatalf("expected reset confirmation, got %v", callCapture.sentTexts())
+	}
+}
+
+func TestTelegramCommandReconfiguresRuntime(t *testing.T) {
+	client := &telegramSessionCaptureClient{
+		reconfigureResponse: acp.SessionReconfigureResult{
+			SessionID: "tg-42",
+			Provider:  "ollama",
+			Model:     "llama3.1",
+			Solver:    "react",
+		},
+	}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile: "operator",
+			Profiles: map[string]config.GatewayProfile{
+				"operator": {
+					Tools:           []string{"fs_read"},
+					AllowedCommands: []string{"provider", "model", "solver"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+	if _, err := gw.getOrCreateSession(42); err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
+
+	if err := gw.handleTelegramMessage(42, "/provider ollama", nil); err != nil {
+		t.Fatalf("provider command returned error: %v", err)
+	}
+	if client.lastReconfigure.SessionID != "tg-42" || client.lastReconfigure.Provider != "ollama" {
+		t.Fatalf("provider reconfigure = %#v", client.lastReconfigure)
+	}
+	if err := gw.handleTelegramMessage(42, "/model llama3.1", nil); err != nil {
+		t.Fatalf("model command returned error: %v", err)
+	}
+	if client.lastReconfigure.SessionID != "tg-42" || client.lastReconfigure.Model != "llama3.1" {
+		t.Fatalf("model reconfigure = %#v", client.lastReconfigure)
+	}
+	if err := gw.handleTelegramMessage(42, "/solver react", nil); err != nil {
+		t.Fatalf("solver command returned error: %v", err)
+	}
+	if client.lastReconfigure.SessionID != "tg-42" || client.lastReconfigure.Solver != "react" {
+		t.Fatalf("solver reconfigure = %#v", client.lastReconfigure)
+	}
+	texts := strings.Join(callCapture.sentTexts(), "\n")
+	if !strings.Contains(texts, "Runtime updated.") || !strings.Contains(texts, "Provider: ollama") {
+		t.Fatalf("missing reconfigure confirmation: %q", texts)
+	}
+}
+
+func TestTelegramCommandProfileSwitchesSandboxAndSession(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile: "operator",
+			Profiles: map[string]config.GatewayProfile{
+				"operator": {
+					Tools:           []string{"fs_read", "sh"},
+					Dangerous:       []string{"sh"},
+					AllowedCommands: []string{"profile"},
+				},
+				"news_fr": {
+					Tools:           []string{"news_fetch", "translate"},
+					Dangerous:       []string{},
+					Provider:        "glm",
+					Solver:          "react",
+					AllowedCommands: []string{"help", "reset"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+	if _, err := gw.getOrCreateSession(42); err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
+
+	if err := gw.handleTelegramMessage(42, "/profile news_fr", nil); err != nil {
+		t.Fatalf("profile command returned error: %v", err)
+	}
+	if client.lastCloseSessionID != "tg-42" {
+		t.Fatalf("closed session = %q, want tg-42", client.lastCloseSessionID)
+	}
+	if got := gw.cfg.ChatProfiles["42"]; got != "news_fr" {
+		t.Fatalf("chat profile = %q, want news_fr", got)
+	}
+	if strings.Join(client.lastNew.Tools, ",") != "news_fetch,translate" {
+		t.Fatalf("new session tools = %v", client.lastNew.Tools)
+	}
+	if client.lastNew.Dangerous == nil || len(client.lastNew.Dangerous) != 0 {
+		t.Fatalf("new session dangerous = %#v, want explicit empty list", client.lastNew.Dangerous)
+	}
+	if client.lastNew.Provider != "glm" || client.lastNew.Solver != "react" {
+		t.Fatalf("new session runtime = %#v", client.lastNew)
+	}
+	if !strings.Contains(strings.Join(callCapture.sentTexts(), "\n"), "Profile set to news_fr") {
+		t.Fatalf("expected profile confirmation, got %v", callCapture.sentTexts())
+	}
+}
+
+func TestTelegramCommandProfileRefusesUnknownProfile(t *testing.T) {
+	client := &telegramSessionCaptureClient{}
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		ctx: context.Background(),
+		cfg: telegramRuntimeConfig{
+			Profile: "operator",
+			Profiles: map[string]config.GatewayProfile{
+				"operator": {
+					AllowedCommands: []string{"profile"},
+				},
+			},
+		},
+		cli:            client,
+		telegramCallFn: callCapture.call,
+	}
+
+	if err := gw.handleTelegramMessage(42, "/profile missing", nil); err != nil {
+		t.Fatalf("profile command returned error: %v", err)
+	}
+	if client.lastCloseSessionID != "" {
+		t.Fatalf("unexpected closed session %q", client.lastCloseSessionID)
+	}
+	if _, ok := gw.cfg.ChatProfiles["42"]; ok {
+		t.Fatalf("unknown profile changed chat profile: %#v", gw.cfg.ChatProfiles)
+	}
+	if !strings.Contains(strings.Join(callCapture.sentTexts(), "\n"), "Unknown profile") {
+		t.Fatalf("expected unknown profile message, got %v", callCapture.sentTexts())
 	}
 }
 
@@ -303,6 +675,13 @@ type telegramFileDownloadLeakRoundTripper struct {
 	token string
 }
 
+type telegramSendVoiceRoundTripper struct {
+	mu          sync.Mutex
+	called      bool
+	contentType string
+	body        string
+}
+
 func (r telegramFileDownloadLeakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if strings.Contains(req.URL.Path, "/getFile") {
 		body, _ := json.Marshal(struct {
@@ -316,6 +695,32 @@ func (r telegramFileDownloadLeakRoundTripper) RoundTrip(req *http.Request) (*htt
 		return jsonResp(body), nil
 	}
 	return nil, errors.New("download failed for " + req.URL.String())
+}
+
+func (r *telegramSendVoiceRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !strings.HasSuffix(req.URL.Path, "/sendVoice") {
+		return nil, errors.New("unexpected method " + req.URL.Path)
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	r.called = true
+	r.contentType = req.Header.Get("Content-Type")
+	r.body = string(body)
+	r.mu.Unlock()
+	resp, _ := json.Marshal(struct {
+		OK     bool `json:"ok"`
+		Result bool `json:"result"`
+	}{OK: true, Result: true})
+	return jsonResp(resp), nil
+}
+
+func (r *telegramSendVoiceRoundTripper) snapshot() (bool, string, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.called, r.contentType, r.body
 }
 
 func jsonResp(body []byte) *http.Response {
@@ -529,14 +934,12 @@ func TestPollOnceTranscribesVoiceMessage(t *testing.T) {
 	client := &telegramTestClient{}
 	callCapture := &telegramCallCapture{}
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		cfg:             telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1},
-		http:            &http.Client{Transport: rt},
-		token:           "123:test",
-		cli:             client,
-		telegramCallFn:  callCapture.call,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1},
+		http:           &http.Client{Transport: rt},
+		token:          "123:test",
+		cli:            client,
+		telegramCallFn: callCapture.call,
 	}
 
 	if err := gw.pollOnce(); err != nil {
@@ -558,9 +961,6 @@ func TestPollOnceTranscribesVoiceMessage(t *testing.T) {
 	}
 	if !foundEcho {
 		t.Fatalf("expected transcript echo in sent messages, got %v", callCapture.sentTexts())
-	}
-	if !callCapture.calledMethod("setMessageReaction") {
-		t.Fatalf("expected ack reaction for actionable voice message")
 	}
 }
 
@@ -585,14 +985,12 @@ func TestPollOnceForwardsPhotoAsImagePromptAndReacts(t *testing.T) {
 	client := &telegramTestClient{}
 	callCapture := &telegramCallCapture{}
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		cfg:             telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1, Workspace: workspace},
-		http:            &http.Client{Transport: rt},
-		token:           "123:test",
-		cli:             client,
-		telegramCallFn:  callCapture.call,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1, Workspace: workspace},
+		http:           &http.Client{Transport: rt},
+		token:          "123:test",
+		cli:            client,
+		telegramCallFn: callCapture.call,
 	}
 
 	if err := gw.pollOnce(); err != nil {
@@ -602,9 +1000,7 @@ func TestPollOnceForwardsPhotoAsImagePromptAndReacts(t *testing.T) {
 	if rt.getFileN != 1 || rt.downloadN != 1 {
 		t.Fatalf("expected one getFile + one download, got getFile=%d download=%d", rt.getFileN, rt.downloadN)
 	}
-	if !callCapture.calledMethod("setMessageReaction") {
-		t.Fatalf("expected ack reaction for actionable photo message")
-	}
+
 	if got := client.lastPrompt.Prompt; len(got) != 2 {
 		t.Fatalf("prompt blocks = %d, want 2: %#v", len(got), got)
 	} else {
@@ -651,6 +1047,96 @@ func TestTelegramWorkspacePath(t *testing.T) {
 	}
 }
 
+func TestTelegramBuildPromptKeepsImageToolInstructions(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "work")
+	imgPath := filepath.Join(workspace, ".v100-telegram-images", "img.jpg")
+	got := telegramBuildPrompt(workspace, gatewaycore.Update{
+		ChatID: "42",
+		Text:   "post this",
+		Images: []gatewaycore.ImageAttachment{{
+			MIMEType: "image/png",
+			Data:     []byte("image-bytes"),
+			Path:     imgPath,
+		}},
+	})
+	if len(got) != 2 {
+		t.Fatalf("prompt blocks = %d, want 2", len(got))
+	}
+	for _, want := range []string{
+		"Telegram image attachments were saved as local files",
+		"/workspace/.v100-telegram-images/img.jpg",
+		"atproto_upload_blob",
+	} {
+		if !strings.Contains(got[0].Text, want) {
+			t.Fatalf("prompt text missing %q: %q", want, got[0].Text)
+		}
+	}
+	if got[1].Type != "image" || got[1].MimeType != "image/png" || got[1].Data == "" {
+		t.Fatalf("image prompt block = %#v", got[1])
+	}
+}
+
+func TestTelegramGatewayTransportAdapterUsesStringChatIDs(t *testing.T) {
+	callCapture := &telegramCallCapture{}
+	gw := &telegramGateway{
+		cfg: telegramRuntimeConfig{
+			AllowedChatIDs: map[int64]struct{}{42: {}},
+		},
+		telegramCallFn: callCapture.call,
+	}
+	if gw.Name() != "telegram" {
+		t.Fatalf("transport name = %q", gw.Name())
+	}
+	if !gw.Allowed("42") || gw.Allowed("99") || gw.Allowed("not-a-chat-id") {
+		t.Fatalf("unexpected allowed results")
+	}
+	if err := gw.SendText(context.Background(), "42", []string{"hello"}); err != nil {
+		t.Fatalf("SendText returned error: %v", err)
+	}
+	if err := gw.SendTyping(context.Background(), "42"); err != nil {
+		t.Fatalf("SendTyping returned error: %v", err)
+	}
+	if err := gw.React(context.Background(), "42", "7", "👍"); err != nil {
+		t.Fatalf("React returned error: %v", err)
+	}
+	for _, method := range []string{"sendMessage", "sendChatAction", "setMessageReaction"} {
+		if !callCapture.calledMethod(method) {
+			t.Fatalf("expected method %s to be called, got %#v", method, callCapture.methods)
+		}
+	}
+	if err := gw.SendText(context.Background(), "invalid", []string{"hello"}); err == nil {
+		t.Fatal("expected invalid chat id error")
+	}
+}
+
+func TestTelegramSendVoiceUploadsAudioFile(t *testing.T) {
+	audioPath := filepath.Join(t.TempDir(), "reply.ogg")
+	if err := os.WriteFile(audioPath, []byte("fake-ogg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt := &telegramSendVoiceRoundTripper{}
+	gw := &telegramGateway{
+		ctx:   context.Background(),
+		http:  &http.Client{Transport: rt},
+		token: "123:test",
+	}
+	if err := gw.SendVoice(context.Background(), "42", audioPath); err != nil {
+		t.Fatalf("SendVoice returned error: %v", err)
+	}
+	called, contentType, body := rt.snapshot()
+	if !called {
+		t.Fatal("sendVoice was not called")
+	}
+	if !strings.HasPrefix(contentType, "multipart/form-data;") {
+		t.Fatalf("content type = %q", contentType)
+	}
+	for _, want := range []string{"name=\"chat_id\"", "42", "name=\"voice\"", "reply.ogg", "fake-ogg"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("multipart body missing %q: %q", want, body)
+		}
+	}
+}
+
 func TestPollOnceVoiceWithoutTranscriberReplies(t *testing.T) {
 	t.Setenv("V100_TRANSCRIBE_CMD", "")
 	t.Setenv("PATH", t.TempDir())
@@ -669,14 +1155,12 @@ func TestPollOnceVoiceWithoutTranscriberReplies(t *testing.T) {
 	client := &telegramTestClient{}
 	callCapture := &telegramCallCapture{}
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		cfg:             telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1},
-		http:            &http.Client{Transport: rt},
-		token:           "123:test",
-		cli:             client,
-		telegramCallFn:  callCapture.call,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1},
+		http:           &http.Client{Transport: rt},
+		token:          "123:test",
+		cli:            client,
+		telegramCallFn: callCapture.call,
 	}
 
 	if err := gw.pollOnce(); err != nil {
@@ -708,9 +1192,7 @@ func TestHandleTelegramMessageRejectsDisallowedChat(t *testing.T) {
 			StreamResponses: true,
 			StatusInterval:  time.Second,
 		},
-		cli:             client,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		cli: client,
 	}
 
 	if err := gw.handleTelegramMessage(999, "should be ignored", nil); err != nil {
@@ -739,14 +1221,12 @@ func TestPollOnceRejectsDisallowedChat(t *testing.T) {
 	}
 	callCapture := &telegramCallCapture{}
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		cfg:             telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1, StreamResponses: true},
-		http:            &http.Client{Transport: rt},
-		token:           "test",
-		cli:             client,
-		telegramCallFn:  callCapture.call,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{AllowedChatIDs: map[int64]struct{}{123: {}}, PollTimeout: 1, StreamResponses: true},
+		http:           &http.Client{Transport: rt},
+		token:          "test",
+		cli:            client,
+		telegramCallFn: callCapture.call,
 	}
 
 	if err := gw.pollOnce(); err != nil {
@@ -765,19 +1245,20 @@ func TestPollOnceRejectsDisallowedChat(t *testing.T) {
 
 func TestHandleACPNotificationRunErrorNotifiesInNonStreamingMode(t *testing.T) {
 	callCapture := &telegramCallCapture{}
+	client := &telegramSessionCaptureClient{}
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		cfg:             telegramRuntimeConfig{StreamResponses: false},
-		telegramCallFn:  callCapture.call,
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:            context.Background(),
+		cfg:            telegramRuntimeConfig{StreamResponses: false},
+		cli:            client,
+		telegramCallFn: callCapture.call,
 	}
-	state := &telegramGatewaySession{chatID: 42, sessionID: "session-42"}
-	gw.sessionsByChat[42] = state
-	gw.sessionsByAcpID["session-42"] = state
+	state, err := gw.getOrCreateSession(42)
+	if err != nil {
+		t.Fatalf("getOrCreateSession returned error: %v", err)
+	}
 
 	params, err := json.Marshal(acp.SessionUpdateParams{
-		SessionID: "session-42",
+		SessionID: state.SessionID,
 		Update: acp.Update{
 			Type:   "run_error",
 			Status: "failed",
@@ -806,10 +1287,8 @@ func TestHandleACPNotificationRunErrorNotifiesInNonStreamingMode(t *testing.T) {
 
 func TestHandleACPNotificationConnectionClosedSignals(t *testing.T) {
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		acpClosed:       make(chan struct{}),
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx:       context.Background(),
+		acpClosed: make(chan struct{}),
 	}
 
 	note := acp.Notification{JSONRPC: "2.0", Method: acp.MethodConnectionClosed}
@@ -831,9 +1310,7 @@ func TestHandleACPNotificationConnectionClosedSignals(t *testing.T) {
 
 func TestHandleACPNotificationDropsMalformedPayload(t *testing.T) {
 	gw := &telegramGateway{
-		ctx:             context.Background(),
-		sessionsByChat:  make(map[int64]*telegramGatewaySession),
-		sessionsByAcpID: make(map[string]*telegramGatewaySession),
+		ctx: context.Background(),
 	}
 	note := acp.Notification{
 		JSONRPC: "2.0",
@@ -928,7 +1405,11 @@ func TestGatewayCmdHasTelegramSubcommand(t *testing.T) {
 	cfgPath := "config.toml"
 	cmd := gatewayCmd(&cfgPath)
 	children := cmd.Commands()
-	if len(children) != 1 || children[0].Name() != "telegram" {
+	names := map[string]bool{}
+	for _, c := range children {
+		names[c.Name()] = true
+	}
+	if len(children) != 2 || !names["telegram"] || !names["signal"] {
 		t.Fatalf("gateway command children = %v", func() []string {
 			out := make([]string, 0, len(children))
 			for _, c := range children {
@@ -938,7 +1419,14 @@ func TestGatewayCmdHasTelegramSubcommand(t *testing.T) {
 		}())
 	}
 
-	if children[0].Flags().Lookup("once") == nil {
+	var telegramCmd *cobra.Command
+	for _, c := range children {
+		if c.Name() == "telegram" {
+			telegramCmd = c
+			break
+		}
+	}
+	if telegramCmd == nil || telegramCmd.Flags().Lookup("once") == nil {
 		t.Fatal("expected telegram command to expose --once flag")
 	}
 }

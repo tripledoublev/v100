@@ -28,6 +28,8 @@ type Config struct {
 	ATProto    ATProtoConfig             `toml:"atproto"`
 	ATProtoAlt ATProtoConfig             `toml:"alt-atproto"`
 	Telegram   TelegramConfig            `toml:"telegram"`
+	Signal     SignalConfig              `toml:"signal"`
+	Gateway    GatewayConfig             `toml:"gateway"`
 	Embedding  EmbeddingConfig           `toml:"embedding"`
 }
 
@@ -47,16 +49,64 @@ type ATProtoConfig struct {
 
 // TelegramConfig holds credentials and run behavior for Telegram gateway.
 type TelegramConfig struct {
-	Enabled           bool    `toml:"enabled"`
-	BotToken          string  `toml:"bot_token"`               // direct bot token value
-	BotTokenEnv       string  `toml:"bot_token_env"`           // env var name (preferred)
-	PollTimeoutSec    int     `toml:"poll_timeout_seconds"`    // getUpdates timeout
-	RunDir            string  `toml:"run_dir"`                 // optional runs base directory
-	Workspace         string  `toml:"workspace"`               // optional working directory for tool execution
-	StreamResponses   bool    `toml:"stream_responses"`        // send chunk updates as they arrive
-	StatusIntervalSec int     `toml:"status_interval_seconds"` // status update throttle
-	AllowedChatIDs    []int64 `toml:"allowed_chat_ids"`        // whitelist of chat IDs
-	Provider          string  `toml:"provider"`                // override defaults.provider for the ACP child (empty = inherit)
+	Enabled           bool              `toml:"enabled"`
+	BotToken          string            `toml:"bot_token"`               // direct bot token value
+	BotTokenEnv       string            `toml:"bot_token_env"`           // env var name (preferred)
+	PollTimeoutSec    int               `toml:"poll_timeout_seconds"`    // getUpdates timeout
+	RunDir            string            `toml:"run_dir"`                 // optional runs base directory
+	Workspace         string            `toml:"workspace"`               // optional working directory for tool execution
+	StreamResponses   bool              `toml:"stream_responses"`        // send chunk updates as they arrive
+	VoiceReplies      bool              `toml:"voice_replies"`           // synthesize voice replies with V100_TTS_CMD
+	VoiceReplyMode    string            `toml:"voice_reply_mode"`        // audio | audio+text
+	StatusIntervalSec int               `toml:"status_interval_seconds"` // status update throttle
+	AllowedChatIDs    []int64           `toml:"allowed_chat_ids"`        // whitelist of chat IDs
+	Provider          string            `toml:"provider"`                // override defaults.provider for the ACP child (empty = inherit)
+	Profile           string            `toml:"profile"`                 // gateway-wide default profile
+	ChatProfiles      map[string]string `toml:"chat_profiles"`           // per-chat profile overrides
+}
+
+// SignalConfig holds signal-cli JSON-RPC gateway settings.
+type SignalConfig struct {
+	Enabled           bool              `toml:"enabled"`
+	Account           string            `toml:"account"`                 // registered signal-cli account number
+	Socket            string            `toml:"socket"`                  // unix socket path for signal-cli daemon
+	TCP               string            `toml:"tcp"`                     // optional host:port for signal-cli daemon
+	RPCMode           string            `toml:"rpc_mode"`                // socket | tcp | stdio
+	RunDir            string            `toml:"run_dir"`                 // optional runs base directory
+	Workspace         string            `toml:"workspace"`               // optional working directory for tool execution
+	StreamResponses   bool              `toml:"stream_responses"`        // send chunk updates as they arrive
+	VoiceReplies      bool              `toml:"voice_replies"`           // synthesize voice replies with V100_TTS_CMD
+	VoiceReplyMode    string            `toml:"voice_reply_mode"`        // audio | audio+text
+	StatusIntervalSec int               `toml:"status_interval_seconds"` // status update throttle
+	AllowedNumbers    []string          `toml:"allowed_numbers"`         // whitelist of Signal sender numbers
+	Provider          string            `toml:"provider"`                // override defaults.provider for the ACP child (empty = inherit)
+	Profile           string            `toml:"profile"`                 // gateway-wide default profile
+	ChatProfiles      map[string]string `toml:"chat_profiles"`           // per-number profile overrides
+}
+
+// GatewayConfig holds shared gateway profiles used by chat transports.
+type GatewayConfig struct {
+	Profiles map[string]GatewayProfile `toml:"profiles"`
+}
+
+// GatewayProfile constrains provider/runtime settings for a gateway chat.
+type GatewayProfile struct {
+	Tools            []string `toml:"tools"`
+	Dangerous        []string `toml:"dangerous"`
+	AllowedCommands  []string `toml:"allowed_commands"`
+	Provider         string   `toml:"provider"`
+	Model            string   `toml:"model"`
+	Solver           string   `toml:"solver"`
+	SystemPrompt     string   `toml:"system_prompt"`
+	SystemPromptPath string   `toml:"system_prompt_path"`
+	NetworkTier      string   `toml:"network_tier"`
+	BudgetSteps      int      `toml:"budget_steps"`
+	BudgetTokens     int      `toml:"budget_tokens"`
+	BudgetCostUSD    float64  `toml:"budget_cost_usd"`
+	VoiceReplies     *bool    `toml:"voice_replies"`
+	VoiceReplyMode   string   `toml:"voice_reply_mode"`
+	ReactionMode     string   `toml:"reaction_mode"`
+	ReactionEmojis   []string `toml:"reaction_emojis"`
 }
 
 // UpdateConfig defines auto-update behavior.
@@ -66,7 +116,7 @@ type UpdateConfig struct {
 
 // UIConfig defines terminal UI rendering preferences.
 type UIConfig struct {
-	Theme string `toml:"theme"` // v100 | mono | dracula | catppuccin
+	Theme string `toml:"theme"` // v100 | mono | dracula | catppuccin | gruvbox | nord | rose-pine | tokyonight
 }
 
 // SandboxConfig defines the isolated execution environment.
@@ -291,7 +341,7 @@ func DefaultConfig() *Config {
 		Tools: ToolsConfig{
 			Enabled: []string{
 				"fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh",
-				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
+				"git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "translate", "wiki", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write",
 				"fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect",
 				"atproto_feed", "atproto_notifications", "atproto_upload_blob", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall", "atproto_anon_synth",
 			},
@@ -361,7 +411,22 @@ func DefaultConfig() *Config {
 			RunDir:            "",
 			Workspace:         "",
 			StreamResponses:   true,
+			VoiceReplyMode:    "audio+text",
 			StatusIntervalSec: 2,
+		},
+		Signal: SignalConfig{
+			Enabled:           false,
+			RPCMode:           "socket",
+			Socket:            "/run/signal-cli.sock",
+			RunDir:            "",
+			Workspace:         "",
+			StreamResponses:   true,
+			VoiceReplyMode:    "audio+text",
+			StatusIntervalSec: 2,
+			ChatProfiles:      map[string]string{},
+		},
+		Gateway: GatewayConfig{
+			Profiles: map[string]GatewayProfile{},
 		},
 		UI: UIConfig{
 			Theme: "v100",
@@ -463,7 +528,7 @@ provider = "ollama"
 model = "nomic-embed-text:latest"
 
 [tools]
-enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_upload_blob", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
+enabled = ["fs_read", "fs_write", "fs_list", "fs_mkdir", "fs_render_image", "sh", "git_status", "git_diff", "git_commit", "git_push", "curl_fetch", "web_extract", "web_search", "deep_research", "source_code", "news_fetch", "translate", "project_search", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_read", "blackboard_write", "fingerprint", "sem_diff", "sem_impact", "sem_blame", "provenance_lookup", "inspect_tool", "reflect", "atproto_feed", "atproto_notifications", "atproto_upload_blob", "atproto_post", "atproto_create_record", "atproto_resolve", "atproto_get_follows", "atproto_get_followers", "atproto_get_profile", "atproto_follower_momentum", "atproto_graph_explorer", "atproto_community_detect", "atproto_engagement_health", "atproto_vibe_check", "atproto_daily_digest", "atproto_index", "atproto_recall"]
 dangerous = ["fs_write", "sh", "git_commit", "git_push", "patch_apply", "agent", "dispatch", "orchestrate", "blackboard_write", "fingerprint", "atproto_create_record"]
 
 [tools.env]
@@ -497,7 +562,7 @@ compress_provider = "glm"     # provider for compression calls (empty = main pro
 mirror_tool_results = false   # when true, predict tool outputs and log hallucination coefficients
 
 [ui]
-theme = "v100"                 # v100 | mono | dracula | catppuccin; override with V100_THEME or --theme
+theme = "v100"                 # v100 | mono | dracula | catppuccin | gruvbox | nord | rose-pine | tokyonight; override with V100_THEME or --theme
 
 [sandbox]
 enabled = false
@@ -532,8 +597,24 @@ poll_timeout_seconds = 30
 run_dir = ""                    # optional override of runs/ base directory
 workspace = ""                  # optional override of workspace used by sessions
 stream_responses = true         # stream agent responses via update notifications
+voice_replies = false           # synthesize replies with V100_TTS_CMD
+voice_reply_mode = "audio+text" # audio | audio+text
 status_interval_seconds = 2
 allowed_chat_ids = []            # optional allowlist; empty means allow all chats
+
+[signal]
+enabled = false
+account = ""                     # registered signal-cli account, e.g. "+15145551234"
+socket = "/run/signal-cli.sock"  # unix socket for signal-cli daemon
+tcp = ""                         # optional host:port for signal-cli daemon
+rpc_mode = "socket"              # socket | tcp | stdio
+run_dir = ""                     # optional override of runs/ base directory
+workspace = ""                   # optional override of workspace used by sessions
+stream_responses = true          # stream agent responses via update notifications
+voice_replies = false            # synthesize replies with V100_TTS_CMD
+voice_reply_mode = "audio+text"  # audio | audio+text
+status_interval_seconds = 2
+allowed_numbers = []             # optional allowlist; empty means allow all numbers
 `
 }
 
@@ -608,6 +689,7 @@ func loadConfigFile(path string) (*Config, error) {
 	ensureString(&cfg.Tools.Enabled, "web_search")
 	ensureString(&cfg.Tools.Enabled, "deep_research")
 	ensureString(&cfg.Tools.Enabled, "source_code")
+	ensureString(&cfg.Tools.Enabled, "translate")
 	ensureString(&cfg.Tools.Enabled, "fs_render_image")
 	ensureString(&cfg.Tools.Enabled, "fingerprint")
 	ensureString(&cfg.Tools.Dangerous, "fingerprint")
@@ -621,6 +703,7 @@ func loadConfigFile(path string) (*Config, error) {
 	applyWakeDefaults(&cfg.Wake, DefaultConfig().Wake)
 	applyUpdateDefaults(&cfg.Update, DefaultConfig().Update)
 	applyTelegramDefaults(&cfg.Telegram, DefaultConfig().Telegram)
+	applySignalDefaults(&cfg.Signal, DefaultConfig().Signal)
 	if cfg.Embedding.Provider == "" {
 		cfg.Embedding.Provider = DefaultConfig().Embedding.Provider
 	}
@@ -821,6 +904,50 @@ func applyTelegramDefaults(dst *TelegramConfig, defaults TelegramConfig) {
 	if dst.StatusIntervalSec <= 0 {
 		dst.StatusIntervalSec = defaults.StatusIntervalSec
 	}
+	if strings.TrimSpace(dst.VoiceReplyMode) == "" {
+		dst.VoiceReplyMode = defaults.VoiceReplyMode
+	}
+	if dst.ChatProfiles == nil {
+		dst.ChatProfiles = map[string]string{}
+	}
+}
+
+func applySignalDefaults(dst *SignalConfig, defaults SignalConfig) {
+	if dst == nil {
+		return
+	}
+	if strings.TrimSpace(dst.RPCMode) == "" {
+		dst.RPCMode = defaults.RPCMode
+	}
+	if strings.TrimSpace(dst.Socket) == "" && strings.TrimSpace(dst.TCP) == "" {
+		dst.Socket = defaults.Socket
+	}
+	if dst.StatusIntervalSec <= 0 {
+		dst.StatusIntervalSec = defaults.StatusIntervalSec
+	}
+	if strings.TrimSpace(dst.VoiceReplyMode) == "" {
+		dst.VoiceReplyMode = defaults.VoiceReplyMode
+	}
+	if dst.ChatProfiles == nil {
+		dst.ChatProfiles = map[string]string{}
+	}
+}
+
+func (cfg *Config) ResolveGatewayProfile(gatewayDefault string, chatProfiles map[string]string, chatID string) (string, GatewayProfile, bool) {
+	if cfg == nil || cfg.Gateway.Profiles == nil {
+		return "", GatewayProfile{}, false
+	}
+	name := strings.TrimSpace(gatewayDefault)
+	if chatProfiles != nil {
+		if chatName := strings.TrimSpace(chatProfiles[chatID]); chatName != "" {
+			name = chatName
+		}
+	}
+	if name == "" {
+		return "", GatewayProfile{}, false
+	}
+	profile, ok := cfg.Gateway.Profiles[name]
+	return name, profile, ok
 }
 
 func applyDefaultsConfig(dst *DefaultsConfig, defaults DefaultsConfig) {

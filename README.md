@@ -36,6 +36,7 @@ v100 is designed for long-running, unattended execution:
 Tools are a first-class part of the runtime. The model interacts with the world through explicitly registered, schema-bound tools (40+ currently available):
 - **Safety boundaries**: Tools are marked `Safe` or `Dangerous`. Dangerous tools can require explicit operator confirmation, trigger mandatory "Reflection" turns (`Policy.ReflectOnDangerous`) to assess confidence, or be blocked entirely.
 - **External API guardrails**: ATProto and news tools use per-endpoint token-bucket rate limits and circuit breakers. `atproto_index`, `atproto_graph_explorer`, and `news_fetch` cap paginated requests at 100 items per call; repeated HTTP 429 responses emit structured alerts and open exponential backoff. `atproto_post` returns a dry-run preview unless `confirm=true` is supplied.
+- **Translation**: `translate` uses the active model provider by default, or a `V100_TRANSLATE_CMD` shim that receives `target_lang`, `source_lang`, and `formality` as args with source text on stdin.
 - **Sandboxing**: Runs can be executed inside isolated Docker containers with strict **Network Tiers** to prevent unauthorized data exfiltration.
 - **Semantic analysis**: Includes tools like `sem_diff`, `sem_impact`, and `sem_blame` that understand code entities such as functions and classes.
 
@@ -144,7 +145,8 @@ Enable Bubble Tea TUI for a better visual experience:
 ./v100 run --provider minimax --tui --workspace .
 ```
 
-Built-in TUI themes are `v100`, `mono`, `dracula`, and `catppuccin`.
+Built-in TUI themes are `v100`, `mono`, `dracula`, `catppuccin`, `gruvbox`,
+`nord`, `rose-pine`, and `tokyonight`.
 Configure `[ui] theme = "dracula"`, set `V100_THEME=dracula`, or pass
 `--theme dracula` to `run`/`resume`.
 

@@ -45,6 +45,7 @@ const (
 	MethodSessionList         = "session/list"
 	MethodSessionResume       = "session/resume"
 	MethodSessionLoad         = "session/load"
+	MethodSessionReconfigure  = "session/reconfigure"
 	MethodSessionPrompt       = "session/prompt"
 	MethodSessionClose        = "session/close"
 	MethodSessionCancel       = "session/cancel"
@@ -66,6 +67,7 @@ const (
 	ErrSessionBusy                = -32003
 	ErrSessionClosing             = -32004
 	ErrUnsupportedProtocolVersion = -32010
+	ErrInvalidSessionConfig       = -32021
 	ErrProviderConfiguration      = -32020
 )
 
@@ -91,6 +93,8 @@ func ErrorMessage(code int) string {
 		return "session closing"
 	case ErrUnsupportedProtocolVersion:
 		return "unsupported protocol version"
+	case ErrInvalidSessionConfig:
+		return "invalid session config"
 	case ErrProviderConfiguration:
 		return "provider configuration error"
 	default:
@@ -170,9 +174,19 @@ type SessionCapabilities struct {
 }
 
 type SessionNewParams struct {
-	SessionID string `json:"sessionId,omitempty"`
-	CWD       string `json:"cwd,omitempty"`
-	RunDir    string `json:"runDir,omitempty"`
+	SessionID     string   `json:"sessionId,omitempty"`
+	CWD           string   `json:"cwd,omitempty"`
+	RunDir        string   `json:"runDir,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	Solver        string   `json:"solver,omitempty"`
+	Tools         []string `json:"tools"`
+	Dangerous     []string `json:"dangerous"`
+	SystemPrompt  string   `json:"system_prompt,omitempty"`
+	NetworkTier   string   `json:"network_tier,omitempty"`
+	BudgetSteps   int      `json:"budget_steps,omitempty"`
+	BudgetTokens  int      `json:"budget_tokens,omitempty"`
+	BudgetCostUSD float64  `json:"budget_cost_usd,omitempty"`
 }
 
 type SessionNewResult struct {
@@ -213,6 +227,20 @@ type SessionResumeParams struct {
 type SessionResumeResult struct {
 	SessionID string `json:"sessionId"`
 	RunID     string `json:"runId"`
+}
+
+type SessionReconfigureParams struct {
+	SessionID string `json:"sessionId"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Solver    string `json:"solver,omitempty"`
+}
+
+type SessionReconfigureResult struct {
+	SessionID string `json:"sessionId"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Solver    string `json:"solver"`
 }
 
 type SuggestedPrompt struct {

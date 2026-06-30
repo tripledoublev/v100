@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,12 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Telegram.BotTokenEnv != "V100_TELEGRAM_BOT_TOKEN" {
 		t.Errorf("expected default telegram token env V100_TELEGRAM_BOT_TOKEN, got %q", cfg.Telegram.BotTokenEnv)
+	}
+	if cfg.Signal.Enabled {
+		t.Error("expected signal default to be disabled")
+	}
+	if cfg.Signal.RPCMode != "socket" || cfg.Signal.Socket != "/run/signal-cli.sock" {
+		t.Errorf("unexpected signal defaults: %+v", cfg.Signal)
 	}
 	if cfg.Tools.Auth.GitHub.Mode != "disabled" {
 		t.Errorf("expected GitHub tool auth disabled by default, got %q", cfg.Tools.Auth.GitHub.Mode)
@@ -128,6 +135,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !containsString(cfg.Tools.Enabled, "source_code") {
 		t.Error("expected source_code tool to be enabled by default")
 	}
+	if !containsString(cfg.Tools.Enabled, "translate") {
+		t.Error("expected translate tool to be enabled by default")
+	}
 
 	shDangerous := false
 	for _, tool := range cfg.Tools.Dangerous {
@@ -208,6 +218,82 @@ theme = "dracula"
 		t.Errorf("unexpected GitHub tool auth config: %+v", cfg.Tools.Auth.GitHub)
 	}
 
+	profilePath := filepath.Join(dir, "profiles.toml")
+	if err := os.WriteFile(profilePath, []byte(`
+[gateway.profiles.news_fr]
+tools = ["news_fetch", "translate"]
+dangerous = []
+provider = "glm"
+model = "glm-4.6"
+solver = "react"
+system_prompt = "Réponds en français."
+network_tier = "research"
+budget_steps = 12
+budget_tokens = 40000
+budget_cost_usd = 0.25
+allowed_commands = ["help", "reset"]
+
+[gateway.profiles.operator]
+tools = ["fs_read", "sh"]
+dangerous = ["sh"]
+allowed_commands = ["help", "model", "provider", "solver", "profile", "reset"]
+
+[telegram]
+profile = "operator"
+
+[telegram.chat_profiles]
+"123456789" = "news_fr"
+
+[signal]
+profile = "news_fr"
+account = "+15145551234"
+rpc_mode = "tcp"
+tcp = "127.0.0.1:7583"
+allowed_numbers = ["+15145550000"]
+
+[signal.chat_profiles]
+"+15145550000" = "operator"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profileCfg, err := Load(profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	news := profileCfg.Gateway.Profiles["news_fr"]
+	if news.Provider != "glm" || news.Model != "glm-4.6" || news.Solver != "react" {
+		t.Fatalf("news profile runtime = %+v", news)
+	}
+	if !containsString(news.Tools, "translate") || len(news.Dangerous) != 0 {
+		t.Fatalf("news profile tools/dangerous = %+v", news)
+	}
+	if news.SystemPrompt != "Réponds en français." || news.NetworkTier != "research" {
+		t.Fatalf("news profile prompt/network = %+v", news)
+	}
+	if news.BudgetSteps != 12 || news.BudgetTokens != 40000 || news.BudgetCostUSD != 0.25 {
+		t.Fatalf("news profile budgets = %+v", news)
+	}
+	if profileCfg.Telegram.Profile != "operator" || profileCfg.Telegram.ChatProfiles["123456789"] != "news_fr" {
+		t.Fatalf("telegram profile binding = %+v", profileCfg.Telegram)
+	}
+	if profileCfg.Signal.Profile != "news_fr" || profileCfg.Signal.ChatProfiles["+15145550000"] != "operator" {
+		t.Fatalf("signal profile binding = %+v", profileCfg.Signal)
+	}
+	if profileCfg.Signal.Account != "+15145551234" || profileCfg.Signal.RPCMode != "tcp" || profileCfg.Signal.TCP != "127.0.0.1:7583" {
+		t.Fatalf("signal runtime config = %+v", profileCfg.Signal)
+	}
+	if profileCfg.ATProto.Handle != "" || profileCfg.ATProto.AppPasswordEnv != "" {
+		t.Fatalf("unexpected atproto defaults in inline config test: %+v", profileCfg.ATProto)
+	}
+	name, resolved, ok := profileCfg.ResolveGatewayProfile(profileCfg.Telegram.Profile, profileCfg.Telegram.ChatProfiles, "123456789")
+	if !ok || name != "news_fr" || resolved.SystemPrompt != "Réponds en français." {
+		t.Fatalf("ResolveGatewayProfile chat override = %q %#v %v", name, resolved, ok)
+	}
+	name, resolved, ok = profileCfg.ResolveGatewayProfile(profileCfg.Telegram.Profile, profileCfg.Telegram.ChatProfiles, "999")
+	if !ok || name != "operator" || !containsString(resolved.Tools, "sh") {
+		t.Fatalf("ResolveGatewayProfile default = %q %#v %v", name, resolved, ok)
+	}
+
 	cfgEnvPath := filepath.Join(dir, "telegram_env.toml")
 	t.Setenv("V100_TELEGRAM_TOKEN_TEST", "env-token")
 	if err := os.WriteFile(cfgEnvPath, []byte(`
@@ -245,6 +331,9 @@ bot_token_env = "V100_TELEGRAM_TOKEN_TEST"
 	}
 	if !containsString(cfg.Tools.Enabled, "source_code") {
 		t.Error("expected source_code tool to be enabled after migration")
+	}
+	if !containsString(cfg.Tools.Enabled, "translate") {
+		t.Error("expected translate tool to be enabled after migration")
 	}
 }
 
@@ -373,6 +462,12 @@ func TestDefaultTOMLContainsAnthropic(t *testing.T) {
 	if !contains(toml, `bot_token_env = "V100_TELEGRAM_BOT_TOKEN"`) {
 		t.Error("default TOML should include telegram bot token env fallback")
 	}
+	if !contains(toml, "[signal]") {
+		t.Error("default TOML should contain signal config section")
+	}
+	if !contains(toml, `rpc_mode = "socket"`) {
+		t.Error("default TOML should include signal rpc mode")
+	}
 }
 
 func TestLoadConfigAppliesSandboxDefaults(t *testing.T) {
@@ -442,6 +537,40 @@ backend = "docker"
 		if !containsString(cfg.Tools.Dangerous, want) {
 			t.Fatalf("expected dangerous tools to include %q, got %v", want, cfg.Tools.Dangerous)
 		}
+	}
+}
+
+func TestSignalVincentPresetIsReadOnlyAndResolvesPrompt(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "examples", "signal-chat-fr", "config.toml")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := ValidateConfigPath(path)
+	if result.HasErrors() {
+		t.Fatalf("preset validation failed: %+v", result.Findings)
+	}
+	name, profile, ok := cfg.ResolveGatewayProfile(cfg.Signal.Profile, cfg.Signal.ChatProfiles, "+1XXXXXXXXXX")
+	if !ok || name != "signal-vincent" {
+		t.Fatalf("resolved profile = %q ok=%v", name, ok)
+	}
+	wantTools := []string{"web_search", "web_extract", "wiki", "translate", "atproto_feed", "atproto_notifications", "atproto_resolve"}
+	if strings.Join(profile.Tools, ",") != strings.Join(wantTools, ",") {
+		t.Fatalf("tools = %v, want %v", profile.Tools, wantTools)
+	}
+	if len(profile.Dangerous) != 0 {
+		t.Fatalf("dangerous = %v, want empty", profile.Dangerous)
+	}
+	for _, denied := range []string{"sh", "git_status", "git_commit", "git_push", "atproto_post", "atproto_create_record", "news_fetch"} {
+		if containsString(profile.Tools, denied) {
+			t.Fatalf("unsafe tool %q unexpectedly present in signal-vincent profile: %v", denied, profile.Tools)
+		}
+	}
+	if profile.SystemPromptPath != "system_prompt_fr.md" {
+		t.Fatalf("system_prompt_path = %q", profile.SystemPromptPath)
+	}
+	if cfg.ATProto.Handle != "your-handle.bsky.social" || cfg.ATProto.AppPasswordEnv != "V100_BSKY_APP_PASSWORD" {
+		t.Fatalf("atproto config = %+v", cfg.ATProto)
 	}
 }
 

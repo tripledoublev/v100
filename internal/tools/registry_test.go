@@ -106,6 +106,7 @@ func TestRegistryEffects(t *testing.T) {
 		"deep_research",
 		"source_code",
 		"news_fetch",
+		"translate",
 		"git_push",
 		"sh",
 	})
@@ -116,6 +117,7 @@ func TestRegistryEffects(t *testing.T) {
 	reg.Register(tools.NewDeepResearch(nil))
 	reg.Register(tools.SourceCode())
 	reg.Register(tools.NewsFetch())
+	reg.Register(tools.Translate())
 	reg.Register(tools.GitPush())
 	reg.Register(tools.Sh())
 
@@ -139,6 +141,9 @@ func TestRegistryEffects(t *testing.T) {
 	}
 	if eff := reg.Effects("news_fetch"); !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("news_fetch effects = %+v, want network + external side effect", eff)
+	}
+	if eff := reg.Effects("translate"); eff != (tools.ToolEffects{}) {
+		t.Fatalf("translate effects = %+v, want no direct effects", eff)
 	}
 	if eff := reg.Effects("git_push"); !eff.MutatesWorkspace || !eff.NeedsNetwork || !eff.ExternalSideEffect {
 		t.Fatalf("git_push effects = %+v, want workspace mutation + network + external side effect", eff)

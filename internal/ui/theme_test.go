@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestThemeByNameResolvesBuiltIns(t *testing.T) {
-	for _, name := range []string{"v100", "mono", "dracula", "catppuccin", "default"} {
+	for _, name := range []string{"v100", "mono", "dracula", "catppuccin", "gruvbox", "nord", "tokyonight", "rose-pine", "default"} {
 		if _, ok := ThemeByName(name); !ok {
 			t.Fatalf("ThemeByName(%q) not found", name)
 		}
@@ -20,14 +21,37 @@ func TestThemeByNameResolvesBuiltIns(t *testing.T) {
 
 func TestThemeNamesAreSorted(t *testing.T) {
 	names := ThemeNames()
-	if strings.Join(names, ",") != "catppuccin,dracula,mono,v100" {
+	if strings.Join(names, ",") != "catppuccin,dracula,gruvbox,mono,nord,rose-pine,tokyonight,v100" {
 		t.Fatalf("ThemeNames() = %v", names)
+	}
+}
+
+func TestBuiltInThemesSetEveryColor(t *testing.T) {
+	colorType := reflect.TypeOf(lipgloss.Color(""))
+	for name, theme := range builtinThemes {
+		value := reflect.ValueOf(theme)
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Type().Field(i)
+			if field.Type != colorType {
+				continue
+			}
+			if got := value.Field(i).Interface().(lipgloss.Color); string(got) == "" {
+				t.Fatalf("theme %q field %s is empty", name, field.Name)
+			}
+		}
 	}
 }
 
 func TestApplyThemeRebuildsDerivedStyles(t *testing.T) {
 	original := CurrentTheme()
 	t.Cleanup(func() { ApplyTheme(original) })
+
+	for name, theme := range builtinThemes {
+		ApplyTheme(theme)
+		if CurrentTheme().Name != name {
+			t.Fatalf("CurrentTheme().Name = %q, want %q", CurrentTheme().Name, name)
+		}
+	}
 
 	custom := ThemeV100
 	custom.Name = "test"

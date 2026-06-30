@@ -308,6 +308,146 @@ func validateEffectiveConfig(result *ValidationResult, cfg *Config) {
 	validateWakeTaskReference(result, cfg)
 	validateToolCredentialConfig(result, cfg)
 	validateUIConfig(result, cfg)
+	validateGatewayProfiles(result, cfg)
+	validateVoiceReplyMode(result, "telegram.voice_reply_mode", cfg.Telegram.VoiceReplyMode)
+	validateSignalConfig(result, cfg)
+}
+
+func validateGatewayProfiles(result *ValidationResult, cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	profiles := cfg.Gateway.Profiles
+	if len(profiles) == 0 {
+		if strings.TrimSpace(cfg.Telegram.Profile) != "" {
+			result.Add(ValidationError, "telegram.profile", fmt.Sprintf("unknown gateway profile %q", cfg.Telegram.Profile))
+		}
+		for chatID, profileName := range cfg.Telegram.ChatProfiles {
+			result.Add(ValidationError, "telegram.chat_profiles."+chatID, fmt.Sprintf("unknown gateway profile %q", profileName))
+		}
+		if strings.TrimSpace(cfg.Signal.Profile) != "" {
+			result.Add(ValidationError, "signal.profile", fmt.Sprintf("unknown gateway profile %q", cfg.Signal.Profile))
+		}
+		for chatID, profileName := range cfg.Signal.ChatProfiles {
+			result.Add(ValidationError, "signal.chat_profiles."+chatID, fmt.Sprintf("unknown gateway profile %q", profileName))
+		}
+		return
+	}
+
+	validateGatewayProfileReference(result, profiles, "telegram.profile", cfg.Telegram.Profile)
+	for chatID, profileName := range cfg.Telegram.ChatProfiles {
+		validateGatewayProfileReference(result, profiles, "telegram.chat_profiles."+chatID, profileName)
+	}
+	validateGatewayProfileReference(result, profiles, "signal.profile", cfg.Signal.Profile)
+	for chatID, profileName := range cfg.Signal.ChatProfiles {
+		validateGatewayProfileReference(result, profiles, "signal.chat_profiles."+chatID, profileName)
+	}
+
+	knownTools := knownGatewayProfileTools()
+	for name, profile := range profiles {
+		path := "gateway.profiles." + name
+		allowed := map[string]bool{}
+		for _, toolName := range profile.Tools {
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" {
+				continue
+			}
+			allowed[toolName] = true
+			if !knownTools[toolName] {
+				result.Add(ValidationError, path+".tools", fmt.Sprintf("unknown tool %q", toolName))
+			}
+		}
+		for _, toolName := range profile.Dangerous {
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" {
+				continue
+			}
+			if !knownTools[toolName] {
+				result.Add(ValidationError, path+".dangerous", fmt.Sprintf("unknown tool %q", toolName))
+			}
+			if !allowed[toolName] {
+				result.Add(ValidationError, path+".dangerous", fmt.Sprintf("dangerous tool %q is not listed in tools", toolName))
+			}
+		}
+		if strings.TrimSpace(profile.Provider) != "" {
+			checkProviderReference(result, cfg, path+".provider", profile.Provider, false)
+		}
+		switch strings.ToLower(strings.TrimSpace(profile.Solver)) {
+		case "", "react", "plan_execute", "router", "smartrouter", "dual_channel", "rlm", "miniglm":
+		default:
+			result.Add(ValidationError, path+".solver", fmt.Sprintf("unknown solver %q", profile.Solver))
+		}
+		switch strings.ToLower(strings.TrimSpace(profile.NetworkTier)) {
+		case "", "off", "research", "open":
+		default:
+			result.Add(ValidationError, path+".network_tier", fmt.Sprintf("unsupported network tier %q; use off, research, or open", profile.NetworkTier))
+		}
+		validateVoiceReplyMode(result, path+".voice_reply_mode", profile.VoiceReplyMode)
+		validatePromptPath(result, path, profile.SystemPromptPath, cfg.PromptBaseDir(), "system_prompt_path")
+		switch profile.ReactionMode {
+		case "", "none", "simple", "random", "smart":
+			// ok
+		default:
+			result.Add(ValidationError, path, fmt.Sprintf("invalid reaction_mode %q", profile.ReactionMode))
+		}
+	}
+}
+
+func validateSignalConfig(result *ValidationResult, cfg *Config) {
+	if cfg == nil || !cfg.Signal.Enabled {
+		return
+	}
+	if strings.TrimSpace(cfg.Signal.Account) == "" {
+		result.Add(ValidationError, "signal.account", "signal gateway is enabled but account is empty")
+	}
+	mode := strings.ToLower(strings.TrimSpace(cfg.Signal.RPCMode))
+	switch mode {
+	case "", "socket":
+		if strings.TrimSpace(cfg.Signal.Socket) == "" {
+			result.Add(ValidationError, "signal.socket", "signal rpc_mode socket requires socket")
+		}
+	case "tcp":
+		if strings.TrimSpace(cfg.Signal.TCP) == "" {
+			result.Add(ValidationError, "signal.tcp", "signal rpc_mode tcp requires tcp")
+		}
+	case "stdio":
+	default:
+		result.Add(ValidationError, "signal.rpc_mode", fmt.Sprintf("unsupported signal rpc_mode %q; use socket, tcp, or stdio", cfg.Signal.RPCMode))
+	}
+	validateVoiceReplyMode(result, "signal.voice_reply_mode", cfg.Signal.VoiceReplyMode)
+}
+
+func validateVoiceReplyMode(result *ValidationResult, path, mode string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "audio", "audio+text":
+	default:
+		result.Add(ValidationError, path, fmt.Sprintf("unsupported voice reply mode %q; use audio or audio+text", mode))
+	}
+}
+
+func validateGatewayProfileReference(result *ValidationResult, profiles map[string]GatewayProfile, path, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if _, ok := profiles[name]; !ok {
+		result.Add(ValidationError, path, fmt.Sprintf("unknown gateway profile %q", name))
+	}
+}
+
+func knownGatewayProfileTools() map[string]bool {
+	known := map[string]bool{}
+	for _, name := range DefaultConfig().Tools.Enabled {
+		known[name] = true
+	}
+	for _, name := range []string{
+		"blackboard_search",
+		"blackboard_store",
+		"fs_outline",
+	} {
+		known[name] = true
+	}
+	return known
 }
 
 func checkProviderReference(result *ValidationResult, cfg *Config, field, name string, required bool) {
@@ -401,9 +541,9 @@ func validateUIConfig(result *ValidationResult, cfg *Config) {
 		return
 	}
 	switch theme {
-	case "v100", "mono", "dracula", "catppuccin":
+	case "v100", "mono", "dracula", "catppuccin", "gruvbox", "nord", "rose-pine", "tokyonight":
 	default:
-		result.Add(ValidationError, "ui.theme", fmt.Sprintf("unsupported UI theme %q; use v100, mono, dracula, or catppuccin", cfg.UI.Theme))
+		result.Add(ValidationError, "ui.theme", fmt.Sprintf("unsupported UI theme %q; use v100, mono, dracula, catppuccin, gruvbox, nord, rose-pine, or tokyonight", cfg.UI.Theme))
 	}
 }
 

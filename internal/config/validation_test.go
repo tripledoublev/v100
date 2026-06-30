@@ -189,6 +189,52 @@ theme = "solarized"
 	}
 }
 
+func TestValidateConfigPathGatewayProfiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	writeFile(t, path, `
+[defaults]
+provider = "codex"
+
+[gateway.profiles.news_fr]
+tools = ["news_fetch", "not_a_tool"]
+dangerous = ["sh"]
+system_prompt_path = "missing.md"
+
+[telegram]
+profile = "missing_default"
+
+[telegram.chat_profiles]
+"123" = "missing_chat"
+
+[signal]
+enabled = true
+profile = "missing_signal"
+account = ""
+rpc_mode = "bogus"
+
+[signal.chat_profiles]
+"+15145550000" = "missing_signal_chat"
+`)
+
+	result := ValidateConfigPath(path)
+	for _, needle := range []string{
+		`unknown gateway profile "missing_default"`,
+		`unknown gateway profile "missing_chat"`,
+		`unknown gateway profile "missing_signal"`,
+		`unknown gateway profile "missing_signal_chat"`,
+		`signal gateway is enabled but account is empty`,
+		`unsupported signal rpc_mode "bogus"`,
+		`unknown tool "not_a_tool"`,
+		`dangerous tool "sh" is not listed in tools`,
+		`system_prompt_path references missing file`,
+	} {
+		if !hasFinding(result, ValidationError, needle) {
+			t.Fatalf("missing gateway profile validation %q: %+v", needle, result.Findings)
+		}
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

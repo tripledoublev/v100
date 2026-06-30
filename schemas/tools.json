@@ -104,6 +104,11 @@
       "input":  { "required": ["action","package"], "properties": { "action": { "type": "string", "enum": ["resolve","list","search","read"] }, "ecosystem": { "type": "string", "enum": ["auto","go","npm","pypi","crates","path"] }, "package": { "type": "string" }, "version": { "type": "string" }, "path": { "type": "string" }, "pattern": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" }, "max_results": { "type": "integer" }, "max_chars": { "type": "integer" } } },
       "output": { "properties": { "root": { "type": "string" }, "package_dir": { "type": "string" }, "output": { "type": "string" } } }
     },
+    "translate": {
+      "dangerous": false,
+      "input":  { "required": ["text","target_lang"], "properties": { "text": { "type": "string" }, "target_lang": { "type": "string" }, "source_lang": { "type": "string" }, "formality": { "type": "string", "enum": ["default","informal","formal"] } } },
+      "output": { "required": ["translated","target_lang"], "properties": { "translated": { "type": "string" }, "source_lang": { "type": "string" }, "target_lang": { "type": "string" } } }
+    },
     "wiki": {
       "dangerous": false,
       "input":  { "required": ["action"], "properties": { "action": { "type": "string", "enum": ["read", "search", "update"] }, "title": { "type": "string" }, "query": { "type": "string" }, "lang": { "type": "string" }, "sentences": { "type": "integer" }, "max_results": { "type": "integer" } } },

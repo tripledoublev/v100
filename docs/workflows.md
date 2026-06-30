@@ -17,7 +17,7 @@ v100 run --provider minimax --workspace .
 Useful flags:
 
 - `--tui` for the Bubble Tea interface
-- `--theme v100|mono|dracula|catppuccin` to override `[ui].theme` or `V100_THEME`
+- `--theme v100|mono|dracula|catppuccin|gruvbox|nord|rose-pine|tokyonight` to override `[ui].theme` or `V100_THEME`
 - `--continuous` to continue automatically between steps
 - `--sandbox` to isolate execution
 - `--confirm-tools` to control tool confirmations
