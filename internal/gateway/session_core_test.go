@@ -234,6 +234,72 @@ func TestCoreRunCoalescesSameChatUpdatesFromPollBatch(t *testing.T) {
 	}
 }
 
+func TestCoreRunErrorUsesACPErrorDetail(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	core := NewCore(Config{}, cli)
+	transport := &fakeTransport{}
+	state, err := core.GetOrCreateSession(ctx, "42")
+	if err != nil {
+		t.Fatalf("GetOrCreateSession: %v", err)
+	}
+	params, err := json.Marshal(acp.SessionUpdateParams{
+		SessionID: state.SessionID,
+		Update: acp.Update{
+			Type:      "run_error",
+			Status:    "failed",
+			Title:     "run error: provider failed",
+			RawOutput: json.RawMessage(`{"error":"provider failed"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	note := acp.Notification{JSONRPC: "2.0", Method: acp.MethodSessionUpdate, Params: params}
+	if err := core.HandleNotification(ctx, transport, note); err != nil {
+		t.Fatalf("HandleNotification returned error: %v", err)
+	}
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	got := transport.sent["42"]
+	if len(got) != 1 || got[0] != "Run failed: provider failed" {
+		t.Fatalf("sent messages = %#v", got)
+	}
+}
+
+func TestCoreRunErrorFallsBackToGenericMessageWhenDetailMissing(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	core := NewCore(Config{}, cli)
+	transport := &fakeTransport{}
+	state, err := core.GetOrCreateSession(ctx, "42")
+	if err != nil {
+		t.Fatalf("GetOrCreateSession: %v", err)
+	}
+	params, err := json.Marshal(acp.SessionUpdateParams{
+		SessionID: state.SessionID,
+		Update: acp.Update{
+			Type:      "run_error",
+			Status:    "failed",
+			Title:     "run error",
+			RawOutput: json.RawMessage(`{}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	note := acp.Notification{JSONRPC: "2.0", Method: acp.MethodSessionUpdate, Params: params}
+	if err := core.HandleNotification(ctx, transport, note); err != nil {
+		t.Fatalf("HandleNotification returned error: %v", err)
+	}
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	got := transport.sent["42"]
+	if len(got) != 1 || got[0] != "Run failed. Check the run log for details." {
+		t.Fatalf("sent messages = %#v", got)
+	}
+}
+
 func TestCoalesceUpdatesKeepsDifferentChatsSeparate(t *testing.T) {
 	got := CoalesceUpdates([]Update{
 		{ChatID: "42", MessageID: "1", Text: "first"},
