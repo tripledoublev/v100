@@ -222,10 +222,7 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 			}
 		}
 		if promptRes.StopReason != "" && promptRes.StopReason != "end_turn" && t != nil {
-			if promptRes.StopReason == "refusal" {
-				return t.SendText(ctx, chatID, []string{"Non."})
-			}
-			return t.SendText(ctx, chatID, []string{"Pas moyen."})
+			return nil
 		}
 		if t != nil && c.voiceConfig(chatID).Enabled {
 			state.mu.Lock()
@@ -244,7 +241,7 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 	state.Output.Reset()
 	state.mu.Unlock()
 	if response == "" {
-		response = "(no response)"
+		return nil
 	}
 	if t == nil {
 		return nil
