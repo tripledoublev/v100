@@ -37,9 +37,13 @@ func NewTranslator(conn *Conn, sessionID string) core.OutputFn {
 		case core.EventRunError:
 			var p core.RunErrorPayload
 			if json.Unmarshal(ev.Payload, &p) == nil {
+				title := "run error"
+				if trimmed := strings.TrimSpace(p.Error); trimmed != "" {
+					title = "run error: " + trimmed
+				}
 				sendUpdate(conn, sessionID, Update{
 					Type:      "run_error",
-					Title:     "run error",
+					Title:     title,
 					Status:    "failed",
 					RawOutput: rawPayload(ev.Payload),
 				})

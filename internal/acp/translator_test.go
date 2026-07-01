@@ -81,6 +81,9 @@ func TestTranslatorMapsRuntimeLifecycleEvents(t *testing.T) {
 	}
 	checkUpdate(0, "run_status_update", "in_progress")
 	checkUpdate(1, "run_error", "failed")
+	if got[1].Update.Title != "run error: provider failed" {
+		t.Fatalf("run error title = %q", got[1].Update.Title)
+	}
 	checkUpdate(2, "step_summary", "completed")
 	checkUpdate(3, "agent_lifecycle", "in_progress")
 	if got[3].Update.ToolCallID != "child-1" {
@@ -100,6 +103,25 @@ func TestTranslatorMapsRuntimeLifecycleEvents(t *testing.T) {
 	}
 	if runEnd.Reason != "budget_steps" || runEnd.UsedSteps != 2 {
 		t.Fatalf("unexpected run end payload: %+v", runEnd)
+	}
+}
+
+func TestTranslatorKeepsGenericRunErrorTitleWhenDetailMissing(t *testing.T) {
+	var out bytes.Buffer
+	conn := NewConn(strings.NewReader(""), &out)
+	translate := NewTranslator(conn, "session-1")
+
+	translate(acpEvent(t, core.EventRunError, core.RunErrorPayload{Error: "  "}))
+
+	got := readACPUpdates(t, out.String())
+	if len(got) != 1 {
+		t.Fatalf("got %d notifications, want 1", len(got))
+	}
+	if got[0].Update.Type != "run_error" || got[0].Update.Status != "failed" {
+		t.Fatalf("run error update = %#v", got[0].Update)
+	}
+	if got[0].Update.Title != "run error" {
+		t.Fatalf("run error title = %q", got[0].Update.Title)
 	}
 }
 

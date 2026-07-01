@@ -417,7 +417,16 @@ func (c *Core) HandleNotification(ctx context.Context, t Transport, note acp.Not
 		state.mu.Unlock()
 	case "run_error":
 		if strings.TrimSpace(update.Update.Status) == "failed" && t != nil {
-			return t.SendText(ctx, state.ChatID, []string{"Run failed. Check the run log for details."})
+			msg := "Run failed. Check the run log for details."
+			if detail := strings.TrimSpace(update.Update.Title); detail != "" && detail != "run error" {
+				msg = strings.TrimPrefix(detail, "run error: ")
+			} else if detail := runErrorDetail(update.Update.RawOutput); detail != "" {
+				msg = detail
+			}
+			if !strings.HasPrefix(strings.ToLower(msg), "run failed") {
+				msg = "Run failed: " + msg
+			}
+			return t.SendText(ctx, state.ChatID, []string{msg})
 		}
 	}
 	return nil
@@ -632,4 +641,17 @@ func updatePrompt(workspace string, u Update) []acp.ContentBlock {
 		})
 	}
 	return prompt
+}
+
+func runErrorDetail(raw json.RawMessage) string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Error)
 }
