@@ -1352,10 +1352,32 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 		if ctx.Err() == context.Canceled {
 			return "cancelled"
 		}
+		_ = s.conn.SendNotification(acp.MethodSessionUpdate, acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update: acp.Update{
+				Type:      "run_error",
+				Title:     "run error: " + err.Error(),
+				Status:    "failed",
+				RawOutput: acpRunErrorRawOutput(err),
+			},
+		})
 		return "refusal"
 	}
 
 	return "end_turn"
+}
+
+func acpRunErrorRawOutput(err error) json.RawMessage {
+	if err == nil {
+		return nil
+	}
+	raw, marshalErr := json.Marshal(struct {
+		Error string `json:"error"`
+	}{Error: err.Error()})
+	if marshalErr != nil {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func (s *acpSession) cleanup() {

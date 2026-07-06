@@ -89,6 +89,8 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 	return nil
 }
 
+func (f *fakeSignalRPC) Close() error { return nil }
+
 func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
 		Envelope: signalEnvelope{
@@ -142,6 +144,80 @@ func TestSignalPollDropsDisallowedReceive(t *testing.T) {
 	}
 	if len(updates) != 0 {
 		t.Fatalf("updates = %#v, want none", updates)
+	}
+}
+
+func TestSignalPollPrefersSourceNumberForAllowedChat(t *testing.T) {
+	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
+		Envelope: signalEnvelope{
+			Source:       "uuid-or-aci",
+			SourceNumber: "+15145550000",
+			DataMessage: &signalDataMessage{
+				Message: "bonjour",
+			},
+		},
+	}}}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+	}
+	updates, err := gw.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll returned error: %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(updates))
+	}
+	if updates[0].ChatID != "+15145550000" {
+		t.Fatalf("chat id = %q, want source number", updates[0].ChatID)
+	}
+}
+
+func TestGatewaySignalCommandIncludesPromptSubcommand(t *testing.T) {
+	cfgPath := ""
+	cmd := gatewaySignalCmd(&cfgPath)
+	sub, _, err := cmd.Find([]string{"prompt"})
+	if err != nil {
+		t.Fatalf("Find(prompt) returned error: %v", err)
+	}
+	if sub == nil || sub.Use != "prompt --to NUMBER [message]" {
+		t.Fatalf("prompt subcommand = %#v", sub)
+	}
+}
+
+func TestPrepareSignalControlSocketRejectsLiveSocket(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "control.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen unix socket: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	if err := prepareSignalControlSocket(socket); err == nil || !strings.Contains(err.Error(), "already has a listener") {
+		t.Fatalf("prepareSignalControlSocket error = %v, want live listener error", err)
+	}
+	if _, err := net.Dial("unix", socket); err != nil {
+		t.Fatalf("live socket was removed or made unreachable: %v", err)
+	}
+}
+
+func TestPrepareSignalControlSocketRemovesStaleSocket(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "control.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen unix socket: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	if err := prepareSignalControlSocket(socket); err != nil {
+		t.Fatalf("prepareSignalControlSocket returned error: %v", err)
+	}
+	if _, err := net.Listen("unix", socket); err != nil {
+		t.Fatalf("socket was not reusable after stale cleanup: %v", err)
 	}
 }
 

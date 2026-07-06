@@ -72,6 +72,7 @@ type SignalConfig struct {
 	Socket            string            `toml:"socket"`                  // unix socket path for signal-cli daemon
 	TCP               string            `toml:"tcp"`                     // optional host:port for signal-cli daemon
 	RPCMode           string            `toml:"rpc_mode"`                // socket | tcp | stdio
+	ControlSocket     string            `toml:"control_socket"`          // unix socket for terminal prompt injection
 	RunDir            string            `toml:"run_dir"`                 // optional runs base directory
 	Workspace         string            `toml:"workspace"`               // optional working directory for tool execution
 	StreamResponses   bool              `toml:"stream_responses"`        // send chunk updates as they arrive

@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +39,7 @@ type signalRuntimeConfig struct {
 	Socket          string
 	TCP             string
 	RPCMode         string
+	ControlSocket   string
 	RunDir          string
 	Workspace       string
 	StreamResponses bool
@@ -52,6 +57,7 @@ type signalRuntimeConfig struct {
 type signalRPC interface {
 	Receive(ctx context.Context) ([]signalReceiveEnvelope, error)
 	Call(ctx context.Context, method string, params any, out any) error
+	Close() error
 }
 
 type signalJSONRPC struct {
@@ -79,6 +85,35 @@ func gatewaySignalCmd(cfgPath *string) *cobra.Command {
 			return runSignalGateway(cmd.Context(), cfgPath)
 		},
 	}
+	cmd.AddCommand(gatewaySignalPromptCmd(cfgPath))
+	return cmd
+}
+
+func gatewaySignalPromptCmd(cfgPath *string) *cobra.Command {
+	var to string
+	cmd := &cobra.Command{
+		Use:   "prompt --to NUMBER [message]",
+		Short: "Run one ACP-backed Signal reply",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			text := strings.TrimSpace(strings.Join(args, " "))
+			if text == "" {
+				b, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				text = strings.TrimSpace(string(b))
+			}
+			if strings.TrimSpace(to) == "" {
+				return fmt.Errorf("--to is required")
+			}
+			if text == "" {
+				return fmt.Errorf("message is required")
+			}
+			return runSignalGatewayPrompt(cmd.Context(), cfgPath, to, text)
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "Signal recipient phone number")
 	return cmd
 }
 
@@ -89,6 +124,43 @@ func runSignalGateway(ctx context.Context, cfgPath *string) error {
 	}
 	defer func() { _ = stop() }()
 	return gw.gatewayCore().Run(ctx, gw)
+}
+
+func runSignalGatewayPrompt(ctx context.Context, cfgPath *string, to, text string) error {
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	runtime := normalizeSignalConfig(cfg.Signal)
+	socket := runtime.ControlSocket
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	if err != nil {
+		return fmt.Errorf("connect signal gateway control socket %s: %w", socket, err)
+	}
+	defer func() { _ = conn.Close() }()
+	if deadline, ok := ctx.Deadline(); ok {
+		if c, ok := conn.(interface{ SetDeadline(time.Time) error }); ok {
+			_ = c.SetDeadline(deadline)
+		}
+	}
+	req := signalControlRequest{
+		To:   strings.TrimSpace(to),
+		Text: text,
+	}
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return fmt.Errorf("send signal gateway control request: %w", err)
+	}
+	var res signalControlResponse
+	if err := json.NewDecoder(conn).Decode(&res); err != nil {
+		return fmt.Errorf("read signal gateway control response: %w", err)
+	}
+	if !res.OK {
+		if strings.TrimSpace(res.Error) == "" {
+			return fmt.Errorf("signal gateway control request failed")
+		}
+		return fmt.Errorf("signal gateway control request failed: %s", res.Error)
+	}
+	return nil
 }
 
 func setupSignalGateway(ctx context.Context, cfgPath *string) (*signalGateway, func() error, error) {
@@ -119,9 +191,23 @@ func setupSignalGateway(ctx context.Context, cfgPath *string) (*signalGateway, f
 		return nil, nil, err
 	}
 	gw.cli = proc.Client
+	stopControl, err := startSignalControlServer(ctx, gw)
+	if err != nil {
+		_ = proc.Stop()
+		_ = rpc.Close()
+		return nil, nil, err
+	}
 	return gw, func() error {
+		if stopControl != nil {
+			_ = stopControl()
+		}
 		_ = gw.gatewayCore().CloseAllSessions(context.Background())
-		return proc.Stop()
+		procErr := proc.Stop()
+		rpcErr := rpc.Close()
+		if procErr != nil {
+			return procErr
+		}
+		return rpcErr
 	}, nil
 }
 
@@ -146,6 +232,7 @@ func normalizeSignalConfig(cfg config.SignalConfig) signalRuntimeConfig {
 		Socket:          strings.TrimSpace(cfg.Socket),
 		TCP:             strings.TrimSpace(cfg.TCP),
 		RPCMode:         mode,
+		ControlSocket:   normalizeSignalControlSocket(cfg.ControlSocket, cfg.Account),
 		RunDir:          strings.TrimSpace(cfg.RunDir),
 		Workspace:       strings.TrimSpace(cfg.Workspace),
 		StreamResponses: cfg.StreamResponses,
@@ -157,6 +244,124 @@ func normalizeSignalConfig(cfg config.SignalConfig) signalRuntimeConfig {
 		Profile:         strings.TrimSpace(cfg.Profile),
 		ChatProfiles:    copyStringMap(cfg.ChatProfiles),
 	}
+}
+
+type signalControlRequest struct {
+	To   string `json:"to"`
+	Text string `json:"text"`
+}
+
+type signalControlResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func startSignalControlServer(ctx context.Context, gw *signalGateway) (func() error, error) {
+	if gw == nil {
+		return nil, fmt.Errorf("signal gateway is required")
+	}
+	socket := strings.TrimSpace(gw.cfg.ControlSocket)
+	if socket == "" {
+		return nil, fmt.Errorf("signal control socket is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		return nil, fmt.Errorf("create signal control socket dir: %w", err)
+	}
+	if err := prepareSignalControlSocket(socket); err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, fmt.Errorf("listen signal control socket: %w", err)
+	}
+	_ = os.Chmod(socket, 0o600)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go gw.handleSignalControlConn(ctx, conn)
+		}
+	}()
+	log.Printf("signal control socket listening at %s", socket)
+	return func() error {
+		err := ln.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+		_ = os.Remove(socket)
+		return err
+	}, nil
+}
+
+func prepareSignalControlSocket(socket string) error {
+	info, err := os.Stat(socket)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat signal control socket: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("signal control socket path exists and is not a socket: %s", socket)
+	}
+	conn, dialErr := net.DialTimeout("unix", socket, 200*time.Millisecond)
+	if dialErr == nil {
+		_ = conn.Close()
+		return fmt.Errorf("signal control socket already has a listener: %s", socket)
+	}
+	if err := os.Remove(socket); err != nil {
+		return fmt.Errorf("remove stale signal control socket: %w", err)
+	}
+	return nil
+}
+
+func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Conn) {
+	defer func() { _ = conn.Close() }()
+	var req signalControlRequest
+	res := signalControlResponse{OK: true}
+	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+		res = signalControlResponse{Error: "invalid request: " + err.Error()}
+		_ = json.NewEncoder(conn).Encode(res)
+		return
+	}
+	to := strings.TrimSpace(req.To)
+	text := strings.TrimSpace(req.Text)
+	switch {
+	case to == "":
+		res = signalControlResponse{Error: "to is required"}
+	case text == "":
+		res = signalControlResponse{Error: "text is required"}
+	case !g.Allowed(to):
+		res = signalControlResponse{Error: "recipient is not allowed"}
+	default:
+		err := g.gatewayCore().Handle(ctx, g, gatewaycore.Update{
+			ChatID:    to,
+			MessageID: fmt.Sprintf("terminal-%d", time.Now().UnixMilli()),
+			Text:      text,
+		})
+		if err != nil {
+			res = signalControlResponse{Error: err.Error()}
+		}
+	}
+	_ = json.NewEncoder(conn).Encode(res)
+}
+
+func normalizeSignalControlSocket(path, account string) string {
+	path = strings.TrimSpace(path)
+	if path != "" {
+		return path
+	}
+	base := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
+	if base == "" {
+		base = os.TempDir()
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(account)))
+	return filepath.Join(base, "v100-signal-"+hex.EncodeToString(sum[:8])+".sock")
 }
 
 func (g *signalGateway) Name() string { return "signal" }
@@ -195,8 +400,8 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 	updates := make([]gatewaycore.Update, 0, len(envelopes))
 	for _, env := range envelopes {
 		number := strings.TrimSpace(env.Envelope.Source)
-		if number == "" {
-			number = strings.TrimSpace(env.Envelope.SourceNumber)
+		if sourceNumber := strings.TrimSpace(env.Envelope.SourceNumber); sourceNumber != "" {
+			number = sourceNumber
 		}
 		if number == "" || !g.Allowed(number) {
 			continue
@@ -215,11 +420,7 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			continue
 		}
 		msgID := signalTimestampString(env.Envelope.Timestamp)
-		displayName := strings.TrimSpace(env.Envelope.SourceName)
-		if displayName == "" {
-			displayName = number
-		}
-		log.Printf("signal %s (%s): %s", displayName, number, msg)
+		log.Printf("signal message accepted from %s message_id=%s chars=%d", redactSignalChatID(number), msgID, len([]rune(msg)))
 		go func(cID, mID, text string) {
 			if emoji := g.chooseReaction(ctx, cID, text); emoji != "" {
 				_ = g.React(ctx, cID, mID, emoji)
@@ -540,7 +741,7 @@ func newSignalRPC(ctx context.Context, cfg signalRuntimeConfig) (signalRPC, erro
 		}
 		return &signalJSONRPC{conn: conn, account: cfg.Account}, nil
 	case "stdio":
-		cmd := exec.CommandContext(ctx, "signal-cli", "-a", cfg.Account, "jsonRpc")
+		cmd := exec.CommandContext(ctx, "signal-cli", "-a", cfg.Account, "jsonRpc", "--receive-mode", "manual")
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			return nil, err
@@ -579,6 +780,13 @@ func (c stdioReadWriteCloser) Close() error {
 		return nil
 	}
 	return c.close()
+}
+
+func (c *signalJSONRPC) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	return c.conn.Close()
 }
 
 func (c *signalJSONRPC) Receive(ctx context.Context) ([]signalReceiveEnvelope, error) {
@@ -664,4 +872,16 @@ func redactSignalAccountError(err error, account string) error {
 		return err
 	}
 	return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), account, "<redacted-signal-account>"))
+}
+
+func redactSignalChatID(chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return "<empty>"
+	}
+	runes := []rune(chatID)
+	if len(runes) <= 4 {
+		return "<redacted>"
+	}
+	return "<redacted>..." + string(runes[len(runes)-4:])
 }

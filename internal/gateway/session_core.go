@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,7 @@ func (c *Core) Run(ctx context.Context, t Transport) error {
 			if ctx.Err() != nil {
 				return nil
 			}
+			log.Printf("%s gateway poll error: %v", t.Name(), err)
 			select {
 			case <-ctx.Done():
 				return nil
@@ -115,6 +117,7 @@ func (c *Core) Run(ctx context.Context, t Transport) error {
 		updates = CoalesceUpdates(updates)
 		for _, update := range updates {
 			if err := c.Handle(ctx, t, update); err != nil {
+				log.Printf("%s gateway handle error: %v", t.Name(), err)
 				return err
 			}
 		}
