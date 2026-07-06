@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.8 — 2026-07-06
+
+**Signal Gateway Reliability**
+
+### Fixes
+
+- Added ACP-backed `v100 gateway signal prompt --to NUMBER` support through the already-running Signal gateway control socket.
+- Hardened Signal gateway control socket startup so a second gateway process cannot unlink a live listener; stale sockets are still cleaned up.
+- Closed Signal RPC resources on startup failure and normal shutdown.
+- Switched stdio Signal JSON-RPC to manual receive mode to avoid competing receive loops.
+- Preserved ACP run errors as `run_error` updates so gateway clients surface budget and runtime failures instead of generic refusals.
+
+## v0.3.7 — 2026-07-06
+
+**Signal Gateway Replies**
+
+### Fixes
+
+- Removed hardcoded refusal phrasing from gateway error handling so Signal replies can follow the active profile prompt.
+
 ## v0.3.6 — 2026-06-19
 
 **Vision-Capable Gateway**
