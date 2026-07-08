@@ -174,6 +174,25 @@ type SessionCapabilities struct {
 }
 
 type SessionNewParams struct {
+	SessionID       string   `json:"sessionId,omitempty"`
+	CWD             string   `json:"cwd,omitempty"`
+	RunDir          string   `json:"runDir,omitempty"`
+	Provider        string   `json:"provider,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Solver          string   `json:"solver,omitempty"`
+	Tools           []string `json:"tools"`
+	Dangerous       []string `json:"dangerous"`
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	NetworkTier     string   `json:"network_tier,omitempty"`
+	BudgetSteps     int      `json:"budget_steps,omitempty"`
+	BudgetTokens    int      `json:"budget_tokens,omitempty"`
+	BudgetCostUSD   float64  `json:"budget_cost_usd,omitempty"`
+	BudgetStepsSet  bool     `json:"-"`
+	BudgetTokensSet bool     `json:"-"`
+	BudgetCostSet   bool     `json:"-"`
+}
+
+type sessionNewParamsJSON struct {
 	SessionID     string   `json:"sessionId,omitempty"`
 	CWD           string   `json:"cwd,omitempty"`
 	RunDir        string   `json:"runDir,omitempty"`
@@ -184,9 +203,68 @@ type SessionNewParams struct {
 	Dangerous     []string `json:"dangerous"`
 	SystemPrompt  string   `json:"system_prompt,omitempty"`
 	NetworkTier   string   `json:"network_tier,omitempty"`
-	BudgetSteps   int      `json:"budget_steps,omitempty"`
-	BudgetTokens  int      `json:"budget_tokens,omitempty"`
-	BudgetCostUSD float64  `json:"budget_cost_usd,omitempty"`
+	BudgetSteps   *int     `json:"budget_steps,omitempty"`
+	BudgetTokens  *int     `json:"budget_tokens,omitempty"`
+	BudgetCostUSD *float64 `json:"budget_cost_usd,omitempty"`
+}
+
+func (p SessionNewParams) MarshalJSON() ([]byte, error) {
+	out := sessionNewParamsJSON{
+		SessionID:    p.SessionID,
+		CWD:          p.CWD,
+		RunDir:       p.RunDir,
+		Provider:     p.Provider,
+		Model:        p.Model,
+		Solver:       p.Solver,
+		Tools:        p.Tools,
+		Dangerous:    p.Dangerous,
+		SystemPrompt: p.SystemPrompt,
+		NetworkTier:  p.NetworkTier,
+	}
+	if p.BudgetStepsSet || p.BudgetSteps != 0 {
+		v := p.BudgetSteps
+		out.BudgetSteps = &v
+	}
+	if p.BudgetTokensSet || p.BudgetTokens != 0 {
+		v := p.BudgetTokens
+		out.BudgetTokens = &v
+	}
+	if p.BudgetCostSet || p.BudgetCostUSD != 0 {
+		v := p.BudgetCostUSD
+		out.BudgetCostUSD = &v
+	}
+	return json.Marshal(out)
+}
+
+func (p *SessionNewParams) UnmarshalJSON(data []byte) error {
+	var in sessionNewParamsJSON
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	*p = SessionNewParams{}
+	p.SessionID = in.SessionID
+	p.CWD = in.CWD
+	p.RunDir = in.RunDir
+	p.Provider = in.Provider
+	p.Model = in.Model
+	p.Solver = in.Solver
+	p.Tools = in.Tools
+	p.Dangerous = in.Dangerous
+	p.SystemPrompt = in.SystemPrompt
+	p.NetworkTier = in.NetworkTier
+	if in.BudgetSteps != nil {
+		p.BudgetSteps = *in.BudgetSteps
+		p.BudgetStepsSet = true
+	}
+	if in.BudgetTokens != nil {
+		p.BudgetTokens = *in.BudgetTokens
+		p.BudgetTokensSet = true
+	}
+	if in.BudgetCostUSD != nil {
+		p.BudgetCostUSD = *in.BudgetCostUSD
+		p.BudgetCostSet = true
+	}
+	return nil
 }
 
 type SessionNewResult struct {

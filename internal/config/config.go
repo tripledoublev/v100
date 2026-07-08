@@ -104,6 +104,9 @@ type GatewayProfile struct {
 	BudgetSteps      int      `toml:"budget_steps"`
 	BudgetTokens     int      `toml:"budget_tokens"`
 	BudgetCostUSD    float64  `toml:"budget_cost_usd"`
+	BudgetStepsSet   bool     `toml:"-"`
+	BudgetTokensSet  bool     `toml:"-"`
+	BudgetCostSet    bool     `toml:"-"`
 	VoiceReplies     *bool    `toml:"voice_replies"`
 	VoiceReplyMode   string   `toml:"voice_reply_mode"`
 	ReactionMode     string   `toml:"reaction_mode"`
@@ -635,9 +638,11 @@ func loadConfigFile(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if _, err := toml.Decode(string(data), &cfg); err != nil {
+	meta, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	markGatewayProfileBudgetFields(&cfg, meta)
 	cfg.SourceDir = sourceDir
 	applyProviderDefaults(&cfg, DefaultConfig())
 	applyToolDefaults(&cfg.Tools, DefaultConfig().Tools)
@@ -715,6 +720,18 @@ func loadConfigFile(path string) (*Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func markGatewayProfileBudgetFields(cfg *Config, meta toml.MetaData) {
+	if cfg == nil || cfg.Gateway.Profiles == nil {
+		return
+	}
+	for name, profile := range cfg.Gateway.Profiles {
+		profile.BudgetStepsSet = meta.IsDefined("gateway", "profiles", name, "budget_steps")
+		profile.BudgetTokensSet = meta.IsDefined("gateway", "profiles", name, "budget_tokens")
+		profile.BudgetCostSet = meta.IsDefined("gateway", "profiles", name, "budget_cost_usd")
+		cfg.Gateway.Profiles[name] = profile
+	}
 }
 
 func applyProviderDefaults(cfg *Config, defaults *Config) {

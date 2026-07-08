@@ -132,13 +132,22 @@ func applyACPSessionNewOverrides(cfg *config.Config, params acp.SessionNewParams
 			return acpStatus(acp.ErrInvalidSessionConfig, "unsupported network_tier %q", params.NetworkTier)
 		}
 	}
-	if params.BudgetSteps > 0 {
+	if params.BudgetStepsSet || params.BudgetSteps > 0 {
+		if params.BudgetSteps < 0 {
+			return acpStatus(acp.ErrInvalidSessionConfig, "budget_steps must be >= 0")
+		}
 		cfg.Defaults.BudgetSteps = params.BudgetSteps
 	}
-	if params.BudgetTokens > 0 {
+	if params.BudgetTokensSet || params.BudgetTokens > 0 {
+		if params.BudgetTokens < 0 {
+			return acpStatus(acp.ErrInvalidSessionConfig, "budget_tokens must be >= 0")
+		}
 		cfg.Defaults.BudgetTokens = params.BudgetTokens
 	}
-	if params.BudgetCostUSD > 0 {
+	if params.BudgetCostSet || params.BudgetCostUSD > 0 {
+		if params.BudgetCostUSD < 0 {
+			return acpStatus(acp.ErrInvalidSessionConfig, "budget_cost_usd must be >= 0")
+		}
 		cfg.Defaults.BudgetCostUSD = params.BudgetCostUSD
 	}
 

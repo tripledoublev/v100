@@ -109,9 +109,27 @@ func ApplyProfileToSessionNew(params *acp.SessionNewParams, runtime ProfileRunti
 		params.SystemPrompt = string(data)
 	}
 	params.NetworkTier = strings.TrimSpace(profile.NetworkTier)
-	params.BudgetSteps = profile.BudgetSteps
-	params.BudgetTokens = profile.BudgetTokens
-	params.BudgetCostUSD = profile.BudgetCostUSD
+	if profile.BudgetStepsSet || profile.BudgetSteps > 0 {
+		if profile.BudgetSteps < 0 {
+			return fmt.Errorf("budget_steps must be >= 0")
+		}
+		params.BudgetSteps = profile.BudgetSteps
+		params.BudgetStepsSet = true
+	}
+	if profile.BudgetTokensSet || profile.BudgetTokens > 0 {
+		if profile.BudgetTokens < 0 {
+			return fmt.Errorf("budget_tokens must be >= 0")
+		}
+		params.BudgetTokens = profile.BudgetTokens
+		params.BudgetTokensSet = true
+	}
+	if profile.BudgetCostSet || profile.BudgetCostUSD > 0 {
+		if profile.BudgetCostUSD < 0 {
+			return fmt.Errorf("budget_cost_usd must be >= 0")
+		}
+		params.BudgetCostUSD = profile.BudgetCostUSD
+		params.BudgetCostSet = true
+	}
 	return nil
 }
 

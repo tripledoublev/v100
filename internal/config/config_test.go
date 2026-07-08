@@ -238,6 +238,12 @@ tools = ["fs_read", "sh"]
 dangerous = ["sh"]
 allowed_commands = ["help", "model", "provider", "solver", "profile", "reset"]
 
+[gateway.profiles.unlimited]
+tools = ["web_search"]
+budget_steps = 0
+budget_tokens = 0
+budget_cost_usd = 0
+
 [telegram]
 profile = "operator"
 
@@ -272,6 +278,23 @@ allowed_numbers = ["+15145550000"]
 	}
 	if news.BudgetSteps != 12 || news.BudgetTokens != 40000 || news.BudgetCostUSD != 0.25 {
 		t.Fatalf("news profile budgets = %+v", news)
+	}
+	if !news.BudgetStepsSet || !news.BudgetTokensSet || !news.BudgetCostSet {
+		t.Fatalf("news profile budget presence = %+v", news)
+	}
+	operator := profileCfg.Gateway.Profiles["operator"]
+	if operator.BudgetStepsSet || operator.BudgetTokensSet || operator.BudgetCostSet {
+		t.Fatalf("operator profile should inherit budgets, got %+v", operator)
+	}
+	unlimited := profileCfg.Gateway.Profiles["unlimited"]
+	if unlimited.BudgetSteps != 0 || !unlimited.BudgetStepsSet {
+		t.Fatalf("unlimited profile budget steps = %+v", unlimited)
+	}
+	if unlimited.BudgetTokens != 0 || !unlimited.BudgetTokensSet {
+		t.Fatalf("unlimited profile budget tokens = %+v", unlimited)
+	}
+	if unlimited.BudgetCostUSD != 0 || !unlimited.BudgetCostSet {
+		t.Fatalf("unlimited profile budget cost = %+v", unlimited)
 	}
 	if profileCfg.Telegram.Profile != "operator" || profileCfg.Telegram.ChatProfiles["123456789"] != "news_fr" {
 		t.Fatalf("telegram profile binding = %+v", profileCfg.Telegram)
