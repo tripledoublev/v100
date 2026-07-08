@@ -426,6 +426,30 @@ func TestACPSessionNewRejectsInvalidOverridesWithoutCreatingSession(t *testing.T
 				Provider:  "definitely-not-a-provider",
 			},
 		},
+		{
+			name: "negative budget steps",
+			params: acp.SessionNewParams{
+				SessionID:      "negative-steps-session",
+				BudgetSteps:    -1,
+				BudgetStepsSet: true,
+			},
+		},
+		{
+			name: "negative budget tokens",
+			params: acp.SessionNewParams{
+				SessionID:       "negative-tokens-session",
+				BudgetTokens:    -1,
+				BudgetTokensSet: true,
+			},
+		},
+		{
+			name: "negative budget cost",
+			params: acp.SessionNewParams{
+				SessionID:     "negative-cost-session",
+				BudgetCostUSD: -0.01,
+				BudgetCostSet: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -579,6 +603,53 @@ func TestACPSessionNewProfileToolsFailClosed(t *testing.T) {
 	}
 	if session.comp.Run.Budget.MaxSteps != 7 || session.comp.Run.Budget.MaxTokens != 1234 {
 		t.Fatalf("budget = %+v", session.comp.Run.Budget)
+	}
+
+	closeACPSession(session, "session_close")
+}
+
+func TestACPSessionNewPreservesExplicitZeroStepBudget(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	writeACPSessionOverrideConfig(t, cfgPath)
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionNew, acp.SessionNewParams{
+		SessionID:       "unlimited-session",
+		CWD:             workspace,
+		RunDir:          filepath.Join(root, "runs"),
+		Tools:           []string{},
+		Dangerous:       []string{},
+		BudgetSteps:     0,
+		BudgetStepsSet:  true,
+		BudgetTokens:    0,
+		BudgetTokensSet: true,
+		BudgetCostUSD:   0,
+		BudgetCostSet:   true,
+	}))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var result acp.SessionNewResult
+	decodeACPResult(t, responses[0], &result)
+	session := server.sessions["unlimited-session"]
+	if session == nil || session.comp == nil {
+		t.Fatalf("session not registered correctly: %#v", server.sessions)
+	}
+	if session.comp.Run.Budget.MaxSteps != 0 || session.comp.Run.Budget.MaxTokens != 0 || session.comp.Run.Budget.MaxCostUSD != 0 {
+		t.Fatalf("budget = %+v, want explicit zero budgets", session.comp.Run.Budget)
 	}
 
 	closeACPSession(session, "session_close")

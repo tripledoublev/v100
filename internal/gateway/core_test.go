@@ -105,6 +105,76 @@ func TestApplyProfileToSessionNewCopiesSandboxAndPrompt(t *testing.T) {
 	}
 }
 
+func TestApplyProfileToSessionNewPreservesExplicitZeroBudget(t *testing.T) {
+	params := acp.SessionNewParams{}
+	err := ApplyProfileToSessionNew(&params, ProfileRuntime{
+		Name: "unlimited",
+		OK:   true,
+		Profile: config.GatewayProfile{
+			Tools:           []string{"web_search"},
+			BudgetSteps:     0,
+			BudgetStepsSet:  true,
+			BudgetTokens:    0,
+			BudgetTokensSet: true,
+			BudgetCostUSD:   0,
+			BudgetCostSet:   true,
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("ApplyProfileToSessionNew returned error: %v", err)
+	}
+	if params.BudgetSteps != 0 || !params.BudgetStepsSet {
+		t.Fatalf("budget steps = %d set=%v, want explicit zero", params.BudgetSteps, params.BudgetStepsSet)
+	}
+	if params.BudgetTokens != 0 || !params.BudgetTokensSet {
+		t.Fatalf("budget tokens = %d set=%v, want explicit zero", params.BudgetTokens, params.BudgetTokensSet)
+	}
+	if params.BudgetCostUSD != 0 || !params.BudgetCostSet {
+		t.Fatalf("budget cost = %f set=%v, want explicit zero", params.BudgetCostUSD, params.BudgetCostSet)
+	}
+}
+
+func TestApplyProfileToSessionNewRejectsNegativeBudgets(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile config.GatewayProfile
+	}{
+		{
+			name: "steps",
+			profile: config.GatewayProfile{
+				BudgetSteps:    -1,
+				BudgetStepsSet: true,
+			},
+		},
+		{
+			name: "tokens",
+			profile: config.GatewayProfile{
+				BudgetTokens:    -1,
+				BudgetTokensSet: true,
+			},
+		},
+		{
+			name: "cost",
+			profile: config.GatewayProfile{
+				BudgetCostUSD: -0.01,
+				BudgetCostSet: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ApplyProfileToSessionNew(&acp.SessionNewParams{}, ProfileRuntime{
+				Name:    "invalid",
+				OK:      true,
+				Profile: tt.profile,
+			}, "")
+			if err == nil {
+				t.Fatal("ApplyProfileToSessionNew returned nil, want budget validation error")
+			}
+		})
+	}
+}
+
 func TestReconfigureParamsMapsRuntimeCommands(t *testing.T) {
 	params, ok := ReconfigureParams("session-1", Command{Name: "provider", Arg: "ollama"})
 	if !ok || params.SessionID != "session-1" || params.Provider != "ollama" {
