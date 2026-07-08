@@ -62,5 +62,6 @@ type Config struct {
 	BusyMessage     string
 	PrepareSession  func(chatID string, params *acp.SessionNewParams) error
 	BuildPrompt     func(workspace string, update Update) []acp.ContentBlock
+	AfterPrompt     func(workspace string, update Update)
 	VoiceSettings   func(chatID string) VoiceConfig
 }

@@ -32,6 +32,8 @@ const (
 	signalPollRetryBase         = 1 * time.Second
 	signalPollRetryMax          = 30 * time.Second
 	signalShutdownTimeout       = 5 * time.Second
+	signalManualContextMax      = 5
+	signalGatewaySentWindow     = 5 * time.Minute
 )
 
 type signalRuntimeConfig struct {
@@ -75,6 +77,23 @@ type signalGateway struct {
 	cli       gatewaycore.ACPClient
 	core      *gatewaycore.Core
 	globalCfg *config.Config
+
+	manualMu      sync.Mutex
+	manualContext map[string][]signalManualContext
+	manualPrompt  map[string]uint64
+	manualNextID  uint64
+	gatewaySent   map[string][]signalRecentSent
+}
+
+type signalManualContext struct {
+	ID        uint64
+	Text      string
+	Timestamp string
+}
+
+type signalRecentSent struct {
+	Text string
+	At   time.Time
 }
 
 func gatewaySignalCmd(cfgPath *string) *cobra.Command {
@@ -388,6 +407,8 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 		VoiceSettings: func(chatID string) gatewaycore.VoiceConfig {
 			return gatewayVoiceConfig(g.cfg.VoiceReplies, g.cfg.VoiceReplyMode, g.effectiveGatewayProfile(chatID))
 		},
+		BuildPrompt: g.buildSignalPrompt,
+		AfterPrompt: g.afterSignalPrompt,
 	}, g.cli)
 	return g.core
 }
@@ -399,6 +420,9 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 	}
 	updates := make([]gatewaycore.Update, 0, len(envelopes))
 	for _, env := range envelopes {
+		if g.recordSignalSentSync(env.Envelope) {
+			continue
+		}
 		number := strings.TrimSpace(env.Envelope.Source)
 		if sourceNumber := strings.TrimSpace(env.Envelope.SourceNumber); sourceNumber != "" {
 			number = sourceNumber
@@ -406,14 +430,16 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 		if number == "" || !g.Allowed(number) {
 			continue
 		}
+		rawMsg := ""
 		msg := ""
 		if env.Envelope.DataMessage != nil {
-			msg = strings.TrimSpace(env.Envelope.DataMessage.Message)
+			rawMsg = strings.TrimSpace(env.Envelope.DataMessage.Message)
+			msg = signalDataMessageText(env.Envelope.DataMessage)
 		}
-		if msg == "" {
+		if rawMsg == "" && msg == "" {
 			continue
 		}
-		if command, ok := gatewaycore.ParseCommand(msg); ok {
+		if command, ok := gatewaycore.ParseCommand(rawMsg); ok {
 			if err := g.handleSignalCommand(ctx, number, command); err != nil {
 				return nil, err
 			}
@@ -435,6 +461,250 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 	return updates, nil
 }
 
+func (g *signalGateway) recordSignalSentSync(env signalEnvelope) bool {
+	if env.SyncMessage == nil || env.SyncMessage.SentMessage == nil {
+		return false
+	}
+	sent := env.SyncMessage.SentMessage
+	number := strings.TrimSpace(sent.Destination)
+	if destinationNumber := strings.TrimSpace(sent.DestinationNumber); destinationNumber != "" {
+		number = destinationNumber
+	}
+	rawText := strings.TrimSpace(sent.Message)
+	text := signalSentMessageText(sent)
+	if number == "" || text == "" || !g.Allowed(number) {
+		return true
+	}
+	if rawText != "" && g.consumeGatewaySent(number, rawText) {
+		return true
+	}
+	g.appendManualContext(number, signalManualContext{
+		Text:      text,
+		Timestamp: signalTimestampString(sent.Timestamp),
+	})
+	log.Printf("signal manual sent context recorded for %s chars=%d", redactSignalChatID(number), len([]rune(text)))
+	return true
+}
+
+func (g *signalGateway) appendManualContext(chatID string, entry signalManualContext) {
+	chatID = strings.TrimSpace(chatID)
+	entry.Text = strings.TrimSpace(entry.Text)
+	if chatID == "" || entry.Text == "" {
+		return
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	if g.manualContext == nil {
+		g.manualContext = map[string][]signalManualContext{}
+	}
+	if entry.ID == 0 {
+		g.manualNextID++
+		entry.ID = g.manualNextID
+	}
+	items := append(g.manualContext[chatID], entry)
+	if len(items) > signalManualContextMax {
+		items = items[len(items)-signalManualContextMax:]
+	}
+	g.manualContext[chatID] = items
+}
+
+func (g *signalGateway) peekManualContext(chatID string) []signalManualContext {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	return append([]signalManualContext(nil), g.manualContext[chatID]...)
+}
+
+func (g *signalGateway) drainManualContext(chatID string) []signalManualContext {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	items := append([]signalManualContext(nil), g.manualContext[chatID]...)
+	delete(g.manualContext, chatID)
+	return items
+}
+
+func (g *signalGateway) clearManualContext(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	delete(g.manualContext, chatID)
+	delete(g.manualPrompt, chatID)
+}
+
+func (g *signalGateway) rememberGatewaySent(chatID, text string) {
+	chatID = strings.TrimSpace(chatID)
+	text = strings.TrimSpace(text)
+	if chatID == "" || text == "" {
+		return
+	}
+	now := time.Now()
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	if g.gatewaySent == nil {
+		g.gatewaySent = map[string][]signalRecentSent{}
+	}
+	items := pruneRecentSignalSent(g.gatewaySent[chatID], now)
+	items = append(items, signalRecentSent{Text: text, At: now})
+	g.gatewaySent[chatID] = items
+}
+
+func (g *signalGateway) consumeGatewaySent(chatID, text string) bool {
+	chatID = strings.TrimSpace(chatID)
+	text = strings.TrimSpace(text)
+	if chatID == "" || text == "" {
+		return false
+	}
+	now := time.Now()
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	items := pruneRecentSignalSent(g.gatewaySent[chatID], now)
+	for i, item := range items {
+		if item.Text == text {
+			items = append(items[:i], items[i+1:]...)
+			if len(items) == 0 {
+				delete(g.gatewaySent, chatID)
+			} else {
+				g.gatewaySent[chatID] = items
+			}
+			return true
+		}
+	}
+	if len(items) == 0 {
+		delete(g.gatewaySent, chatID)
+	} else {
+		g.gatewaySent[chatID] = items
+	}
+	return false
+}
+
+func pruneRecentSignalSent(items []signalRecentSent, now time.Time) []signalRecentSent {
+	if len(items) == 0 {
+		return nil
+	}
+	out := items[:0]
+	for _, item := range items {
+		if now.Sub(item.At) <= signalGatewaySentWindow {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func signalDataMessageText(msg *signalDataMessage) string {
+	if msg == nil {
+		return ""
+	}
+	return signalMessageTextWithQuote(msg.Message, msg.Quote)
+}
+
+func signalSentMessageText(msg *signalSentMessage) string {
+	if msg == nil {
+		return ""
+	}
+	return signalMessageTextWithQuote(msg.Message, msg.Quote)
+}
+
+func signalMessageTextWithQuote(message string, quote *signalQuote) string {
+	message = strings.TrimSpace(message)
+	if quote == nil {
+		return message
+	}
+	quoted := strings.TrimSpace(quote.Text)
+	if quoted == "" {
+		return message
+	}
+	if message == "" {
+		message = "(no text)"
+	}
+	return fmt.Sprintf("User replied to:\n\n%s\n\nwith:\n\n%s", quoted, message)
+}
+
+func (g *signalGateway) buildSignalPrompt(_ string, update gatewaycore.Update) []acp.ContentBlock {
+	text := strings.TrimSpace(update.Text)
+	manual := g.peekManualContext(update.ChatID)
+	g.rememberSignalPromptManualMax(update.ChatID, manual)
+	if len(manual) == 0 {
+		return []acp.ContentBlock{{Type: "text", Text: text}}
+	}
+	var b strings.Builder
+	b.WriteString("Context: the account owner manually sent these Signal messages in this chat since your last turn. Treat them as already-sent human messages from this same account. Do not reply to these context messages directly.\n")
+	for _, entry := range manual {
+		if strings.TrimSpace(entry.Timestamp) != "" {
+			fmt.Fprintf(&b, "- [%s] %s\n", entry.Timestamp, entry.Text)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s\n", entry.Text)
+	}
+	if text != "" {
+		b.WriteString("\nLatest incoming message:\n")
+		b.WriteString(text)
+	}
+	return []acp.ContentBlock{{Type: "text", Text: strings.TrimSpace(b.String())}}
+}
+
+func (g *signalGateway) rememberSignalPromptManualMax(chatID string, manual []signalManualContext) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	var maxID uint64
+	for _, entry := range manual {
+		if entry.ID > maxID {
+			maxID = entry.ID
+		}
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	if maxID == 0 {
+		delete(g.manualPrompt, chatID)
+		return
+	}
+	if g.manualPrompt == nil {
+		g.manualPrompt = map[string]uint64{}
+	}
+	g.manualPrompt[chatID] = maxID
+}
+
+func (g *signalGateway) afterSignalPrompt(_ string, update gatewaycore.Update) {
+	g.clearDeliveredManualContext(update.ChatID)
+}
+
+func (g *signalGateway) clearDeliveredManualContext(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	g.manualMu.Lock()
+	defer g.manualMu.Unlock()
+	maxID := g.manualPrompt[chatID]
+	delete(g.manualPrompt, chatID)
+	if maxID == 0 {
+		return
+	}
+	items := g.manualContext[chatID]
+	out := items[:0]
+	for _, item := range items {
+		if item.ID > maxID {
+			out = append(out, item)
+		}
+	}
+	if len(out) == 0 {
+		delete(g.manualContext, chatID)
+		return
+	}
+	g.manualContext[chatID] = out
+}
+
 func (g *signalGateway) SendText(ctx context.Context, chatID string, chunks []string) error {
 	for _, chunk := range chunks {
 		chunk = strings.TrimSpace(chunk)
@@ -448,6 +718,7 @@ func (g *signalGateway) SendText(ctx context.Context, chatID string, chunks []st
 		}, nil); err != nil {
 			return err
 		}
+		g.rememberGatewaySent(chatID, chunk)
 	}
 	return nil
 }
@@ -704,6 +975,7 @@ func (g *signalGateway) resetSignalSession(ctx context.Context, chatID string) e
 	if err != nil {
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Reset failed: %v", err)})
 	}
+	g.clearManualContext(chatID)
 	if !closed {
 		return g.SendText(ctx, chatID, []string{"No active session to reset."})
 	}
@@ -720,10 +992,32 @@ type signalEnvelope struct {
 	SourceName   string             `json:"sourceName"`
 	Timestamp    any                `json:"timestamp"`
 	DataMessage  *signalDataMessage `json:"dataMessage"`
+	SyncMessage  *signalSyncMessage `json:"syncMessage"`
 }
 
 type signalDataMessage struct {
-	Message string `json:"message"`
+	Message string       `json:"message"`
+	Quote   *signalQuote `json:"quote"`
+}
+
+type signalSyncMessage struct {
+	SentMessage *signalSentMessage `json:"sentMessage"`
+}
+
+type signalSentMessage struct {
+	Destination       string       `json:"destination"`
+	DestinationNumber string       `json:"destinationNumber"`
+	Timestamp         any          `json:"timestamp"`
+	Message           string       `json:"message"`
+	Quote             *signalQuote `json:"quote"`
+}
+
+type signalQuote struct {
+	ID           any    `json:"id"`
+	Author       string `json:"author"`
+	AuthorNumber string `json:"authorNumber"`
+	AuthorUUID   string `json:"authorUuid"`
+	Text         string `json:"text"`
 }
 
 func newSignalRPC(ctx context.Context, cfg signalRuntimeConfig) (signalRPC, error) {
