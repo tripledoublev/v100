@@ -31,6 +31,7 @@ type fakeSignalACPClient struct {
 	lastNew    acp.SessionNewParams
 	lastPrompt acp.SessionPromptParams
 	newErr     error
+	promptErr  error
 }
 
 func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any, out any) error {
@@ -55,6 +56,9 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 			f.mu.Lock()
 			f.lastPrompt = p
 			f.mu.Unlock()
+		}
+		if f.promptErr != nil {
+			return f.promptErr
 		}
 		if res, ok := out.(*acp.SessionPromptResult); ok {
 			res.StopReason = "end_turn"
@@ -123,6 +127,84 @@ func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	}
 }
 
+func TestSignalPollIncludesQuotedReplyContext(t *testing.T) {
+	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
+		Envelope: signalEnvelope{
+			Source: "+15145550000",
+			DataMessage: &signalDataMessage{
+				Message: "yes, exactly",
+				Quote: &signalQuote{
+					ID:           float64(1693064367000),
+					AuthorNumber: "+15145551111",
+					Text:         "the earlier message",
+				},
+			},
+		},
+	}}}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+	}
+
+	updates, err := gw.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll returned error: %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(updates))
+	}
+	for _, want := range []string{
+		"User replied to:",
+		"the earlier message",
+		"with:",
+		"yes, exactly",
+	} {
+		if !strings.Contains(updates[0].Text, want) {
+			t.Fatalf("quoted update missing %q: %q", want, updates[0].Text)
+		}
+	}
+}
+
+func TestSignalPollQuotedCommandUsesRawMessage(t *testing.T) {
+	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
+		Envelope: signalEnvelope{
+			Source: "+15145550000",
+			DataMessage: &signalDataMessage{
+				Message: "/reset",
+				Quote: &signalQuote{
+					Text: "quoted message should not hide the command",
+				},
+			},
+		},
+	}}}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+		cli: &fakeSignalACPClient{},
+	}
+
+	updates, err := gw.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll returned error: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("updates = %#v, want command to be handled locally", updates)
+	}
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	if len(rpc.calls) != 1 || rpc.calls[0].method != "send" {
+		t.Fatalf("rpc calls = %#v, want reset reply", rpc.calls)
+	}
+	text, _ := rpc.calls[0].params.(map[string]any)["message"].(string)
+	if !strings.Contains(text, "No active session") {
+		t.Fatalf("reset reply = %q", text)
+	}
+}
+
 func TestSignalPollDropsDisallowedReceive(t *testing.T) {
 	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
 		Envelope: signalEnvelope{
@@ -172,6 +254,223 @@ func TestSignalPollPrefersSourceNumberForAllowedChat(t *testing.T) {
 	}
 	if updates[0].ChatID != "+15145550000" {
 		t.Fatalf("chat id = %q, want source number", updates[0].ChatID)
+	}
+}
+
+func TestSignalPollRecordsSentSyncWithoutReplyTrigger(t *testing.T) {
+	var receives []signalReceiveEnvelope
+	raw := `[
+		{
+			"envelope": {
+				"syncMessage": {
+					"sentMessage": {
+						"destination": "+15145550000",
+						"destinationNumber": "+15145550000",
+						"timestamp": 1693064367769,
+						"message": "manual reply from signal app"
+					}
+				}
+			}
+		}
+	]`
+	if err := json.Unmarshal([]byte(raw), &receives); err != nil {
+		t.Fatalf("unmarshal sent sync envelope: %v", err)
+	}
+	rpc := &fakeSignalRPC{receives: receives}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+	}
+
+	updates, err := gw.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll returned error: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("updates = %#v, want no reply-triggering update", updates)
+	}
+	manual := gw.drainManualContext("+15145550000")
+	if len(manual) != 1 || manual[0].Text != "manual reply from signal app" || manual[0].Timestamp != "1693064367769" {
+		t.Fatalf("manual context = %#v", manual)
+	}
+}
+
+func TestSignalPollRecordsQuotedSentSyncContext(t *testing.T) {
+	var receives []signalReceiveEnvelope
+	raw := `[
+		{
+			"envelope": {
+				"syncMessage": {
+					"sentMessage": {
+						"destination": "+15145550000",
+						"destinationNumber": "+15145550000",
+						"timestamp": 1693064367769,
+						"message": "manual reply from signal app",
+						"quote": {
+							"id": 1693064367000,
+							"authorNumber": "+15145551111",
+							"text": "question I replied to"
+						}
+					}
+				}
+			}
+		}
+	]`
+	if err := json.Unmarshal([]byte(raw), &receives); err != nil {
+		t.Fatalf("unmarshal quoted sent sync envelope: %v", err)
+	}
+	rpc := &fakeSignalRPC{receives: receives}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+	}
+
+	updates, err := gw.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll returned error: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("updates = %#v, want no reply-triggering update", updates)
+	}
+	manual := gw.drainManualContext("+15145550000")
+	if len(manual) != 1 {
+		t.Fatalf("manual context = %#v, want one", manual)
+	}
+	for _, want := range []string{
+		"User replied to:",
+		"question I replied to",
+		"with:",
+		"manual reply from signal app",
+	} {
+		if !strings.Contains(manual[0].Text, want) {
+			t.Fatalf("manual quoted context missing %q: %q", want, manual[0].Text)
+		}
+	}
+}
+
+func TestSignalManualContextPrependedToNextPrompt(t *testing.T) {
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		cli: cli,
+		rpc: &fakeSignalRPC{},
+	}
+	gw.appendManualContext("+15145550000", signalManualContext{
+		Text:      "I already answered manually",
+		Timestamp: "1693064367769",
+	})
+
+	err := gw.gatewayCore().Handle(context.Background(), gw, gatewaycore.Update{
+		ChatID: "+15145550000",
+		Text:   "what do you think?",
+	})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	cli.mu.Lock()
+	prompt := cli.lastPrompt.Prompt
+	cli.mu.Unlock()
+	if len(prompt) != 1 {
+		t.Fatalf("prompt blocks = %#v", prompt)
+	}
+	text := prompt[0].Text
+	for _, want := range []string{
+		"account owner manually sent",
+		"I already answered manually",
+		"Latest incoming message:",
+		"what do you think?",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("prompt missing %q: %q", want, text)
+		}
+	}
+	if remaining := gw.drainManualContext("+15145550000"); len(remaining) != 0 {
+		t.Fatalf("manual context was not drained: %#v", remaining)
+	}
+}
+
+func TestSignalManualContextRetainedWhenPromptFails(t *testing.T) {
+	cli := &fakeSignalACPClient{promptErr: context.DeadlineExceeded}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		cli: cli,
+		rpc: &fakeSignalRPC{},
+	}
+	gw.appendManualContext("+15145550000", signalManualContext{
+		Text:      "manual context should survive",
+		Timestamp: "1693064367769",
+	})
+
+	err := gw.gatewayCore().Handle(context.Background(), gw, gatewaycore.Update{
+		ChatID: "+15145550000",
+		Text:   "will this fail?",
+	})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	manual := gw.drainManualContext("+15145550000")
+	if len(manual) != 1 || manual[0].Text != "manual context should survive" {
+		t.Fatalf("manual context = %#v, want retained after prompt failure", manual)
+	}
+}
+
+func TestSignalManualContextKeepsEntriesAddedDuringPrompt(t *testing.T) {
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+	}
+	gw.appendManualContext("+15145550000", signalManualContext{Text: "included in prompt"})
+
+	prompt := gw.buildSignalPrompt("", gatewaycore.Update{
+		ChatID: "+15145550000",
+		Text:   "incoming",
+	})
+	if len(prompt) != 1 || !strings.Contains(prompt[0].Text, "included in prompt") {
+		t.Fatalf("prompt = %#v, want first manual context", prompt)
+	}
+	gw.appendManualContext("+15145550000", signalManualContext{Text: "sent while prompt in flight"})
+	gw.afterSignalPrompt("", gatewaycore.Update{ChatID: "+15145550000"})
+
+	manual := gw.drainManualContext("+15145550000")
+	if len(manual) != 1 || manual[0].Text != "sent while prompt in flight" {
+		t.Fatalf("manual context = %#v, want only in-flight entry retained", manual)
+	}
+}
+
+func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:        "+15145551234",
+			AllowedNumbers: map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc,
+	}
+	if err := gw.SendText(context.Background(), "+15145550000", []string{"gateway generated reply"}); err != nil {
+		t.Fatalf("SendText returned error: %v", err)
+	}
+	handled := gw.recordSignalSentSync(signalEnvelope{
+		SyncMessage: &signalSyncMessage{
+			SentMessage: &signalSentMessage{
+				DestinationNumber: "+15145550000",
+				Message:           "gateway generated reply",
+			},
+		},
+	})
+	if !handled {
+		t.Fatal("sent sync was not handled")
+	}
+	if manual := gw.drainManualContext("+15145550000"); len(manual) != 0 {
+		t.Fatalf("manual context = %#v, want none for gateway echo", manual)
 	}
 }
 
