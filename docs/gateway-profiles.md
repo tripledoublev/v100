@@ -109,6 +109,10 @@ operational state file.
 Ambiguous transport failures are retained only for sent-echo correlation; v100
 does not blindly replay them after restart because doing so could duplicate a
 message that Signal accepted before the connection dropped.
+As with any non-transactional external send, a process-kill in the tiny interval
+between Signal accepting a message and v100 recording that result can leave
+echo attribution ambiguous; the deterministic prefix keeps those cases visible
+in the trace rather than silently changing the message text.
 
 `message_format = "signal_markdown"` renders conservative Markdown as Signal's
 native bold, italic, strike, spoiler, and monospace ranges. Streaming waits for

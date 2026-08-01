@@ -14,6 +14,7 @@
 ### Fixes
 
 - Preserved manually sent same-account messages in durable labeled traces, including quoted context, instead of temporarily injecting ambiguous prose into the next friend prompt.
+- Preserved explicitly configured zero gateway budgets when creating or resuming ACP sessions.
 - Added bounded, atomic Signal coordination state for run bindings, owner-message delivery, inbound deduplication, and bot-echo correlation, with corrupt-state quarantine and per-chat reset cleanup.
 - Restarted the gateway on closed or reset Signal JSON-RPC transports while retaining ordinary polling retries for transient errors.
 - Hardened Markdown spoiler processing and streaming boundaries against pathological input, multiline constructs, malformed fences, private-use characters, and grapheme or UTF-16 splitting.
