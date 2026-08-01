@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.9 — 2026-08-01
+
+**Signal Shared-Account Context and Styling**
+
+### Features
+
+- Added restart-tolerant shared-account mode that records owner-written Signal messages as labeled assistant-side context without triggering the bot, while friend messages and bot responses retain distinct `signal.friend` and `signal.bot` trace sources.
+- Resumed persisted ACP conversations after gateway restarts while reapplying the configured provider, model, solver, tools, dangerous-tool denylist, system prompt, network tier, and explicit budgets.
+- Added Signal-native rendering for conservative Markdown, block-aware response streaming, UTF-16-safe style ranges and chunking, deterministic bot prefixes, and explicit plain-text fallback for older signal-cli versions.
+- Added `v100 gateway signal send --to NUMBER` for deterministic control-socket messages that do not invoke the model.
+
+### Fixes
+
+- Preserved manually sent same-account messages in durable labeled traces, including quoted context, instead of temporarily injecting ambiguous prose into the next friend prompt.
+- Preserved explicitly configured zero gateway budgets when creating or resuming ACP sessions.
+- Added bounded, atomic Signal coordination state for run bindings, owner-message delivery, inbound deduplication, and bot-echo correlation, with corrupt-state quarantine and per-chat reset cleanup.
+- Restarted the gateway on closed or reset Signal JSON-RPC transports while retaining ordinary polling retries for transient errors.
+- Hardened Markdown spoiler processing and streaming boundaries against pathological input, multiline constructs, malformed fences, private-use characters, and grapheme or UTF-16 splitting.
+
 ## v0.3.8 — 2026-07-06
 
 **Signal Gateway Reliability**

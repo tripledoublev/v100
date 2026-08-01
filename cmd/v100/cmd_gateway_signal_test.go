@@ -3,20 +3,31 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/acp"
 	"github.com/tripledoublev/v100/internal/config"
 	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
+	"github.com/tripledoublev/v100/internal/signalstate"
+	"github.com/tripledoublev/v100/internal/signalstyle"
 )
 
 type fakeSignalRPC struct {
 	mu       sync.Mutex
 	receives []signalReceiveEnvelope
+	err      error
+	callErrs []error
+	onCall   func(string)
 	calls    []signalRPCCall
 }
 
@@ -29,8 +40,11 @@ type fakeSignalACPClient struct {
 	mu         sync.Mutex
 	calls      []string
 	lastNew    acp.SessionNewParams
+	lastResume acp.SessionResumeParams
 	lastPrompt acp.SessionPromptParams
+	lastAppend acp.SessionAppendContextParams
 	newErr     error
+	resumeErr  error
 	promptErr  error
 }
 
@@ -49,6 +63,29 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 			f.mu.Unlock()
 			if res, ok := out.(*acp.SessionNewResult); ok {
 				res.SessionID = p.SessionID
+				res.RunID = "run-signal-test"
+			}
+		}
+	case acp.MethodSessionResume:
+		if f.resumeErr != nil {
+			return f.resumeErr
+		}
+		if p, ok := params.(acp.SessionResumeParams); ok {
+			f.mu.Lock()
+			f.lastResume = p
+			f.mu.Unlock()
+			if res, ok := out.(*acp.SessionResumeResult); ok {
+				res.SessionID = p.SessionID
+				res.RunID = p.RunID
+			}
+		}
+	case acp.MethodSessionAppendContext:
+		if p, ok := params.(acp.SessionAppendContextParams); ok {
+			f.mu.Lock()
+			f.lastAppend = p
+			f.mu.Unlock()
+			if res, ok := out.(*acp.SessionAppendContextResult); ok {
+				res.Appended = true
 			}
 		}
 	case acp.MethodSessionPrompt:
@@ -81,6 +118,9 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 func (f *fakeSignalRPC) Receive(context.Context) ([]signalReceiveEnvelope, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := append([]signalReceiveEnvelope(nil), f.receives...)
 	f.receives = nil
 	return out, nil
@@ -90,10 +130,61 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, signalRPCCall{method: method, params: params})
+	if f.onCall != nil {
+		f.onCall(method)
+	}
+	if len(f.callErrs) > 0 {
+		err := f.callErrs[0]
+		f.callErrs = f.callErrs[1:]
+		return err
+	}
 	return nil
 }
 
 func (f *fakeSignalRPC) Close() error { return nil }
+
+func TestSignalPollReturnsFatalErrorWhenRPCCloses(t *testing.T) {
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg:       signalRuntimeConfig{AllowedNumbers: map[string]struct{}{"+15145550000": {}}},
+		rpc:       &fakeSignalRPC{err: io.EOF},
+	}
+
+	_, err := gw.Poll(context.Background())
+	if err == nil {
+		t.Fatal("Poll returned nil error")
+	}
+	if !gatewaycore.IsFatalPoll(err) {
+		t.Fatalf("Poll error = %v, want fatal poll error", err)
+	}
+}
+
+func TestIsSignalRPCClosedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "EOF", err: io.EOF, want: true},
+		{name: "wrapped EOF", err: fmt.Errorf("receive: %w", io.EOF), want: true},
+		{name: "unexpected EOF", err: io.ErrUnexpectedEOF, want: true},
+		{name: "closed pipe", err: io.ErrClosedPipe, want: true},
+		{name: "closed connection", err: net.ErrClosed, want: true},
+		{name: "closed file", err: os.ErrClosed, want: true},
+		{name: "EPIPE", err: syscall.EPIPE, want: true},
+		{name: "wrapped EPIPE", err: fmt.Errorf("write: %w", syscall.EPIPE), want: true},
+		{name: "connection reset", err: syscall.ECONNRESET, want: true},
+		{name: "ordinary", err: errors.New("temporary receive failure"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSignalRPCClosedError(tt.err); got != tt.want {
+				t.Fatalf("isSignalRPCClosedError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{
@@ -156,7 +247,7 @@ func TestSignalPollIncludesQuotedReplyContext(t *testing.T) {
 		t.Fatalf("updates = %d, want 1", len(updates))
 	}
 	for _, want := range []string{
-		"User replied to:",
+		"signal.friend replied to signal.friend (the friend):",
 		"the earlier message",
 		"with:",
 		"yes, exactly",
@@ -341,7 +432,7 @@ func TestSignalPollRecordsQuotedSentSyncContext(t *testing.T) {
 		t.Fatalf("manual context = %#v, want one", manual)
 	}
 	for _, want := range []string{
-		"User replied to:",
+		"signal.owner_manual replied to signal.friend (the friend):",
 		"question I replied to",
 		"with:",
 		"manual reply from signal app",
@@ -349,6 +440,24 @@ func TestSignalPollRecordsQuotedSentSyncContext(t *testing.T) {
 		if !strings.Contains(manual[0].Text, want) {
 			t.Fatalf("manual quoted context missing %q: %q", want, manual[0].Text)
 		}
+	}
+}
+
+func TestSignalQuoteLabelsOwnerAndBotExplicitly(t *testing.T) {
+	gw := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234", BotPrefix: "🤖 "}}
+	owner := gw.signalDataMessageText(&signalDataMessage{Message: "gm london", Quote: &signalQuote{
+		AuthorNumber: "+15145551234",
+		Text:         "Im in London",
+	}})
+	if !strings.Contains(owner, "signal.friend replied to signal.owner_manual (Vincent):") {
+		t.Fatalf("owner quote context = %q", owner)
+	}
+	bot := gw.signalDataMessageText(&signalDataMessage{Message: "ok", Quote: &signalQuote{
+		AuthorNumber: "+15145551234",
+		Text:         "🤖 **news**",
+	}})
+	if !strings.Contains(bot, "signal.friend replied to signal.bot (v100):") {
+		t.Fatalf("bot quote context = %q", bot)
 	}
 }
 
@@ -438,7 +547,9 @@ func TestSignalManualContextKeepsEntriesAddedDuringPrompt(t *testing.T) {
 		t.Fatalf("prompt = %#v, want first manual context", prompt)
 	}
 	gw.appendManualContext("+15145550000", signalManualContext{Text: "sent while prompt in flight"})
-	gw.afterSignalPrompt("", gatewaycore.Update{ChatID: "+15145550000"})
+	if err := gw.afterSignalPrompt("", gatewaycore.Update{ChatID: "+15145550000"}); err != nil {
+		t.Fatalf("afterSignalPrompt returned error: %v", err)
+	}
 
 	manual := gw.drainManualContext("+15145550000")
 	if len(manual) != 1 || manual[0].Text != "sent while prompt in flight" {
@@ -458,7 +569,7 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 	if err := gw.SendText(context.Background(), "+15145550000", []string{"gateway generated reply"}); err != nil {
 		t.Fatalf("SendText returned error: %v", err)
 	}
-	handled := gw.recordSignalSentSync(signalEnvelope{
+	handled, err := gw.recordSignalSentSync(context.Background(), signalEnvelope{
 		SyncMessage: &signalSyncMessage{
 			SentMessage: &signalSentMessage{
 				DestinationNumber: "+15145550000",
@@ -466,11 +577,218 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("recordSignalSentSync returned error: %v", err)
+	}
 	if !handled {
 		t.Fatal("sent sync was not handled")
 	}
 	if manual := gw.drainManualContext("+15145550000"); len(manual) != 0 {
 		t.Fatalf("manual context = %#v, want none for gateway echo", manual)
+	}
+}
+
+func TestSignalSharedAccountKeepsLondonMessagesInCorrectRoles(t *testing.T) {
+	ctx := context.Background()
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		ctx:       ctx,
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc:   rpc,
+		cli:   cli,
+		state: store,
+	}
+	handled, err := gw.recordSignalSentSync(ctx, signalEnvelope{SyncMessage: &signalSyncMessage{SentMessage: &signalSentMessage{
+		DestinationNumber: "+15145550000",
+		Timestamp:         json.Number("1001"),
+		Message:           "Im in London",
+	}}})
+	if err != nil || !handled {
+		t.Fatalf("owner sync handled=%v err=%v", handled, err)
+	}
+	if cli.lastAppend.Role != "assistant" || cli.lastAppend.Source != "signal.owner_manual" || cli.lastAppend.Content != "Im in London" {
+		t.Fatalf("owner append = %#v", cli.lastAppend)
+	}
+	if len(store.PendingOwnerEvents()) != 0 {
+		t.Fatalf("pending owner events = %#v", store.PendingOwnerEvents())
+	}
+
+	rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("1002"),
+		DataMessage:  &signalDataMessage{Message: "gm london"},
+	}}}
+	updates, err := gw.Poll(ctx)
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("Poll updates=%#v err=%v", updates, err)
+	}
+	update := updates[0]
+	if update.Source != "signal.friend" || update.ResponseSource != "signal.bot" || update.ExternalEventID != "signal-friend-1002" {
+		t.Fatalf("friend update = %#v", update)
+	}
+	if err := gw.gatewayCore().Handle(ctx, gw, update); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	if cli.lastPrompt.Source != "signal.friend" || cli.lastPrompt.ResponseSource != "signal.bot" || len(cli.lastPrompt.Prompt) != 1 || cli.lastPrompt.Prompt[0].Text != "gm london" {
+		t.Fatalf("friend prompt = %#v", cli.lastPrompt)
+	}
+	binding, ok := store.Binding("+15145550000")
+	if !ok || binding.RunID != "run-signal-test" {
+		t.Fatalf("binding = %#v ok=%v", binding, ok)
+	}
+
+	rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("1002"),
+		DataMessage:  &signalDataMessage{Message: "gm london"},
+	}}}
+	duplicate, err := gw.Poll(ctx)
+	if err != nil || len(duplicate) != 0 {
+		t.Fatalf("duplicate updates=%#v err=%v", duplicate, err)
+	}
+}
+
+func TestSignalSharedAccountResumesStoredRun(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetBinding("+15145550000", "run-before-restart", "signal-old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc:   &fakeSignalRPC{},
+		cli:   cli,
+		state: store,
+	}
+	state, err := gw.ensureSignalSession(context.Background(), "+15145550000")
+	if err != nil {
+		t.Fatalf("ensureSignalSession returned error: %v", err)
+	}
+	if state.RunID != "run-before-restart" || cli.lastResume.RunID != "run-before-restart" {
+		t.Fatalf("state=%#v resume=%#v", state, cli.lastResume)
+	}
+}
+
+func TestSignalSharedAccountReplacesMissingStoredRun(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetBinding("+15145550000", "missing-run", "signal-old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cli := &fakeSignalACPClient{resumeErr: fmt.Errorf("%d: session not found", acp.ErrSessionNotFound)}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: &fakeSignalRPC{}, cli: cli, state: store,
+	}
+	state, err := gw.ensureSignalSession(context.Background(), "+15145550000")
+	if err != nil {
+		t.Fatalf("ensureSignalSession returned error: %v", err)
+	}
+	if state.RunID != "run-signal-test" {
+		t.Fatalf("fresh state = %#v", state)
+	}
+	binding, ok := store.Binding("+15145550000")
+	if !ok || binding.RunID != "run-signal-test" {
+		t.Fatalf("replacement binding = %#v ok=%v", binding, ok)
+	}
+}
+
+func TestSignalSharedAccountDoesNotAckFailedPrompt(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("2001"),
+		DataMessage:  &signalDataMessage{Message: "try again after restart"},
+	}}}}
+	cli := &fakeSignalACPClient{promptErr: errors.New("provider unavailable")}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc, cli: cli, state: store,
+	}
+	updates, err := gw.Poll(context.Background())
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("Poll updates=%#v err=%v", updates, err)
+	}
+	if err := gw.gatewayCore().Handle(context.Background(), gw, updates[0]); err != nil {
+		t.Fatalf("Handle returned error while sending failure notice: %v", err)
+	}
+	if store.IsProcessed("2001") {
+		t.Fatal("failed prompt was acknowledged as processed")
+	}
+}
+
+func TestSignalControlSendFormatsAndTracesGatewaySystemMessage(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			MessageFormat:    "signal_markdown",
+			BotPrefix:        "🤖 ",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc, cli: cli, state: store,
+	}
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gw.handleSignalControlConn(context.Background(), serverConn)
+	}()
+	if err := json.NewEncoder(clientConn).Encode(signalControlRequest{Action: "send", To: "+15145550000", Text: "**v100 est live**"}); err != nil {
+		t.Fatal(err)
+	}
+	var response signalControlResponse
+	if err := json.NewDecoder(clientConn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	_ = clientConn.Close()
+	<-done
+	if !response.OK || response.Error != "" {
+		t.Fatalf("control response = %#v", response)
+	}
+	params := rpc.calls[0].params.(map[string]any)
+	if params["message"] != "🤖 v100 est live" || len(params["textStyle"].([]string)) != 1 {
+		t.Fatalf("formatted control send = %#v", params)
+	}
+	if cli.lastAppend.Source != "signal.gateway_system" || cli.lastAppend.Role != "assistant" || cli.lastAppend.Content != "**v100 est live**" {
+		t.Fatalf("gateway system trace = %#v", cli.lastAppend)
 	}
 }
 
@@ -483,6 +801,13 @@ func TestGatewaySignalCommandIncludesPromptSubcommand(t *testing.T) {
 	}
 	if sub == nil || sub.Use != "prompt --to NUMBER [message]" {
 		t.Fatalf("prompt subcommand = %#v", sub)
+	}
+	send, _, err := cmd.Find([]string{"send"})
+	if err != nil {
+		t.Fatalf("Find(send) returned error: %v", err)
+	}
+	if send == nil || send.Use != "send --to NUMBER [message]" {
+		t.Fatalf("send subcommand = %#v", send)
 	}
 }
 
@@ -541,6 +866,108 @@ func TestSignalSendTextTypingAndReaction(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "send,send,sendTyping,sendReaction" {
 		t.Fatalf("methods = %v", got)
+	}
+}
+
+func TestSignalSendFormattedTextUsesNativeStylesAndPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:       "+15145551234",
+			MessageFormat: "signal_markdown",
+			BotPrefix:     "🤖 ",
+		},
+		rpc: rpc,
+	}
+	if err := gw.SendFormattedText(context.Background(), "+15145550000", "**hello**"); err != nil {
+		t.Fatalf("SendFormattedText returned error: %v", err)
+	}
+	params := rpc.calls[0].params.(map[string]any)
+	if params["message"] != "🤖 hello" {
+		t.Fatalf("message = %#v", params["message"])
+	}
+	styles, ok := params["textStyle"].([]string)
+	if !ok || len(styles) != 1 || styles[0] != "3:5:BOLD" {
+		t.Fatalf("textStyle = %#v", params["textStyle"])
+	}
+}
+
+func TestSignalSendFormattedTextRetriesPlainOnExplicitUnsupportedStyle(t *testing.T) {
+	rpc := &fakeSignalRPC{callErrs: []error{
+		&signalRPCError{Method: "send", Code: -32602, Message: "unknown field textStyle"},
+		nil,
+	}}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg:       signalRuntimeConfig{Account: "+15145551234", MessageFormat: "signal_markdown"},
+		rpc:       rpc,
+	}
+	if err := gw.SendFormattedText(context.Background(), "+15145550000", "**hello**"); err != nil {
+		t.Fatalf("SendFormattedText returned error: %v", err)
+	}
+	if len(rpc.calls) != 2 {
+		t.Fatalf("calls = %d, want style attempt plus plain retry", len(rpc.calls))
+	}
+	if _, ok := rpc.calls[1].params.(map[string]any)["textStyle"]; ok {
+		t.Fatalf("retry retained textStyle: %#v", rpc.calls[1].params)
+	}
+	if !gw.styleDisabled {
+		t.Fatal("style fallback was not latched")
+	}
+}
+
+func TestSignalSendFormattedTextRejectsOversizedPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{cfg: signalRuntimeConfig{BotPrefix: strings.Repeat("x", signalChunkChars)}, rpc: rpc}
+	err := gw.SendFormattedText(context.Background(), "+15145550000", "hello")
+	if err == nil || !strings.Contains(err.Error(), "prefix") {
+		t.Fatalf("SendFormattedText error = %v", err)
+	}
+	if len(rpc.calls) != 0 {
+		t.Fatalf("oversized prefix attempted send: %#v", rpc.calls)
+	}
+}
+
+func TestSignalSendTextChunksAroundPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{cfg: signalRuntimeConfig{BotPrefix: "🤖 "}, rpc: rpc}
+	if err := gw.SendText(context.Background(), "+15145550000", []string{strings.Repeat("a", signalChunkChars)}); err != nil {
+		t.Fatalf("SendText returned error: %v", err)
+	}
+	if len(rpc.calls) != 2 {
+		t.Fatalf("send calls = %d, want 2", len(rpc.calls))
+	}
+	for _, call := range rpc.calls {
+		message := call.params.(map[string]any)["message"].(string)
+		if signalstyle.UTF16Len(message) > signalChunkChars {
+			t.Fatalf("prefixed chunk length = %d", signalstyle.UTF16Len(message))
+		}
+	}
+}
+
+func TestSignalOutboundIntentDistinguishesRejectedAndAmbiguousSend(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedRPC := &fakeSignalRPC{callErrs: []error{&signalRPCError{Method: "send", Code: -32000, Message: "rejected"}}}
+	rejected := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234"}, rpc: rejectedRPC, state: store}
+	if err := rejected.SendFormattedText(context.Background(), "+15145550000", "not sent"); err == nil {
+		t.Fatal("rejected send returned nil error")
+	}
+	if got := store.PendingOutbound(); len(got) != 0 {
+		t.Fatalf("rejected send retained intent: %#v", got)
+	}
+
+	ambiguousRPC := &fakeSignalRPC{callErrs: []error{io.ErrUnexpectedEOF}}
+	ambiguous := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234"}, rpc: ambiguousRPC, state: store}
+	if err := ambiguous.SendFormattedText(context.Background(), "+15145550000", "maybe sent"); err == nil {
+		t.Fatal("ambiguous send returned nil error")
+	}
+	got := store.PendingOutbound()
+	if len(got) != 1 || !got[0].PossiblySent || got[0].ConfirmedSent {
+		t.Fatalf("ambiguous intent = %#v", got)
 	}
 }
 

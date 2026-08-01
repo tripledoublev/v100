@@ -40,6 +40,7 @@ const (
 	EventImageInline      EventType = "image.inline"
 	EventGeneratedGoal    EventType = "generated.goal"
 	EventPolicyEvolve     EventType = "policy.evolve"
+	EventConversationMsg  EventType = "conversation.message"
 )
 
 // ImageInlinePayload carries the base64-encoded image for iTerm2 inline rendering.
@@ -156,9 +157,20 @@ type RunStartPayload struct {
 
 // UserMsgPayload is the Payload for EventUserMsg.
 type UserMsgPayload struct {
-	Content    string `json:"content"`
-	Source     string `json:"source,omitempty"` // "system" for harness-injected messages; empty = user input
-	ImageCount int    `json:"image_count,omitempty"`
+	Content         string `json:"content"`
+	Role            string `json:"role,omitempty"`
+	Source          string `json:"source,omitempty"` // "system" for harness-injected messages; empty = user input
+	ExternalEventID string `json:"external_event_id,omitempty"`
+	ImageCount      int    `json:"image_count,omitempty"`
+}
+
+// ConversationMsgPayload records context appended without a model invocation.
+// Role is explicit so reconstruction never has to infer it from Source.
+type ConversationMsgPayload struct {
+	Role            string `json:"role"`
+	Source          string `json:"source"`
+	ExternalEventID string `json:"external_event_id"`
+	Content         string `json:"content"`
 }
 
 // ModelCallPayload is the Payload for EventModelCall.
@@ -199,11 +211,13 @@ func newModelCallPayload(model string, msgs []providers.Message, toolNames []str
 
 // ModelRespPayload is the Payload for EventModelResp.
 type ModelRespPayload struct {
-	Text       string     `json:"text"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	Usage      Usage      `json:"usage"`
-	DurationMS int64      `json:"duration_ms,omitempty"`
-	TTFT       int64      `json:"ttft,omitempty"` // Time To First Token in ms
+	Text            string     `json:"text"`
+	ToolCalls       []ToolCall `json:"tool_calls,omitempty"`
+	Usage           Usage      `json:"usage"`
+	DurationMS      int64      `json:"duration_ms,omitempty"`
+	TTFT            int64      `json:"ttft,omitempty"` // Time To First Token in ms
+	Source          string     `json:"source,omitempty"`
+	ExternalEventID string     `json:"external_event_id,omitempty"`
 }
 
 // CompressPayload is the Payload for EventCompress.

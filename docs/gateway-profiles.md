@@ -79,7 +79,11 @@ rpc_mode = "socket"
 socket = "/run/signal-cli.sock"
 allowed_numbers = ["+15145550000"]
 profile = "news_fr"
-stream_responses = false
+stream_responses = true
+conversation_mode = "shared_account"
+message_format = "signal_markdown"
+bot_prefix = "🤖 "
+# state_path defaults to ~/.v100/signal/<account-hash>.json
 voice_replies = false
 voice_reply_mode = "audio+text"
 
@@ -91,6 +95,38 @@ The Signal gateway uses the same `gateway.profiles` sandbox as Telegram. Signal
 chat IDs are sender numbers, so per-chat profile keys should use the sender's
 number string. `rpc_mode = "tcp"` uses `tcp = "host:port"`; `rpc_mode = "stdio"`
 starts `signal-cli -a <account> jsonRpc`.
+
+`conversation_mode = "shared_account"` is for the atypical topology where the
+account owner and v100 both send from the configured Signal account. Sent-sync
+messages written manually by the owner are appended to ACP history as
+`signal.owner_manual` assistant-side context and never trigger a reply. Inbound
+messages from the allowed friend are traced as `signal.friend`, while model
+replies are traced as `signal.bot`. The chat-to-run binding, pending owner
+context, processed Signal IDs, and outbound echo correlation live in the small
+atomic `state_path` file, allowing the ACP run to resume after a gateway
+restart. Completed conversation text remains in `trace.jsonl`, not in this
+operational state file.
+Ambiguous transport failures are retained only for sent-echo correlation; v100
+does not blindly replay them after restart because doing so could duplicate a
+message that Signal accepted before the connection dropped.
+As with any non-transactional external send, a process-kill in the tiny interval
+between Signal accepting a message and v100 recording that result can leave
+echo attribution ambiguous; the deterministic prefix keeps those cases visible
+in the trace rather than silently changing the message text.
+
+`message_format = "signal_markdown"` renders conservative Markdown as Signal's
+native bold, italic, strike, spoiler, and monospace ranges. Streaming waits for
+complete Markdown blocks before sending. `bot_prefix` is prepended to every
+gateway-authored text message; shared-account mode defaults it to `🤖 ` when it
+is omitted. If signal-cli explicitly rejects `textStyle`, v100 retries that
+message without styles and keeps plain mode for the process lifetime.
+
+Use the running gateway's control socket for a deterministic announcement that
+must not invoke the model:
+
+```sh
+printf '%s\n' '**v100 was updated**' | v100 --config config.toml gateway signal send --to +15145550000
+```
 
 For a ready-to-deploy personal chat assistant preset, see
 `docs/examples/signal-chat-fr/`.

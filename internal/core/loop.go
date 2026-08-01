@@ -69,7 +69,17 @@ type Loop struct {
 	memoryStepEligible     bool
 	memoryStepConsumed     bool
 	pendingUserImages      []providers.ImageAttachment
+	pendingUserSource      string
+	pendingResponseSource  string
+	pendingExternalEventID string
 	bulkOnlyCompressStepID string
+}
+
+// ConversationTurnMetadata identifies an externally sourced conversation turn.
+type ConversationTurnMetadata struct {
+	Source          string
+	ResponseSource  string
+	ExternalEventID string
 }
 
 const (
@@ -242,6 +252,12 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 
 // StepWithImages processes a single user input and optional image attachments.
 func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []providers.ImageAttachment) error {
+	return l.StepWithImagesMetadata(ctx, userInput, images, ConversationTurnMetadata{})
+}
+
+// StepWithImagesMetadata processes a user turn while preserving its external
+// source and correlation ID in user and model-response trace events.
+func (l *Loop) StepWithImagesMetadata(ctx context.Context, userInput string, images []providers.ImageAttachment, metadata ConversationTurnMetadata) error {
 	if len(images) > 0 && !l.Provider.Capabilities().Images {
 		return fmt.Errorf("provider %q does not support image attachments", l.Provider.Name())
 	}
@@ -253,6 +269,14 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 		}
 	}
 	l.pendingUserImages = append([]providers.ImageAttachment(nil), images...)
+	l.pendingUserSource = strings.TrimSpace(metadata.Source)
+	l.pendingResponseSource = strings.TrimSpace(metadata.ResponseSource)
+	l.pendingExternalEventID = strings.TrimSpace(metadata.ExternalEventID)
+	defer func() {
+		l.pendingUserSource = ""
+		l.pendingResponseSource = ""
+		l.pendingExternalEventID = ""
+	}()
 	stopMemoryCompaction := l.startMemoryCompaction(ctx)
 	defer stopMemoryCompaction()
 
@@ -267,8 +291,11 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 
 func (l *Loop) appendUserMessage(stepID, userInput string) error {
 	payload := UserMsgPayload{
-		Content:    userInput,
-		ImageCount: len(l.pendingUserImages),
+		Content:         userInput,
+		Role:            "user",
+		Source:          l.pendingUserSource,
+		ExternalEventID: l.pendingExternalEventID,
+		ImageCount:      len(l.pendingUserImages),
 	}
 	if _, err := l.emit(EventUserMsg, stepID, payload); err != nil {
 		return err
@@ -324,6 +351,29 @@ func (l *Loop) AppendConversationMessage(role, content string) error {
 		Source:  source,
 	})
 	return err
+}
+
+// AppendExternalConversationMessage records context without invoking a model.
+func (l *Loop) AppendExternalConversationMessage(role, source, externalEventID, content string) error {
+	role = strings.TrimSpace(role)
+	source = strings.TrimSpace(source)
+	externalEventID = strings.TrimSpace(externalEventID)
+	if l == nil || strings.TrimSpace(content) == "" {
+		return nil
+	}
+	_, err := l.emit(EventConversationMsg, "", ConversationMsgPayload{
+		Role:            role,
+		Source:          source,
+		ExternalEventID: externalEventID,
+		Content:         content,
+	})
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	l.Messages = append(l.Messages, providers.Message{Role: role, Content: content})
+	l.mu.Unlock()
+	return nil
 }
 
 // emitErrorAssistance tries one tool-free model turn to explain a failure and suggest remediation.
@@ -1576,6 +1626,29 @@ func (l *Loop) compressionTrigger(tokensBefore int) string {
 }
 
 func (l *Loop) emit(t EventType, stepID string, payload any) (Event, error) {
+	if t == EventModelResp && (l.pendingResponseSource != "" || l.pendingExternalEventID != "") {
+		switch p := payload.(type) {
+		case ModelRespPayload:
+			if p.Source == "" {
+				p.Source = l.pendingResponseSource
+			}
+			if p.ExternalEventID == "" {
+				p.ExternalEventID = l.pendingExternalEventID
+			}
+			payload = p
+		case *ModelRespPayload:
+			if p != nil {
+				copy := *p
+				if copy.Source == "" {
+					copy.Source = l.pendingResponseSource
+				}
+				if copy.ExternalEventID == "" {
+					copy.ExternalEventID = l.pendingExternalEventID
+				}
+				payload = copy
+			}
+		}
+	}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return Event{}, fmt.Errorf("emit marshal: %w", err)

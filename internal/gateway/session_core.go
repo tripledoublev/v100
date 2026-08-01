@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,6 +13,42 @@ import (
 
 	"github.com/tripledoublev/v100/internal/acp"
 )
+
+// fatalPollError marks a transport poll error that cannot recover through
+// retrying the same transport instance. Keep the marker private so callers use
+// FatalPoll and IsFatalPoll instead of depending on its representation.
+type fatalPollError struct {
+	Err error
+}
+
+func (e fatalPollError) Error() string {
+	if e.Err == nil {
+		return "fatal gateway poll error"
+	}
+	return e.Err.Error()
+}
+
+func (e fatalPollError) Unwrap() error { return e.Err }
+func (e fatalPollError) fatalPoll()    {}
+
+type fatalPollMarker interface {
+	error
+	fatalPoll()
+}
+
+// FatalPoll wraps err so Core.Run returns it instead of backing off and retrying.
+func FatalPoll(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fatalPollError{Err: err}
+}
+
+// IsFatalPoll reports whether err asks Core.Run to stop polling and return.
+func IsFatalPoll(err error) bool {
+	var fatal fatalPollMarker
+	return errors.As(err, &fatal)
+}
 
 const (
 	defaultChunkChars     = 3900
@@ -39,19 +76,22 @@ type Core struct {
 
 // Session tracks one chat's ACP session.
 type Session struct {
-	ChatID     string
-	SessionID  string
-	InFlight   bool
-	Output     strings.Builder
-	Stream     strings.Builder
-	LastStatus time.Time
-	mu         sync.Mutex
+	ChatID      string
+	SessionID   string
+	RunID       string
+	InFlight    bool
+	DeliveryErr error
+	Output      strings.Builder
+	Stream      strings.Builder
+	LastStatus  time.Time
+	mu          sync.Mutex
 }
 
 // SessionInfo is a snapshot of a chat session.
 type SessionInfo struct {
 	ChatID     string
 	SessionID  string
+	RunID      string
 	InFlight   bool
 	LastStatus time.Time
 }
@@ -99,6 +139,9 @@ func (c *Core) Run(ctx context.Context, t Transport) error {
 			if ctx.Err() != nil {
 				return nil
 			}
+			if IsFatalPoll(err) {
+				return err
+			}
 			log.Printf("%s gateway poll error: %v", t.Name(), err)
 			select {
 			case <-ctx.Done():
@@ -138,6 +181,13 @@ func CoalesceUpdates(updates []Update) []Update {
 			out = append(out, update)
 			continue
 		}
+		// Externally identified events must remain distinct so each event keeps
+		// its own durable acknowledgement and trace correlation.
+		if strings.TrimSpace(update.ExternalEventID) != "" {
+			update.ChatID = chatID
+			out = append(out, update)
+			continue
+		}
 		idx, ok := byChat[chatID]
 		if !ok {
 			update.ChatID = chatID
@@ -149,6 +199,15 @@ func CoalesceUpdates(updates []Update) []Update {
 		existing.Text = joinUpdateText(existing.Text, update.Text)
 		if strings.TrimSpace(update.MessageID) != "" {
 			existing.MessageID = update.MessageID
+		}
+		if strings.TrimSpace(update.Source) != "" {
+			existing.Source = update.Source
+		}
+		if strings.TrimSpace(update.ResponseSource) != "" {
+			existing.ResponseSource = update.ResponseSource
+		}
+		if strings.TrimSpace(update.ExternalEventID) != "" {
+			existing.ExternalEventID = update.ExternalEventID
 		}
 		existing.Images = append(existing.Images, update.Images...)
 		if update.Audio != nil {
@@ -199,6 +258,7 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 	state.InFlight = true
 	state.Output.Reset()
 	state.Stream.Reset()
+	state.DeliveryErr = nil
 	state.mu.Unlock()
 
 	defer func() {
@@ -210,22 +270,30 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 	prompt := c.buildPrompt(u)
 	var promptRes acp.SessionPromptResult
 	if err := c.cli.Call(ctx, acp.MethodSessionPrompt, acp.SessionPromptParams{
-		SessionID: state.SessionID,
-		Prompt:    prompt,
+		SessionID:       state.SessionID,
+		Prompt:          prompt,
+		Source:          u.Source,
+		ResponseSource:  u.ResponseSource,
+		ExternalEventID: u.ExternalEventID,
 	}, &promptRes); err != nil {
 		if t == nil {
 			return err
 		}
 		return t.SendText(ctx, chatID, []string{fmt.Sprintf("v100 error: %v", err)})
 	}
-	c.afterPrompt(u)
 	if c.cfg.StreamResponses {
 		if t != nil && !c.voiceConfig(chatID).Enabled {
 			if err := c.flushStream(ctx, t, state, true); err != nil {
 				return err
 			}
 		}
-		if promptRes.StopReason != "" && promptRes.StopReason != "end_turn" && t != nil {
+		state.mu.Lock()
+		deliveryErr := state.DeliveryErr
+		state.mu.Unlock()
+		if deliveryErr != nil {
+			return deliveryErr
+		}
+		if !gatewayPromptCompleted(promptRes.StopReason) {
 			return nil
 		}
 		if t != nil && c.voiceConfig(chatID).Enabled {
@@ -235,22 +303,39 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 			state.mu.Unlock()
 			if response != "" {
 				textAlreadySent := normalizeVoiceReplyMode(c.voiceConfig(chatID).Mode) == VoiceReplyModeAudioText
-				return c.sendReply(ctx, t, chatID, response, textAlreadySent)
+				if err := c.sendReply(ctx, t, chatID, response, textAlreadySent); err != nil {
+					return err
+				}
 			}
 		}
-		return nil
+		return c.afterPrompt(u)
 	}
 	state.mu.Lock()
 	response := strings.TrimSpace(state.Output.String())
 	state.Output.Reset()
 	state.mu.Unlock()
-	if response == "" {
+	if !gatewayPromptCompleted(promptRes.StopReason) {
 		return nil
+	}
+	if response == "" {
+		return c.afterPrompt(u)
 	}
 	if t == nil {
-		return nil
+		return c.afterPrompt(u)
 	}
-	return c.sendReply(ctx, t, chatID, response, false)
+	if err := c.sendReply(ctx, t, chatID, response, false); err != nil {
+		return err
+	}
+	return c.afterPrompt(u)
+}
+
+func gatewayPromptCompleted(stopReason string) bool {
+	switch strings.TrimSpace(stopReason) {
+	case "", "end_turn", "max_tokens", "max_turn_requests":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetOrCreateSession returns the chat's ACP session, creating it when needed.
@@ -284,12 +369,101 @@ func (c *Core) GetOrCreateSession(ctx context.Context, chatID string) (*Session,
 	if strings.TrimSpace(res.SessionID) != "" {
 		sessionID = strings.TrimSpace(res.SessionID)
 	}
-	state := &Session{ChatID: chatID, SessionID: sessionID}
+	runID := strings.TrimSpace(res.RunID)
+	if runID == "" {
+		runID = sessionID
+	}
+	state := &Session{ChatID: chatID, SessionID: sessionID, RunID: runID}
 	c.sessionsMu.Lock()
 	c.sessionsByChat[chatID] = state
 	c.sessionsByAcpID[sessionID] = state
 	c.sessionsMu.Unlock()
 	return state, nil
+}
+
+// ResumeSession restores an ACP run and binds it to a chat after a gateway
+// restart. The PrepareResume hook can reapply per-chat profile restrictions.
+func (c *Core) ResumeSession(ctx context.Context, chatID, runID string) (*Session, error) {
+	if c == nil || c.cli == nil {
+		return nil, fmt.Errorf("gateway core is not configured")
+	}
+	chatID = strings.TrimSpace(chatID)
+	runID = strings.TrimSpace(runID)
+	if chatID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	if runID == "" {
+		return nil, fmt.Errorf("run id is required")
+	}
+	c.sessionsMu.RLock()
+	existing := c.sessionsByChat[chatID]
+	c.sessionsMu.RUnlock()
+	if existing != nil {
+		existing.mu.Lock()
+		existingRunID := existing.RunID
+		existing.mu.Unlock()
+		if existingRunID == runID {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("chat %s already has an ACP session", chatID)
+	}
+
+	params := acp.SessionResumeParams{
+		SessionID: c.cfg.SessionIDPrefix + chatID,
+		RunID:     runID,
+		RunDir:    c.cfg.RunDir,
+		CWD:       c.cfg.Workspace,
+	}
+	if c.cfg.PrepareResume != nil {
+		if err := c.cfg.PrepareResume(chatID, &params); err != nil {
+			return nil, err
+		}
+	}
+	var res acp.SessionResumeResult
+	if err := c.cli.Call(ctx, acp.MethodSessionResume, params, &res); err != nil {
+		return nil, fmt.Errorf("resume acp session: %w", err)
+	}
+	sessionID := strings.TrimSpace(res.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(params.SessionID)
+	}
+	resumedRunID := strings.TrimSpace(res.RunID)
+	if resumedRunID == "" {
+		resumedRunID = runID
+	}
+	state := &Session{ChatID: chatID, SessionID: sessionID, RunID: resumedRunID}
+	c.sessionsMu.Lock()
+	c.sessionsByChat[chatID] = state
+	c.sessionsByAcpID[sessionID] = state
+	c.sessionsMu.Unlock()
+	return state, nil
+}
+
+// AppendContext adds an externally sourced message to a chat's ACP history
+// without invoking the model.
+func (c *Core) AppendContext(ctx context.Context, chatID, role, source, externalEventID, content string) (acp.SessionAppendContextResult, error) {
+	if c == nil || c.cli == nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("gateway core is not configured")
+	}
+	state, err := c.GetOrCreateSession(ctx, chatID)
+	if err != nil {
+		return acp.SessionAppendContextResult{}, err
+	}
+	state.mu.Lock()
+	sessionID := state.SessionID
+	state.mu.Unlock()
+	params := acp.SessionAppendContextParams{
+		SessionID:       sessionID,
+		Role:            role,
+		Source:          source,
+		ExternalEventID: externalEventID,
+		Content:         content,
+	}
+	var res acp.SessionAppendContextResult
+	if err := c.cli.Call(ctx, acp.MethodSessionAppendContext, params, &res); err != nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("append acp context: %w", err)
+	}
+	return res, nil
 }
 
 // SessionInfo returns a snapshot of the chat session when one exists.
@@ -309,6 +483,7 @@ func (c *Core) SessionInfo(chatID string) (SessionInfo, bool) {
 	return SessionInfo{
 		ChatID:     state.ChatID,
 		SessionID:  state.SessionID,
+		RunID:      state.RunID,
 		InFlight:   state.InFlight,
 		LastStatus: state.LastStatus,
 	}, true
@@ -398,7 +573,13 @@ func (c *Core) HandleNotification(ctx context.Context, t Transport, note acp.Not
 			state.mu.Lock()
 			state.Stream.WriteString(update.Update.Content.Text)
 			state.mu.Unlock()
-			return c.flushStream(ctx, t, state, false)
+			err := c.flushStream(ctx, t, state, false)
+			if err != nil {
+				state.mu.Lock()
+				state.DeliveryErr = err
+				state.mu.Unlock()
+			}
+			return err
 		}
 		state.mu.Lock()
 		state.Output.WriteString(update.Update.Content.Text)
@@ -482,7 +663,11 @@ func (c *Core) flushStream(ctx context.Context, t Transport, state *Session, fin
 	}
 	state.mu.Lock()
 	buffer := state.Stream.String()
-	flush, rest := splitStreamFlush(buffer, final)
+	splitter := splitStreamFlush
+	if c.cfg.StreamSplitter != nil {
+		splitter = c.cfg.StreamSplitter
+	}
+	flush, rest := splitter(buffer, final)
 	if flush != "" {
 		state.Stream.Reset()
 		state.Stream.WriteString(rest)
@@ -492,7 +677,14 @@ func (c *Core) flushStream(ctx context.Context, t Transport, state *Session, fin
 	if flush == "" {
 		return nil
 	}
-	return t.SendText(ctx, state.ChatID, SplitText(flush, c.cfg.ChunkChars))
+	return c.sendAssistantText(ctx, t, state.ChatID, flush)
+}
+
+func (c *Core) sendAssistantText(ctx context.Context, t Transport, chatID, text string) error {
+	if formatted, ok := t.(FormattedTextTransport); ok {
+		return formatted.SendFormattedText(ctx, chatID, text)
+	}
+	return t.SendText(ctx, chatID, SplitText(text, c.cfg.ChunkChars))
 }
 
 func splitStreamFlush(buffer string, final bool) (flush, rest string) {
@@ -569,10 +761,11 @@ func (c *Core) buildPrompt(u Update) []acp.ContentBlock {
 	return updatePrompt(c.cfg.Workspace, u)
 }
 
-func (c *Core) afterPrompt(u Update) {
+func (c *Core) afterPrompt(u Update) error {
 	if c.cfg.AfterPrompt != nil {
-		c.cfg.AfterPrompt(c.cfg.Workspace, u)
+		return c.cfg.AfterPrompt(c.cfg.Workspace, u)
 	}
+	return nil
 }
 
 func (c *Core) voiceConfig(chatID string) VoiceConfig {
@@ -600,7 +793,7 @@ func (c *Core) sendReply(ctx context.Context, t Transport, chatID, text string, 
 		if textAlreadySent {
 			return nil
 		}
-		return t.SendText(ctx, chatID, SplitText(text, c.cfg.ChunkChars))
+		return c.sendAssistantText(ctx, t, chatID, text)
 	}
 	mode := normalizeVoiceReplyMode(voice.Mode)
 	audioPath, err := synthesizeReply(ctx, text)

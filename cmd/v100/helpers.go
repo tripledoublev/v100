@@ -1362,9 +1362,21 @@ func reconstructHistory(runDir string, events []core.Event) ([]providers.Message
 		case core.EventUserMsg:
 			var p core.UserMsgPayload
 			_ = json.Unmarshal(ev.Payload, &p)
-			role := "user"
-			if strings.TrimSpace(p.Source) != "" {
+			role := strings.TrimSpace(p.Role)
+			if role == "" {
+				role = "user"
+			}
+			if strings.TrimSpace(p.Role) == "" && strings.TrimSpace(p.Source) != "" {
 				role = "system"
+			}
+			msgs = append(msgs, providers.Message{Role: role, Content: p.Content})
+
+		case core.EventConversationMsg:
+			var p core.ConversationMsgPayload
+			_ = json.Unmarshal(ev.Payload, &p)
+			role := strings.TrimSpace(p.Role)
+			if role == "" {
+				continue
 			}
 			msgs = append(msgs, providers.Message{Role: role, Content: p.Content})
 

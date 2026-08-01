@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +22,13 @@ type fakeACPClient struct {
 
 	mu          sync.Mutex
 	lastNew     acp.SessionNewParams
+	lastResume  acp.SessionResumeParams
 	lastPrompt  acp.SessionPromptParams
+	lastAppend  acp.SessionAppendContextParams
 	lastReconf  acp.SessionReconfigureParams
 	lastClose   string
 	promptBlock chan struct{}
+	promptStop  string
 	onPrompt    func(context.Context)
 }
 
@@ -43,6 +47,26 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 				res.SessionID = p.SessionID
 			} else {
 				res.SessionID = "session"
+			}
+			res.RunID = "run-new"
+		}
+	case acp.MethodSessionResume:
+		if p, ok := params.(acp.SessionResumeParams); ok {
+			c.mu.Lock()
+			c.lastResume = p
+			c.mu.Unlock()
+			if res, ok := out.(*acp.SessionResumeResult); ok {
+				res.SessionID = p.SessionID
+				res.RunID = p.RunID
+			}
+		}
+	case acp.MethodSessionAppendContext:
+		if p, ok := params.(acp.SessionAppendContextParams); ok {
+			c.mu.Lock()
+			c.lastAppend = p
+			c.mu.Unlock()
+			if res, ok := out.(*acp.SessionAppendContextResult); ok {
+				res.Appended = true
 			}
 		}
 	case acp.MethodSessionPrompt:
@@ -63,7 +87,10 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 			c.onPrompt(ctx)
 		}
 		if res, ok := out.(*acp.SessionPromptResult); ok {
-			res.StopReason = "end_turn"
+			res.StopReason = c.promptStop
+			if res.StopReason == "" {
+				res.StopReason = "end_turn"
+			}
 		}
 	case acp.MethodSessionReconfigure:
 		if p, ok := params.(acp.SessionReconfigureParams); ok {
@@ -95,16 +122,31 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 }
 
 type fakeTransport struct {
-	allowed map[string]bool
-	batches [][]Update
-	cancel  context.CancelFunc
+	allowed  map[string]bool
+	batches  [][]Update
+	pollErr  error
+	pollErrs []error
+	cancel   context.CancelFunc
 
 	mu        sync.Mutex
 	polls     int
 	sent      map[string][]string
+	sendErr   error
 	voices    map[string][]string
 	typing    []string
 	reactions []string
+}
+
+type fakeFormattedTransport struct {
+	*fakeTransport
+	formatted []string
+}
+
+func (t *fakeFormattedTransport) SendFormattedText(_ context.Context, chatID, text string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.formatted = append(t.formatted, chatID+":"+text)
+	return nil
 }
 
 func (t *fakeTransport) Name() string { return "fake" }
@@ -113,6 +155,19 @@ func (t *fakeTransport) Poll(ctx context.Context) ([]Update, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.polls++
+	if len(t.pollErrs) > 0 {
+		err := t.pollErrs[0]
+		t.pollErrs = t.pollErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if t.pollErr != nil {
+		if t.cancel != nil {
+			t.cancel()
+		}
+		return nil, t.pollErr
+	}
 	if len(t.batches) == 0 {
 		if t.cancel != nil {
 			t.cancel()
@@ -134,7 +189,7 @@ func (t *fakeTransport) SendText(_ context.Context, chatID string, chunks []stri
 		t.sent = map[string][]string{}
 	}
 	t.sent[chatID] = append(t.sent[chatID], chunks...)
-	return nil
+	return t.sendErr
 }
 
 func (t *fakeTransport) SendVoice(_ context.Context, chatID, audioPath string) error {
@@ -182,6 +237,61 @@ func TestCoreCreatesAndReusesSessionPerChat(t *testing.T) {
 	}
 	if got := cli.newCount.Load(); got != 1 {
 		t.Fatalf("session/new count = %d, want 1", got)
+	}
+}
+
+func TestCoreRunReturnsFatalPollError(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	core := NewCore(Config{PollRetryBase: time.Millisecond, PollRetryMax: time.Millisecond}, cli)
+	cause := errors.New("transport closed")
+	transport := &fakeTransport{pollErr: FatalPoll(cause)}
+
+	err := core.Run(ctx, transport)
+	if err == nil {
+		t.Fatal("Run returned nil error")
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("Run error = %v, want cause %v", err, cause)
+	}
+	transport.mu.Lock()
+	polls := transport.polls
+	transport.mu.Unlock()
+	if polls != 1 {
+		t.Fatalf("poll count = %d, want 1", polls)
+	}
+}
+
+func TestCoreRunRetriesOrdinaryPollError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cli := &fakeACPClient{}
+	core := NewCore(Config{PollRetryBase: time.Millisecond, PollRetryMax: time.Millisecond}, cli)
+	transport := &fakeTransport{
+		cancel:   cancel,
+		pollErrs: []error{errors.New("temporary receive failure")},
+		batches: [][]Update{{
+			{ChatID: "42", MessageID: "1", Text: "hello"},
+		}},
+	}
+
+	if err := core.Run(ctx, transport); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	transport.mu.Lock()
+	polls := transport.polls
+	transport.mu.Unlock()
+	if polls != 2 {
+		t.Fatalf("poll count = %d, want 2", polls)
+	}
+}
+
+func TestCoreRunCancellationWinsOverFatalPoll(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	core := NewCore(Config{}, &fakeACPClient{})
+	transport := &fakeTransport{cancel: cancel, pollErr: FatalPoll(errors.New("transport closed"))}
+
+	if err := core.Run(ctx, transport); err != nil {
+		t.Fatalf("Run returned error after cancellation: %v", err)
 	}
 }
 
@@ -314,6 +424,16 @@ func TestCoalesceUpdatesKeepsDifferentChatsSeparate(t *testing.T) {
 	}
 	if got[1].ChatID != "99" || got[1].MessageID != "a" || got[1].Text != "other" {
 		t.Fatalf("second update = %#v", got[1])
+	}
+}
+
+func TestCoalesceUpdatesKeepsExternallyIdentifiedTurnsSeparate(t *testing.T) {
+	got := CoalesceUpdates([]Update{
+		{ChatID: "42", MessageID: "1", Text: "first", ExternalEventID: "signal-friend-1"},
+		{ChatID: "42", MessageID: "2", Text: "second", ExternalEventID: "signal-friend-2"},
+	})
+	if len(got) != 2 || got[0].ExternalEventID != "signal-friend-1" || got[1].ExternalEventID != "signal-friend-2" {
+		t.Fatalf("externally identified updates were coalesced: %#v", got)
 	}
 }
 
@@ -613,6 +733,80 @@ func TestCoreBufferedResponseConcatenatesAndSplitsChunks(t *testing.T) {
 	}
 }
 
+func TestCoreAfterPromptRunsOnlyAfterAcceptedDeliveredTurn(t *testing.T) {
+	t.Run("refusal is not acknowledged", func(t *testing.T) {
+		acknowledged := 0
+		core := NewCore(Config{AfterPrompt: func(string, Update) error {
+			acknowledged++
+			return nil
+		}}, &fakeACPClient{promptStop: "refusal"})
+		if err := core.Handle(context.Background(), &fakeTransport{}, Update{ChatID: "42", Text: "hello"}); err != nil {
+			t.Fatalf("Handle returned error: %v", err)
+		}
+		if acknowledged != 0 {
+			t.Fatalf("refused prompt acknowledgements = %d", acknowledged)
+		}
+	})
+
+	t.Run("failed delivery is not acknowledged", func(t *testing.T) {
+		acknowledged := 0
+		cli := &fakeACPClient{}
+		core := NewCore(Config{AfterPrompt: func(string, Update) error {
+			acknowledged++
+			return nil
+		}}, cli)
+		cli.onPrompt = func(ctx context.Context) {
+			if err := core.HandleNotification(ctx, nil, sessionChunkNotification("gw-42", "reply")); err != nil {
+				t.Fatalf("HandleNotification returned error: %v", err)
+			}
+		}
+		err := core.Handle(context.Background(), &fakeTransport{sendErr: errors.New("Signal unavailable")}, Update{ChatID: "42", Text: "hello"})
+		if err == nil {
+			t.Fatal("Handle returned nil error for failed delivery")
+		}
+		if acknowledged != 0 {
+			t.Fatalf("failed delivery acknowledgements = %d", acknowledged)
+		}
+	})
+}
+
+func TestCorePrefersFormattedTransportForAssistantText(t *testing.T) {
+	core := NewCore(Config{ChunkChars: 2}, &fakeACPClient{})
+	transport := &fakeFormattedTransport{fakeTransport: &fakeTransport{}}
+	if err := core.sendAssistantText(context.Background(), transport, "42", "**hello**"); err != nil {
+		t.Fatalf("sendAssistantText returned error: %v", err)
+	}
+	if got := strings.Join(transport.formatted, "|"); got != "42:**hello**" {
+		t.Fatalf("formatted sends = %q", got)
+	}
+	if len(transport.sent) != 0 {
+		t.Fatalf("plain sends = %#v, want none", transport.sent)
+	}
+}
+
+func TestCoreUsesConfiguredStreamSplitter(t *testing.T) {
+	called := false
+	core := NewCore(Config{StreamSplitter: func(buffer string, final bool) (string, string) {
+		called = true
+		if buffer != "partial" || final {
+			t.Fatalf("splitter args = %q, %v", buffer, final)
+		}
+		return "safe", "tail"
+	}}, &fakeACPClient{})
+	transport := &fakeTransport{}
+	state := &Session{ChatID: "42"}
+	state.Stream.WriteString("partial")
+	if err := core.flushStream(context.Background(), transport, state, false); err != nil {
+		t.Fatalf("flushStream returned error: %v", err)
+	}
+	if !called || state.Stream.String() != "tail" {
+		t.Fatalf("called=%v rest=%q", called, state.Stream.String())
+	}
+	if got := strings.Join(transport.sent["42"], "|"); got != "safe" {
+		t.Fatalf("sent = %q", got)
+	}
+}
+
 func waitCoreSession(t *testing.T, core *Core, chatID string) *Session {
 	t.Helper()
 	for i := 0; i < 100; i++ {
@@ -698,6 +892,43 @@ func TestCorePrepareSessionHookMutatesSessionNewParams(t *testing.T) {
 	}
 }
 
+func TestCoreResumeSessionAndAppendContext(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	steps := 0
+	core := NewCore(Config{
+		SessionIDPrefix: "signal-",
+		RunDir:          "/tmp/runs",
+		Workspace:       "/tmp/work",
+		PrepareResume: func(chatID string, params *acp.SessionResumeParams) error {
+			if chatID != "42" {
+				t.Fatalf("prepare chatID = %q", chatID)
+			}
+			params.Tools = []string{"news_fetch"}
+			params.Dangerous = []string{}
+			params.BudgetSteps = &steps
+			return nil
+		},
+	}, cli)
+	state, err := core.ResumeSession(ctx, "42", "run-existing")
+	if err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+	if state.SessionID != "signal-42" || state.RunID != "run-existing" || cli.newCount.Load() != 0 {
+		t.Fatalf("resumed state = %#v new calls=%d", state, cli.newCount.Load())
+	}
+	if cli.lastResume.CWD != "/tmp/work" || cli.lastResume.RunDir != "/tmp/runs" || cli.lastResume.BudgetSteps == nil || *cli.lastResume.BudgetSteps != 0 {
+		t.Fatalf("resume params = %#v", cli.lastResume)
+	}
+	res, err := core.AppendContext(ctx, "42", "assistant", "signal.owner_manual", "owner-1", "manual reply")
+	if err != nil || !res.Appended {
+		t.Fatalf("AppendContext result=%#v err=%v", res, err)
+	}
+	if cli.lastAppend.SessionID != "signal-42" || cli.lastAppend.Source != "signal.owner_manual" || cli.lastAppend.ExternalEventID != "owner-1" {
+		t.Fatalf("append params = %#v", cli.lastAppend)
+	}
+}
+
 func TestCoreBuildPromptHookOverridesDefaultPrompt(t *testing.T) {
 	ctx := context.Background()
 	cli := &fakeACPClient{}
@@ -710,13 +941,16 @@ func TestCoreBuildPromptHookOverridesDefaultPrompt(t *testing.T) {
 		},
 	}, cli)
 	transport := &fakeTransport{}
-	if err := core.Handle(ctx, transport, Update{ChatID: "42", Text: "hello"}); err != nil {
+	if err := core.Handle(ctx, transport, Update{ChatID: "42", Text: "hello", Source: "signal.friend", ResponseSource: "signal.bot", ExternalEventID: "friend-1"}); err != nil {
 		t.Fatalf("Handle returned error: %v", err)
 	}
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
 	if len(cli.lastPrompt.Prompt) != 1 || cli.lastPrompt.Prompt[0].Text != "custom prompt" {
 		t.Fatalf("prompt = %#v", cli.lastPrompt.Prompt)
+	}
+	if cli.lastPrompt.Source != "signal.friend" || cli.lastPrompt.ResponseSource != "signal.bot" || cli.lastPrompt.ExternalEventID != "friend-1" {
+		t.Fatalf("prompt metadata = %#v", cli.lastPrompt)
 	}
 }
 

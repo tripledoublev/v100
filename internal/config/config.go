@@ -76,6 +76,10 @@ type SignalConfig struct {
 	RunDir            string            `toml:"run_dir"`                 // optional runs base directory
 	Workspace         string            `toml:"workspace"`               // optional working directory for tool execution
 	StreamResponses   bool              `toml:"stream_responses"`        // send chunk updates as they arrive
+	ConversationMode  string            `toml:"conversation_mode"`       // legacy | shared_account
+	MessageFormat     string            `toml:"message_format"`          // plain | signal_markdown
+	BotPrefix         string            `toml:"bot_prefix"`              // deterministic prefix for gateway-authored messages
+	StatePath         string            `toml:"state_path"`              // restart state; the transcript remains in trace.jsonl
 	VoiceReplies      bool              `toml:"voice_replies"`           // synthesize voice replies with V100_TTS_CMD
 	VoiceReplyMode    string            `toml:"voice_reply_mode"`        // audio | audio+text
 	StatusIntervalSec int               `toml:"status_interval_seconds"` // status update throttle
@@ -425,6 +429,8 @@ func DefaultConfig() *Config {
 			RunDir:            "",
 			Workspace:         "",
 			StreamResponses:   true,
+			ConversationMode:  "legacy",
+			MessageFormat:     "plain",
 			VoiceReplyMode:    "audio+text",
 			StatusIntervalSec: 2,
 			ChatProfiles:      map[string]string{},
@@ -615,6 +621,10 @@ rpc_mode = "socket"              # socket | tcp | stdio
 run_dir = ""                     # optional override of runs/ base directory
 workspace = ""                   # optional override of workspace used by sessions
 stream_responses = true          # stream agent responses via update notifications
+conversation_mode = "legacy"    # legacy | shared_account
+message_format = "plain"        # plain | signal_markdown
+bot_prefix = ""                 # e.g. "🤖 " for gateway-authored messages
+state_path = ""                 # optional restart-tolerant Signal state path
 voice_replies = false            # synthesize replies with V100_TTS_CMD
 voice_reply_mode = "audio+text"  # audio | audio+text
 status_interval_seconds = 2
@@ -945,6 +955,12 @@ func applySignalDefaults(dst *SignalConfig, defaults SignalConfig) {
 	}
 	if strings.TrimSpace(dst.VoiceReplyMode) == "" {
 		dst.VoiceReplyMode = defaults.VoiceReplyMode
+	}
+	if strings.TrimSpace(dst.ConversationMode) == "" {
+		dst.ConversationMode = defaults.ConversationMode
+	}
+	if strings.TrimSpace(dst.MessageFormat) == "" {
+		dst.MessageFormat = defaults.MessageFormat
 	}
 	if dst.ChatProfiles == nil {
 		dst.ChatProfiles = map[string]string{}
