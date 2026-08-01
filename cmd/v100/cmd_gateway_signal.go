@@ -457,6 +457,16 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 			})
 		case "send":
 			err = g.SendFormattedText(ctx, to, text)
+			if err == nil && g.state != nil {
+				if _, ensureErr := g.ensureSignalSession(ctx, to); ensureErr != nil {
+					err = fmt.Errorf("message sent but Signal trace session failed: %w", ensureErr)
+				} else {
+					eventID := fmt.Sprintf("signal-gateway-system-%d", time.Now().UnixNano())
+					if _, appendErr := g.gatewayCore().AppendContext(ctx, to, "assistant", "signal.gateway_system", eventID, text); appendErr != nil {
+						err = fmt.Errorf("message sent but Signal trace append failed: %w", appendErr)
+					}
+				}
+			}
 		default:
 			err = fmt.Errorf("unsupported action %q", action)
 		}
@@ -506,6 +516,9 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 		PrepareSession: func(chatID string, params *acp.SessionNewParams) error {
 			return gatewaycore.ApplyProfileToSessionNew(params, g.effectiveGatewayProfile(chatID), g.cfg.PromptBaseDir)
 		},
+		PrepareResume: func(chatID string, params *acp.SessionResumeParams) error {
+			return gatewaycore.ApplyProfileToSessionResume(params, g.effectiveGatewayProfile(chatID), g.cfg.PromptBaseDir)
+		},
 		VoiceSettings: func(chatID string) gatewaycore.VoiceConfig {
 			return gatewayVoiceConfig(g.cfg.VoiceReplies, g.cfg.VoiceReplyMode, g.effectiveGatewayProfile(chatID))
 		},
@@ -516,6 +529,9 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 }
 
 func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) {
+	if err := g.flushPendingOwnerEvents(ctx); err != nil {
+		return nil, err
+	}
 	envelopes, err := g.rpc.Receive(ctx)
 	if err != nil {
 		if isSignalRPCClosedError(err) {
@@ -525,7 +541,7 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 	}
 	updates := make([]gatewaycore.Update, 0, len(envelopes))
 	for _, env := range envelopes {
-		handledSync, syncErr := g.recordSignalSentSync(env.Envelope)
+		handledSync, syncErr := g.recordSignalSentSync(ctx, env.Envelope)
 		if syncErr != nil {
 			return nil, syncErr
 		}
@@ -555,6 +571,17 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			continue
 		}
 		msgID := signalTimestampString(env.Envelope.Timestamp)
+		if g.state != nil && msgID != "" {
+			if g.state.IsProcessed(msgID) {
+				continue
+			}
+			if _, err := g.ensureSignalSession(ctx, number); err != nil {
+				return nil, err
+			}
+			if _, err := g.state.MarkProcessed(msgID, time.Now()); err != nil {
+				return nil, fmt.Errorf("record processed Signal message: %w", err)
+			}
+		}
 		log.Printf("signal message accepted from %s message_id=%s chars=%d", redactSignalChatID(number), msgID, len([]rune(msg)))
 		go func(cID, mID, text string) {
 			if emoji := g.chooseReaction(ctx, cID, text); emoji != "" {
@@ -562,9 +589,12 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			}
 		}(number, msgID, msg)
 		updates = append(updates, gatewaycore.Update{
-			ChatID:    number,
-			MessageID: msgID,
-			Text:      msg,
+			ChatID:          number,
+			MessageID:       msgID,
+			Text:            msg,
+			Source:          signalSource(g.state != nil, "signal.friend"),
+			ResponseSource:  signalSource(g.state != nil, "signal.bot"),
+			ExternalEventID: signalExternalEventID(g.state != nil, "friend", msgID),
 		})
 	}
 	return updates, nil
@@ -583,7 +613,7 @@ func isSignalRPCClosedError(err error) bool {
 		errors.Is(err, syscall.ECONNRESET)
 }
 
-func (g *signalGateway) recordSignalSentSync(env signalEnvelope) (bool, error) {
+func (g *signalGateway) recordSignalSentSync(ctx context.Context, env signalEnvelope) (bool, error) {
 	if env.SyncMessage == nil || env.SyncMessage.SentMessage == nil {
 		return false, nil
 	}
@@ -609,12 +639,98 @@ func (g *signalGateway) recordSignalSentSync(env signalEnvelope) (bool, error) {
 	if rawText != "" && g.consumeGatewaySent(number, rawText) {
 		return true, nil
 	}
+	if g.state != nil {
+		timestamp := signalTimestampInt64(sent.Timestamp)
+		messageID := signalTimestampString(sent.Timestamp)
+		eventID := signalExternalEventID(true, "owner", messageID)
+		if eventID == "" {
+			sum := sha256.Sum256([]byte(number + "\x00" + text))
+			eventID = "signal-owner-hash-" + hex.EncodeToString(sum[:16])
+		}
+		event := signalstate.OwnerEvent{
+			ID:              eventID,
+			ChatID:          number,
+			SignalMessageID: messageID,
+			Text:            text,
+			Timestamp:       timestamp,
+		}
+		_, err := g.state.ApplyOwnerEvent(event)
+		if err != nil {
+			return true, fmt.Errorf("persist Signal owner message: %w", err)
+		}
+		if err := g.flushPendingOwnerEvents(ctx); err != nil {
+			return true, err
+		}
+		log.Printf("signal owner context appended for %s chars=%d", redactSignalChatID(number), len([]rune(text)))
+		return true, nil
+	}
 	g.appendManualContext(number, signalManualContext{
 		Text:      text,
 		Timestamp: signalTimestampString(sent.Timestamp),
 	})
 	log.Printf("signal manual sent context recorded for %s chars=%d", redactSignalChatID(number), len([]rune(text)))
 	return true, nil
+}
+
+func signalSource(enabled bool, source string) string {
+	if !enabled {
+		return ""
+	}
+	return source
+}
+
+func signalExternalEventID(enabled bool, kind, messageID string) string {
+	if !enabled || strings.TrimSpace(messageID) == "" {
+		return ""
+	}
+	return "signal-" + kind + "-" + strings.TrimSpace(messageID)
+}
+
+func (g *signalGateway) ensureSignalSession(ctx context.Context, chatID string) (*gatewaycore.Session, error) {
+	core := g.gatewayCore()
+	if existing, ok := core.SessionInfo(chatID); ok {
+		return &gatewaycore.Session{ChatID: existing.ChatID, SessionID: existing.SessionID, RunID: existing.RunID}, nil
+	}
+	if g.state != nil {
+		if binding, ok := g.state.Binding(chatID); ok && strings.TrimSpace(binding.RunID) != "" {
+			state, err := core.ResumeSession(ctx, chatID, binding.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if err := g.state.SetBinding(chatID, state.RunID, state.SessionID, time.Now()); err != nil {
+				return nil, fmt.Errorf("update resumed Signal binding: %w", err)
+			}
+			return state, nil
+		}
+	}
+	state, err := core.GetOrCreateSession(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if g.state != nil {
+		if err := g.state.SetBinding(chatID, state.RunID, state.SessionID, time.Now()); err != nil {
+			return nil, fmt.Errorf("persist Signal session binding: %w", err)
+		}
+	}
+	return state, nil
+}
+
+func (g *signalGateway) flushPendingOwnerEvents(ctx context.Context) error {
+	if g.state == nil {
+		return nil
+	}
+	for _, event := range g.state.PendingOwnerEvents() {
+		if _, err := g.ensureSignalSession(ctx, event.ChatID); err != nil {
+			return err
+		}
+		if _, err := g.gatewayCore().AppendContext(ctx, event.ChatID, "assistant", "signal.owner_manual", event.ID, event.Text); err != nil {
+			return err
+		}
+		if err := g.state.AckOwnerEvent(event.ID); err != nil {
+			return fmt.Errorf("ack Signal owner context: %w", err)
+		}
+	}
+	return nil
 }
 
 func (g *signalGateway) appendManualContext(chatID string, entry signalManualContext) {
@@ -1157,6 +1273,16 @@ func (g *signalGateway) switchSignalProfile(ctx context.Context, chatID, profile
 		g.restoreSignalChatProfile(chatID, hadOld, oldProfile)
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile switch failed: %v", err)})
 	}
+	if g.state != nil {
+		if err := g.state.ClearChat(chatID); err != nil {
+			return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile changed, but Signal state cleanup failed: %v", err)})
+		}
+		if state, ok := g.gatewayCore().SessionInfo(chatID); ok {
+			if err := g.state.SetBinding(chatID, state.RunID, state.SessionID, time.Now()); err != nil {
+				return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile changed, but Signal state binding failed: %v", err)})
+			}
+		}
+	}
 	return g.SendText(ctx, chatID, []string{fmt.Sprintf("Profile set to %s. Started a fresh session.", profileName)})
 }
 
@@ -1183,6 +1309,11 @@ func (g *signalGateway) resetSignalSession(ctx context.Context, chatID string) e
 		return g.SendText(ctx, chatID, []string{fmt.Sprintf("Reset failed: %v", err)})
 	}
 	g.clearManualContext(chatID)
+	if g.state != nil {
+		if err := g.state.ClearChat(chatID); err != nil {
+			return g.SendText(ctx, chatID, []string{fmt.Sprintf("Reset failed to clear Signal state: %v", err)})
+		}
+	}
 	if !closed {
 		return g.SendText(ctx, chatID, []string{"No active session to reset."})
 	}

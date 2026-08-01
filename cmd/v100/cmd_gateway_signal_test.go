@@ -13,10 +13,12 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/tripledoublev/v100/internal/acp"
 	"github.com/tripledoublev/v100/internal/config"
 	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
+	"github.com/tripledoublev/v100/internal/signalstate"
 )
 
 type fakeSignalRPC struct {
@@ -36,7 +38,9 @@ type fakeSignalACPClient struct {
 	mu         sync.Mutex
 	calls      []string
 	lastNew    acp.SessionNewParams
+	lastResume acp.SessionResumeParams
 	lastPrompt acp.SessionPromptParams
+	lastAppend acp.SessionAppendContextParams
 	newErr     error
 	promptErr  error
 }
@@ -56,6 +60,26 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 			f.mu.Unlock()
 			if res, ok := out.(*acp.SessionNewResult); ok {
 				res.SessionID = p.SessionID
+				res.RunID = "run-signal-test"
+			}
+		}
+	case acp.MethodSessionResume:
+		if p, ok := params.(acp.SessionResumeParams); ok {
+			f.mu.Lock()
+			f.lastResume = p
+			f.mu.Unlock()
+			if res, ok := out.(*acp.SessionResumeResult); ok {
+				res.SessionID = p.SessionID
+				res.RunID = p.RunID
+			}
+		}
+	case acp.MethodSessionAppendContext:
+		if p, ok := params.(acp.SessionAppendContextParams); ok {
+			f.mu.Lock()
+			f.lastAppend = p
+			f.mu.Unlock()
+			if res, ok := out.(*acp.SessionAppendContextResult); ok {
+				res.Appended = true
 			}
 		}
 	case acp.MethodSessionPrompt:
@@ -516,7 +540,7 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 	if err := gw.SendText(context.Background(), "+15145550000", []string{"gateway generated reply"}); err != nil {
 		t.Fatalf("SendText returned error: %v", err)
 	}
-	handled, err := gw.recordSignalSentSync(signalEnvelope{
+	handled, err := gw.recordSignalSentSync(context.Background(), signalEnvelope{
 		SyncMessage: &signalSyncMessage{
 			SentMessage: &signalSentMessage{
 				DestinationNumber: "+15145550000",
@@ -532,6 +556,104 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 	}
 	if manual := gw.drainManualContext("+15145550000"); len(manual) != 0 {
 		t.Fatalf("manual context = %#v, want none for gateway echo", manual)
+	}
+}
+
+func TestSignalSharedAccountKeepsLondonMessagesInCorrectRoles(t *testing.T) {
+	ctx := context.Background()
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		ctx:       ctx,
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc:   rpc,
+		cli:   cli,
+		state: store,
+	}
+	handled, err := gw.recordSignalSentSync(ctx, signalEnvelope{SyncMessage: &signalSyncMessage{SentMessage: &signalSentMessage{
+		DestinationNumber: "+15145550000",
+		Timestamp:         json.Number("1001"),
+		Message:           "Im in London",
+	}}})
+	if err != nil || !handled {
+		t.Fatalf("owner sync handled=%v err=%v", handled, err)
+	}
+	if cli.lastAppend.Role != "assistant" || cli.lastAppend.Source != "signal.owner_manual" || cli.lastAppend.Content != "Im in London" {
+		t.Fatalf("owner append = %#v", cli.lastAppend)
+	}
+	if len(store.PendingOwnerEvents()) != 0 {
+		t.Fatalf("pending owner events = %#v", store.PendingOwnerEvents())
+	}
+
+	rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("1002"),
+		DataMessage:  &signalDataMessage{Message: "gm london"},
+	}}}
+	updates, err := gw.Poll(ctx)
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("Poll updates=%#v err=%v", updates, err)
+	}
+	update := updates[0]
+	if update.Source != "signal.friend" || update.ResponseSource != "signal.bot" || update.ExternalEventID != "signal-friend-1002" {
+		t.Fatalf("friend update = %#v", update)
+	}
+	if err := gw.gatewayCore().Handle(ctx, gw, update); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	if cli.lastPrompt.Source != "signal.friend" || cli.lastPrompt.ResponseSource != "signal.bot" || len(cli.lastPrompt.Prompt) != 1 || cli.lastPrompt.Prompt[0].Text != "gm london" {
+		t.Fatalf("friend prompt = %#v", cli.lastPrompt)
+	}
+	binding, ok := store.Binding("+15145550000")
+	if !ok || binding.RunID != "run-signal-test" {
+		t.Fatalf("binding = %#v ok=%v", binding, ok)
+	}
+
+	rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("1002"),
+		DataMessage:  &signalDataMessage{Message: "gm london"},
+	}}}
+	duplicate, err := gw.Poll(ctx)
+	if err != nil || len(duplicate) != 0 {
+		t.Fatalf("duplicate updates=%#v err=%v", duplicate, err)
+	}
+}
+
+func TestSignalSharedAccountResumesStoredRun(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetBinding("+15145550000", "run-before-restart", "signal-old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc:   &fakeSignalRPC{},
+		cli:   cli,
+		state: store,
+	}
+	state, err := gw.ensureSignalSession(context.Background(), "+15145550000")
+	if err != nil {
+		t.Fatalf("ensureSignalSession returned error: %v", err)
+	}
+	if state.RunID != "run-before-restart" || cli.lastResume.RunID != "run-before-restart" {
+		t.Fatalf("state=%#v resume=%#v", state, cli.lastResume)
 	}
 }
 
