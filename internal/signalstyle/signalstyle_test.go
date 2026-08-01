@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -87,6 +88,42 @@ func TestRenderEscapedSpoilerAndCodePipes(t *testing.T) {
 	assertStyleCovers(t, got, Monospace, "||code||")
 }
 
+func TestRenderPreservesPrivateUseRunes(t *testing.T) {
+	input := "\ue000\ue001 \U000f0000 literal and \\|\\|escaped\\|\\|"
+	got := Render(input)
+	if want := "\ue000\ue001 \U000f0000 literal and ||escaped||"; got.Text != want {
+		t.Fatalf("Text = %q, want %q", got.Text, want)
+	}
+	for _, style := range got.Styles {
+		if style.Kind == Spoiler {
+			t.Fatalf("unexpected spoiler: %#v", style)
+		}
+	}
+}
+
+func TestRenderRawHTMLIsLiteralText(t *testing.T) {
+	input := "<script>alert('not HTML')</script>"
+	got := Render(input)
+	if got.Text != input {
+		t.Fatalf("Text = %q, want literal %q", got.Text, input)
+	}
+	if len(got.Styles) != 0 {
+		t.Fatalf("Styles = %#v, want none", got.Styles)
+	}
+}
+
+func TestRenderManySpoilersCompletesInLinearishTime(t *testing.T) {
+	input := strings.Repeat("||x|| ", 2_000)
+	start := time.Now()
+	got := Render(input)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("rendering spoiler-heavy input took %v", elapsed)
+	}
+	if len(got.Styles) != 2_000 {
+		t.Fatalf("got %d spoiler styles, want 2000", len(got.Styles))
+	}
+}
+
 func TestStyleString(t *testing.T) {
 	if got := (Style{Start: 3, Length: 5, Kind: Spoiler}).String(); got != "3:5:SPOILER" {
 		t.Fatalf("String = %q", got)
@@ -133,6 +170,17 @@ func TestSplitStream(t *testing.T) {
 		{"fence waits", "```go\nfmt.Println(1)\n", "", "```go\nfmt.Println(1)\n", false},
 		{"fence closes", "```go\nx\n```\nafter", "```go\nx\n```\n", "after", false},
 		{"blank inside fence waits", "```\nx\n\n", "", "```\nx\n\n", false},
+		{"indented closer is fence content", "```\nx\n    ```\n", "", "```\nx\n    ```\n", false},
+		{"multiline spoiler waits", "||one\n\ntwo", "", "||one\n\ntwo", false},
+		{"multiline spoiler closes", "||one\n\ntwo||\n\nnext", "||one\n\ntwo||\n\n", "next", false},
+		{"unresolved reference waits", "[x]\n\nnext", "", "[x]\n\nnext", false},
+		{"flushes before unresolved reference", "done\n\n[x]\n\nnext", "done\n\n", "[x]\n\nnext", false},
+		{"reference definition resolves", "[x]\n\n[x]: /target\n\nnext", "[x]\n\n[x]: /target\n\n", "next", false},
+		{"blank inside indented code waits", "    one\n\n", "", "    one\n\n", false},
+		{"indented code closes before text", "    one\n\nnext", "    one\n\n", "next", false},
+		{"blank inside raw HTML waits", "<script>\n\n", "", "<script>\n\n", false},
+		{"raw HTML close flushes", "<script>\n\n</script>\nnext", "<script>\n\n</script>\n", "next", false},
+		{"similar HTML tag uses blank boundary", "<scripture>\n\nnext", "<scripture>\n\n", "next", false},
 		{"final flushes malformed", "hello **wor", "hello **wor", "", true},
 	}
 	for _, tt := range tests {
@@ -146,6 +194,20 @@ func TestSplitStream(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderUsesCommonMarkFenceIndentation(t *testing.T) {
+	unclosed := "```\nx\n    ```\n"
+	if got := Render(unclosed); got.Text != unclosed || len(got.Styles) != 0 {
+		t.Fatalf("indented pseudo-closer was accepted: %#v", got)
+	}
+
+	indentedCode := "    ```\ntext"
+	got := Render(indentedCode)
+	if got.Text == indentedCode {
+		t.Fatalf("four-space-indented code was misclassified as an unclosed fence")
+	}
+	assertStyleCovers(t, got, Monospace, "```")
 }
 
 func TestUTF16Len(t *testing.T) {
