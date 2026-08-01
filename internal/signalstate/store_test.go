@@ -118,6 +118,56 @@ func TestApplyOperationsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestClearChatIsIdempotentAndPreservesOtherState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenDefault(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	for _, chatID := range []string{"clear", "keep"} {
+		if err := store.SetBinding(chatID, "run-"+chatID, "session-"+chatID, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ApplyOwnerEvent(OwnerEvent{ID: "owner-" + chatID, ChatID: chatID, Text: chatID, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.EnqueueOutbound(OutboundIntent{ID: "out-" + chatID, ChatID: chatID, Text: chatID, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.MarkProcessed("processed-for-cleared-chat", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ClearChat("clear"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClearChat("clear"); err != nil {
+		t.Fatalf("repeated clear must be a no-op: %v", err)
+	}
+
+	reloaded, err := OpenDefault(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reloaded.Binding("clear"); ok {
+		t.Fatal("cleared chat binding remains")
+	}
+	if binding, ok := reloaded.Binding("keep"); !ok || binding.RunID != "run-keep" {
+		t.Fatalf("other chat binding was changed: %+v, %v", binding, ok)
+	}
+	if got := reloaded.PendingOwnerEvents(); len(got) != 1 || got[0].ID != "owner-keep" {
+		t.Fatalf("pending owner events after clear = %+v", got)
+	}
+	if got := reloaded.PendingOutbound(); len(got) != 1 || got[0].ID != "out-keep" {
+		t.Fatalf("pending outbound after clear = %+v", got)
+	}
+	if !reloaded.IsProcessed("processed-for-cleared-chat") {
+		t.Fatal("ClearChat removed global processed Signal IDs")
+	}
+}
+
 func TestMatchEchoTimestampFirstThenIdenticalTextFIFO(t *testing.T) {
 	limits := DefaultLimits()
 	limits.EchoTTL = 5 * time.Minute

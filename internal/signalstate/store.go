@@ -136,6 +136,41 @@ func (s *Store) DeleteBinding(chatID string) error {
 	return s.saveLocked()
 }
 
+// ClearChat removes all chat-scoped coordination state in one atomic update.
+// Recent processed Signal IDs are global deduplication metadata and are kept.
+func (s *Store) ClearChat(chatID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	changed := false
+	if _, ok := s.state.Chats[chatID]; ok {
+		delete(s.state.Chats, chatID)
+		changed = true
+	}
+	ownerEvents := s.state.OwnerEvents[:0]
+	for _, event := range s.state.OwnerEvents {
+		if event.ChatID == chatID {
+			changed = true
+			continue
+		}
+		ownerEvents = append(ownerEvents, event)
+	}
+	s.state.OwnerEvents = ownerEvents
+	outboundIntents := s.state.OutboundIntents[:0]
+	for _, intent := range s.state.OutboundIntents {
+		if intent.ChatID == chatID {
+			changed = true
+			continue
+		}
+		outboundIntents = append(outboundIntents, intent)
+	}
+	s.state.OutboundIntents = outboundIntents
+	if !changed {
+		return nil
+	}
+	return s.saveLocked()
+}
+
 // ApplyOwnerEvent adds an event exactly once. Callers should supply an ID that
 // is stable across retries (normally the Signal message ID). If omitted, a
 // deterministic ID is derived from the event's source fields.
