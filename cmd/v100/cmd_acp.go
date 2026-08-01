@@ -166,6 +166,31 @@ func acpSessionNetworkTier(cfg *config.Config, params acp.SessionNewParams) stri
 	return loopNetworkTier(cfg)
 }
 
+func acpResumeOverrides(params acp.SessionResumeParams) acp.SessionNewParams {
+	overrides := acp.SessionNewParams{
+		Provider:     params.Provider,
+		Model:        params.Model,
+		Solver:       params.Solver,
+		Tools:        params.Tools,
+		Dangerous:    params.Dangerous,
+		SystemPrompt: params.SystemPrompt,
+		NetworkTier:  params.NetworkTier,
+	}
+	if params.BudgetSteps != nil {
+		overrides.BudgetSteps = *params.BudgetSteps
+		overrides.BudgetStepsSet = true
+	}
+	if params.BudgetTokens != nil {
+		overrides.BudgetTokens = *params.BudgetTokens
+		overrides.BudgetTokensSet = true
+	}
+	if params.BudgetCostUSD != nil {
+		overrides.BudgetCostUSD = *params.BudgetCostUSD
+		overrides.BudgetCostSet = true
+	}
+	return overrides
+}
+
 func acpProviderKnown(cfg *config.Config, providerName string) bool {
 	if cfg != nil {
 		if _, ok := cfg.Providers[providerName]; ok {
@@ -427,7 +452,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		}
 		s.mu.Unlock()
 
-		_ = s.conn.SendResponse(req.ID, acp.SessionNewResult{SessionID: sessionID})
+		_ = s.conn.SendResponse(req.ID, acp.SessionNewResult{SessionID: sessionID, RunID: comp.Run.ID})
 
 		s.sendAvailableCommands(sessionID)
 
@@ -519,8 +544,25 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			}
 		}
 
-		stopReason := s.runPrompt(session, params.SessionID, promptText, images)
+		stopReason := s.runPrompt(session, params.SessionID, promptText, images, core.ConversationTurnMetadata{
+			Source:          params.Source,
+			ResponseSource:  params.ResponseSource,
+			ExternalEventID: params.ExternalEventID,
+		})
 		_ = s.conn.SendResponse(req.ID, acp.SessionPromptResult{StopReason: stopReason})
+
+	case acp.MethodSessionAppendContext:
+		var params acp.SessionAppendContextParams
+		if err := decodeACPParams(req.Params, &params); err != nil {
+			_ = s.conn.SendError(req.ID, acp.ErrInvalidParams, err.Error())
+			return
+		}
+		res, err := s.appendSessionContext(params)
+		if err != nil {
+			_ = s.conn.SendError(req.ID, acpErrorCode(err), err.Error())
+			return
+		}
+		_ = s.conn.SendResponse(req.ID, res)
 
 	case acp.MethodSessionClose:
 		var params struct {
@@ -621,6 +663,71 @@ func acpErrorCode(err error) int {
 
 func acpStatus(code int, format string, args ...any) error {
 	return acpStatusError{code: code, msg: fmt.Sprintf(format, args...)}
+}
+
+func (s *acpServer) appendSessionContext(params acp.SessionAppendContextParams) (acp.SessionAppendContextResult, error) {
+	sessionID := strings.TrimSpace(params.SessionID)
+	role := strings.ToLower(strings.TrimSpace(params.Role))
+	source := strings.TrimSpace(params.Source)
+	externalEventID := strings.TrimSpace(params.ExternalEventID)
+	content := params.Content
+	if sessionID == "" || source == "" || externalEventID == "" || strings.TrimSpace(content) == "" {
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrInvalidParams, "sessionId, source, externalEventId, and content are required")
+	}
+	switch role {
+	case "assistant", "user", "system":
+	default:
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrInvalidParams, "unsupported context role %q", params.Role)
+	}
+
+	s.mu.Lock()
+	session, ok := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !ok {
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), sessionID)
+	}
+
+	session.mu.Lock()
+	if session.closing {
+		session.mu.Unlock()
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrSessionClosing, "%s: %s", acp.ErrorMessage(acp.ErrSessionClosing), sessionID)
+	}
+	if session.promptActive {
+		session.mu.Unlock()
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrSessionBusy, "%s: %s", acp.ErrorMessage(acp.ErrSessionBusy), sessionID)
+	}
+	session.promptActive = true
+	session.mu.Unlock()
+	defer session.finishPrompt()
+
+	if session.loop == nil || session.comp == nil || session.comp.Run == nil {
+		return acp.SessionAppendContextResult{}, acpStatus(acp.ErrSessionNotFound, "%s: %s", acp.ErrorMessage(acp.ErrSessionNotFound), sessionID)
+	}
+	if err := session.emitRunStart(); err != nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("start run trace: %w", err)
+	}
+
+	events, err := core.ReadAll(session.comp.Run.TraceFile)
+	if err != nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("read trace: %w", err)
+	}
+	for _, event := range events {
+		if event.Type != core.EventConversationMsg {
+			continue
+		}
+		var existing core.ConversationMsgPayload
+		if json.Unmarshal(event.Payload, &existing) != nil || existing.Source != source || existing.ExternalEventID != externalEventID {
+			continue
+		}
+		if existing.Role != role || existing.Content != content {
+			return acp.SessionAppendContextResult{}, acpStatus(acp.ErrInvalidParams, "external event %q from %q already exists with different context", externalEventID, source)
+		}
+		return acp.SessionAppendContextResult{Appended: false}, nil
+	}
+	if err := session.loop.AppendExternalConversationMessage(role, source, externalEventID, content); err != nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("append context: %w", err)
+	}
+	return acp.SessionAppendContextResult{Appended: true}, nil
 }
 
 func (s *acpServer) reconfigureSession(params acp.SessionReconfigureParams) (acp.SessionReconfigureResult, error) {
@@ -1036,7 +1143,12 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 	if meta.Sandbox.Enabled || strings.TrimSpace(meta.Sandbox.Backend) != "" {
 		cfg.Sandbox = meta.Sandbox
 	}
-	providerName, model, selectionChanged := resolveResumeProviderSelection(cfg, providerName, model, "", "")
+	s.applyProviderOverride(cfg)
+	resumeOverrides := acpResumeOverrides(params)
+	if err := applyACPSessionNewOverrides(cfg, resumeOverrides); err != nil {
+		return acp.SessionResumeResult{}, err
+	}
+	providerName, model, selectionChanged := resolveResumeProviderSelection(cfg, providerName, model, params.Provider, params.Model)
 	if selectionChanged {
 		metadata = providers.ModelMetadata{}
 	}
@@ -1057,6 +1169,10 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 		MaxTokens:  cfg.Defaults.BudgetTokens,
 		MaxCostUSD: cfg.Defaults.BudgetCostUSD,
 	})
+	solver, err := buildSolver(cfg, strings.TrimSpace(params.Solver))
+	if err != nil {
+		return acp.SessionResumeResult{}, acpStatus(acp.ErrInvalidSessionConfig, "%s", err.Error())
+	}
 	trace, err := core.OpenTrace(tracePath)
 	if err != nil {
 		return acp.SessionResumeResult{}, fmt.Errorf("open trace: %w", err)
@@ -1126,6 +1242,7 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 		Model:            model,
 		ModelMetadata:    metadata,
 		GenParams:        buildGenParams(cfg, 0, 0, 0, 0, 0, cmd),
+		Solver:           solver,
 		ToolEnv:          toolEnv,
 		RedactToolOutput: redactToolOutput,
 	}
@@ -1146,8 +1263,9 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 		ToolEnv:          append([]string(nil), toolEnv...),
 		RedactToolOutput: redactToolOutput,
 		ModelMetadata:    metadata,
-		NetworkTier:      loopNetworkTier(cfg),
+		NetworkTier:      acpSessionNetworkTier(cfg, resumeOverrides),
 		Snapshots:        buildSnapshotManager(cfg, sandboxWorkspace),
+		Solver:           solver,
 		GenParams:        comp.GenParams,
 	}
 	loop.Hooks = append(loop.Hooks, core.ThresholdHook(5))
@@ -1284,7 +1402,7 @@ func (s *acpServer) sendAvailableCommands(sessionID string) {
 	})
 }
 
-func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt string, images []providers.ImageAttachment) string {
+func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt string, images []providers.ImageAttachment, turnMetadata core.ConversationTurnMetadata) string {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	session.mu.Lock()
@@ -1351,11 +1469,7 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 		return "refusal"
 	}
 
-	if len(images) > 0 {
-		err = session.loop.StepWithImages(ctx, prompt, images)
-	} else {
-		err = session.loop.Step(ctx, prompt)
-	}
+	err = session.loop.StepWithImagesMetadata(ctx, prompt, images, turnMetadata)
 
 	if err != nil {
 		if ctx.Err() == context.Canceled {

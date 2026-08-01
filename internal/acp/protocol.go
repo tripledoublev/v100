@@ -38,18 +38,19 @@ const (
 )
 
 const (
-	MethodInitialize          = "initialize"
-	MethodFinalize            = "finalize"
-	MethodSetSuggestedPrompts = "set_suggested_prompts"
-	MethodSessionNew          = "session/new"
-	MethodSessionList         = "session/list"
-	MethodSessionResume       = "session/resume"
-	MethodSessionLoad         = "session/load"
-	MethodSessionReconfigure  = "session/reconfigure"
-	MethodSessionPrompt       = "session/prompt"
-	MethodSessionClose        = "session/close"
-	MethodSessionCancel       = "session/cancel"
-	MethodSessionUpdate       = "session/update"
+	MethodInitialize           = "initialize"
+	MethodFinalize             = "finalize"
+	MethodSetSuggestedPrompts  = "set_suggested_prompts"
+	MethodSessionNew           = "session/new"
+	MethodSessionList          = "session/list"
+	MethodSessionResume        = "session/resume"
+	MethodSessionLoad          = "session/load"
+	MethodSessionReconfigure   = "session/reconfigure"
+	MethodSessionPrompt        = "session/prompt"
+	MethodSessionAppendContext = "session/append_context"
+	MethodSessionClose         = "session/close"
+	MethodSessionCancel        = "session/cancel"
+	MethodSessionUpdate        = "session/update"
 	// MethodConnectionClosed is a synthetic notification emitted by the client
 	// when the underlying transport reaches EOF or errors.
 	MethodConnectionClosed = "connection/closed"
@@ -269,6 +270,7 @@ func (p *SessionNewParams) UnmarshalJSON(data []byte) error {
 
 type SessionNewResult struct {
 	SessionID string `json:"sessionId"`
+	RunID     string `json:"runId"`
 }
 
 type SessionListParams struct {
@@ -296,10 +298,20 @@ type SessionListResult struct {
 }
 
 type SessionResumeParams struct {
-	SessionID string `json:"sessionId,omitempty"`
-	RunID     string `json:"runId,omitempty"`
-	RunDir    string `json:"runDir,omitempty"`
-	CWD       string `json:"cwd,omitempty"`
+	SessionID     string   `json:"sessionId,omitempty"`
+	RunID         string   `json:"runId,omitempty"`
+	RunDir        string   `json:"runDir,omitempty"`
+	CWD           string   `json:"cwd,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	Solver        string   `json:"solver,omitempty"`
+	Tools         []string `json:"tools"`
+	Dangerous     []string `json:"dangerous"`
+	SystemPrompt  string   `json:"system_prompt,omitempty"`
+	NetworkTier   string   `json:"network_tier,omitempty"`
+	BudgetSteps   *int     `json:"budget_steps,omitempty"`
+	BudgetTokens  *int     `json:"budget_tokens,omitempty"`
+	BudgetCostUSD *float64 `json:"budget_cost_usd,omitempty"`
 }
 
 type SessionResumeResult struct {
@@ -339,12 +351,27 @@ type SetSuggestedPromptsResult struct {
 }
 
 type SessionPromptParams struct {
-	SessionID string         `json:"sessionId"`
-	Prompt    []ContentBlock `json:"prompt"`
+	SessionID       string         `json:"sessionId"`
+	Prompt          []ContentBlock `json:"prompt"`
+	Source          string         `json:"source,omitempty"`
+	ExternalEventID string         `json:"externalEventId,omitempty"`
+	ResponseSource  string         `json:"responseSource,omitempty"`
 }
 
 type SessionPromptResult struct {
 	StopReason string `json:"stopReason"` // ACP spec: "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
+}
+
+type SessionAppendContextParams struct {
+	SessionID       string `json:"sessionId"`
+	Role            string `json:"role"`
+	Source          string `json:"source"`
+	ExternalEventID string `json:"externalEventId"`
+	Content         string `json:"content"`
+}
+
+type SessionAppendContextResult struct {
+	Appended bool `json:"appended"`
 }
 
 type SessionCancelParams struct {

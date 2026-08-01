@@ -296,7 +296,11 @@ func TestACPRunPromptEmitsRunLifecycleUpdates(t *testing.T) {
 		loop: loop,
 	}
 
-	if stopReason := server.runPrompt(session, "session-1", "hello", nil); stopReason != "end_turn" {
+	if stopReason := server.runPrompt(session, "session-1", "hello", nil, core.ConversationTurnMetadata{
+		Source:          "signal.friend",
+		ResponseSource:  "signal.bot",
+		ExternalEventID: "signal-turn-1",
+	}); stopReason != "end_turn" {
 		t.Fatalf("stop reason = %q, want end_turn", stopReason)
 	}
 	closeACPSession(session, "test complete")
@@ -332,6 +336,93 @@ func TestACPRunPromptEmitsRunLifecycleUpdates(t *testing.T) {
 	if !sawEnd {
 		t.Fatalf("missing run.end ACP update: %#v", updates)
 	}
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userPayload core.UserMsgPayload
+	var modelPayload core.ModelRespPayload
+	for _, event := range events {
+		switch event.Type {
+		case core.EventUserMsg:
+			_ = json.Unmarshal(event.Payload, &userPayload)
+		case core.EventModelResp:
+			_ = json.Unmarshal(event.Payload, &modelPayload)
+		}
+	}
+	if userPayload.Source != "signal.friend" || userPayload.ExternalEventID != "signal-turn-1" || userPayload.Role != "user" {
+		t.Fatalf("user trace metadata = %#v", userPayload)
+	}
+	if modelPayload.Source != "signal.bot" || modelPayload.ExternalEventID != "signal-turn-1" {
+		t.Fatalf("model trace metadata = %#v", modelPayload)
+	}
+}
+
+func TestACPAppendContextIsIdempotentAndReconstructsAssistantRole(t *testing.T) {
+	var out bytes.Buffer
+	trace, err := core.OpenTrace(filepath.Join(t.TempDir(), "trace.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &core.Run{ID: "context-run", Dir: t.TempDir(), TraceFile: trace.Path()}
+	budget := core.NewBudgetTracker(&core.Budget{})
+	loop := &core.Loop{Run: run, Trace: trace, Budget: budget}
+	session := &acpSession{comp: &RunComponents{Run: run, Trace: trace, Budget: budget}, loop: loop}
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: map[string]*acpSession{"context-session": session},
+	}
+	params := acp.SessionAppendContextParams{
+		SessionID:       "context-session",
+		Role:            "assistant",
+		Source:          "signal.owner_manual",
+		ExternalEventID: "signal-owner-1",
+		Content:         "manual answer",
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionAppendContext, params))
+	server.handleRequest(acpRequest(t, 2, acp.MethodSessionAppendContext, params))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) != 2 {
+		t.Fatalf("responses = %#v", responses)
+	}
+	var first, second acp.SessionAppendContextResult
+	decodeACPResult(t, responses[0], &first)
+	decodeACPResult(t, responses[1], &second)
+	if !first.Appended || second.Appended {
+		t.Fatalf("append results = %#v, %#v", first, second)
+	}
+	if len(loop.Messages) != 1 || loop.Messages[0].Role != "assistant" || loop.Messages[0].Content != "manual answer" {
+		t.Fatalf("live context = %#v", loop.Messages)
+	}
+	events, err := core.ReadAll(trace.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contextEvents int
+	for _, event := range events {
+		if event.Type == core.EventModelResp {
+			t.Fatal("manual context must not be traced as model.response")
+		}
+		if event.Type == core.EventConversationMsg {
+			contextEvents++
+			var payload core.ConversationMsgPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Role != params.Role || payload.Source != params.Source || payload.ExternalEventID != params.ExternalEventID || payload.Content != params.Content {
+				t.Fatalf("context payload = %#v", payload)
+			}
+		}
+	}
+	if contextEvents != 1 {
+		t.Fatalf("conversation.message count = %d, want 1", contextEvents)
+	}
+	msgs, _, _, _, _ := reconstructHistory(filepath.Dir(trace.Path()), events)
+	if len(msgs) != 1 || msgs[0].Role != "assistant" || msgs[0].Content != "manual answer" {
+		t.Fatalf("reconstructed context = %#v", msgs)
+	}
+	closeACPSession(session, "test complete")
 }
 
 func TestACPErrorsUseProtocolCodes(t *testing.T) {
@@ -393,6 +484,9 @@ func TestACPSessionNewAppliesProviderModelSolverOverrides(t *testing.T) {
 	session := server.sessions["override-session"]
 	if session == nil || session.loop == nil || session.comp == nil {
 		t.Fatalf("session not registered correctly: %#v", server.sessions)
+	}
+	if result.RunID == "" || result.RunID != session.comp.Run.ID {
+		t.Fatalf("run ID = %q, want %q", result.RunID, session.comp.Run.ID)
 	}
 	if got := session.loop.Provider.Name(); got != "ollama" {
 		t.Fatalf("provider = %q, want ollama", got)
@@ -776,6 +870,64 @@ max_tool_calls_per_step = 1
 		t.Fatalf("resumed history = %#v", session.loop.Messages[:3])
 	}
 
+	closeACPSession(session, "session_close")
+}
+
+func TestACPResumeReappliesSessionRestrictions(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config.toml")
+	writeACPSessionOverrideConfig(t, cfgPath)
+	runID := "20260613T040404-context01"
+	writeACPTraceFixture(t, filepath.Join(root, "runs"), runID, workspace, "prompt_exit")
+	steps, tokens := 7, 1234
+	cost := 0.25
+
+	var out bytes.Buffer
+	server := &acpServer{
+		conn:     acp.NewConn(strings.NewReader(""), &out),
+		sessions: make(map[string]*acpSession),
+		cfgPath:  cfgPath,
+		cmd:      &cobra.Command{},
+	}
+	server.handleRequest(acpRequest(t, 1, acp.MethodSessionResume, acp.SessionResumeParams{
+		RunID:         runID,
+		Tools:         []string{"news_fetch"},
+		Dangerous:     []string{},
+		SystemPrompt:  "resumed profile prompt",
+		NetworkTier:   "research",
+		BudgetSteps:   &steps,
+		BudgetTokens:  &tokens,
+		BudgetCostUSD: &cost,
+	}))
+
+	responses := acpResponses(t, out.String())
+	if len(responses) == 0 {
+		t.Fatal("no ACP response")
+	}
+	var result acp.SessionResumeResult
+	decodeACPResult(t, responses[0], &result)
+	session := server.sessions[result.SessionID]
+	if session == nil || session.comp == nil || session.loop == nil {
+		t.Fatalf("session not registered: %#v", server.sessions)
+	}
+	if names := session.comp.Registry.List(); len(names) != 1 || names[0] != "news_fetch" {
+		t.Fatalf("registry tools = %v, want only [news_fetch]", names)
+	}
+	if session.comp.Policy.SystemPrompt != "resumed profile prompt" {
+		t.Fatalf("policy prompt = %q", session.comp.Policy.SystemPrompt)
+	}
+	if session.loop.NetworkTier != "research" {
+		t.Fatalf("network tier = %q", session.loop.NetworkTier)
+	}
+	budget := session.comp.Run.Budget
+	if budget.MaxSteps != steps || budget.MaxTokens != tokens || budget.MaxCostUSD != cost {
+		t.Fatalf("budget = %+v", budget)
+	}
 	closeACPSession(session, "session_close")
 }
 
