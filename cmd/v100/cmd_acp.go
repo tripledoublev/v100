@@ -1130,9 +1130,9 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 	}
 
 	msgs, providerName, model, tracedWorkspace, metadata := reconstructHistory(runDir, events)
-	if ckMsgs, err := loadCheckpoint(runDir); err != nil {
+	if ckMsgs, ok, err := checkpointHistoryWithTraceTail(runDir, events); err != nil {
 		return acp.SessionResumeResult{}, fmt.Errorf("load checkpoint: %w", err)
-	} else if len(ckMsgs) > 0 {
+	} else if ok {
 		msgs = ckMsgs
 	}
 	if resumeSummary := buildResumeSummary(runID, events, msgs); strings.TrimSpace(resumeSummary) != "" {

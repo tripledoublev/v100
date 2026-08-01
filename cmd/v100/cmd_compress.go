@@ -16,7 +16,8 @@ import (
 // CompressCheckpoint is written to compress.checkpoint.json in the run dir
 // so that `v100 resume` can start from the compressed message history.
 type CompressCheckpoint struct {
-	Messages []providers.Message `json:"messages"`
+	Messages        []providers.Message `json:"messages"`
+	TraceEventCount int                 `json:"trace_event_count,omitempty"`
 }
 
 func compressCmd(cfgPath *string) *cobra.Command {
@@ -140,7 +141,7 @@ func compressCmd(cfgPath *string) *cobra.Command {
 
 			// Write checkpoint for `v100 resume` to pick up
 			checkpointPath := filepath.Join(runDir, "compress.checkpoint.json")
-			data, err := json.MarshalIndent(CompressCheckpoint{Messages: loop.Messages}, "", "  ")
+			data, err := json.MarshalIndent(CompressCheckpoint{Messages: loop.Messages, TraceEventCount: len(events)}, "", "  ")
 			if err != nil {
 				return fmt.Errorf("marshal checkpoint: %w", err)
 			}
@@ -176,17 +177,35 @@ func estimateTokensSlice(msgs []providers.Message) int {
 // loadCheckpoint loads a compress.checkpoint.json from the run dir if it exists.
 // Returns nil, nil if no checkpoint is present.
 func loadCheckpoint(runDir string) ([]providers.Message, error) {
+	ck, err := loadCompressCheckpoint(runDir)
+	return ck.Messages, err
+}
+
+func loadCompressCheckpoint(runDir string) (CompressCheckpoint, error) {
 	p := filepath.Join(runDir, "compress.checkpoint.json")
 	data, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return CompressCheckpoint{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read compress checkpoint: %w", err)
+		return CompressCheckpoint{}, fmt.Errorf("read compress checkpoint: %w", err)
 	}
 	var ck CompressCheckpoint
 	if err := json.Unmarshal(data, &ck); err != nil {
-		return nil, fmt.Errorf("parse compress checkpoint: %w", err)
+		return CompressCheckpoint{}, fmt.Errorf("parse compress checkpoint: %w", err)
 	}
-	return ck.Messages, nil
+	return ck, nil
+}
+
+func checkpointHistoryWithTraceTail(runDir string, events []core.Event) ([]providers.Message, bool, error) {
+	ck, err := loadCompressCheckpoint(runDir)
+	if err != nil || len(ck.Messages) == 0 {
+		return nil, false, err
+	}
+	msgs := append([]providers.Message(nil), ck.Messages...)
+	if ck.TraceEventCount > 0 && ck.TraceEventCount <= len(events) {
+		tail, _, _, _, _ := reconstructHistory(runDir, events[ck.TraceEventCount:])
+		msgs = append(msgs, tail...)
+	}
+	return reconcileToolHistory(msgs), true, nil
 }
