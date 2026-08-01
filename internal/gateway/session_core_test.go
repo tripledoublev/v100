@@ -422,6 +422,16 @@ func TestCoalesceUpdatesKeepsDifferentChatsSeparate(t *testing.T) {
 	}
 }
 
+func TestCoalesceUpdatesKeepsExternallyIdentifiedTurnsSeparate(t *testing.T) {
+	got := CoalesceUpdates([]Update{
+		{ChatID: "42", MessageID: "1", Text: "first", ExternalEventID: "signal-friend-1"},
+		{ChatID: "42", MessageID: "2", Text: "second", ExternalEventID: "signal-friend-2"},
+	})
+	if len(got) != 2 || got[0].ExternalEventID != "signal-friend-1" || got[1].ExternalEventID != "signal-friend-2" {
+		t.Fatalf("externally identified updates were coalesced: %#v", got)
+	}
+}
+
 func TestCoreStreamingBuffersUntilSentenceBoundary(t *testing.T) {
 	ctx := context.Background()
 	cli := &fakeACPClient{}

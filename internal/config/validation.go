@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 
 	"github.com/BurntSushi/toml"
 )
@@ -421,6 +422,13 @@ func validateSignalConfig(result *ValidationResult, cfg *Config) {
 	messageFormat := strings.ToLower(strings.TrimSpace(cfg.Signal.MessageFormat))
 	if messageFormat != "" && messageFormat != "plain" && messageFormat != "signal_markdown" {
 		result.Add(ValidationError, "signal.message_format", fmt.Sprintf("unsupported signal message_format %q; use plain or signal_markdown", cfg.Signal.MessageFormat))
+	}
+	prefixUnits := 0
+	for _, r := range cfg.Signal.BotPrefix {
+		prefixUnits += utf16.RuneLen(r)
+	}
+	if prefixUnits >= 3900 {
+		result.Add(ValidationError, "signal.bot_prefix", "signal bot_prefix must be shorter than 3900 UTF-16 code units")
 	}
 	validateVoiceReplyMode(result, "signal.voice_reply_mode", cfg.Signal.VoiceReplyMode)
 }

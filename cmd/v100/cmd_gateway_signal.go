@@ -233,6 +233,9 @@ func setupSignalGateway(ctx context.Context, cfgPath *string) (*signalGateway, f
 		return nil, nil, err
 	}
 	normalized := normalizeSignalConfig(cfg.Signal)
+	if signalstyle.UTF16Len(normalized.BotPrefix) >= signalChunkChars {
+		return nil, nil, fmt.Errorf("signal bot_prefix must be shorter than %d UTF-16 code units", signalChunkChars)
+	}
 	normalized.Profiles = cfg.Gateway.Profiles
 	normalized.PromptBaseDir = cfg.PromptBaseDir()
 	if !cfg.Signal.Enabled {
@@ -456,15 +459,16 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 				Text:      text,
 			})
 		case "send":
-			err = g.SendFormattedText(ctx, to, text)
+			eventID := fmt.Sprintf("signal-gateway-system-%d", time.Now().UnixNano())
+			if g.state != nil {
+				_, err = g.ensureSignalSession(ctx, to)
+			}
+			if err == nil {
+				err = g.SendFormattedText(ctx, to, text)
+			}
 			if err == nil && g.state != nil {
-				if _, ensureErr := g.ensureSignalSession(ctx, to); ensureErr != nil {
-					err = fmt.Errorf("message sent but Signal trace session failed: %w", ensureErr)
-				} else {
-					eventID := fmt.Sprintf("signal-gateway-system-%d", time.Now().UnixNano())
-					if _, appendErr := g.gatewayCore().AppendContext(ctx, to, "assistant", "signal.gateway_system", eventID, text); appendErr != nil {
-						err = fmt.Errorf("message sent but Signal trace append failed: %w", appendErr)
-					}
+				if _, appendErr := g.gatewayCore().AppendContext(ctx, to, "assistant", "signal.gateway_system", eventID, text); appendErr != nil {
+					err = fmt.Errorf("message was delivered but its trace append failed; do not retry automatically: %w", appendErr)
 				}
 			}
 		default:
@@ -559,7 +563,7 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 		msg := ""
 		if env.Envelope.DataMessage != nil {
 			rawMsg = strings.TrimSpace(env.Envelope.DataMessage.Message)
-			msg = signalDataMessageText(env.Envelope.DataMessage)
+			msg = g.signalDataMessageText(env.Envelope.DataMessage)
 		}
 		if rawMsg == "" && msg == "" {
 			continue
@@ -577,9 +581,6 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			}
 			if _, err := g.ensureSignalSession(ctx, number); err != nil {
 				return nil, err
-			}
-			if _, err := g.state.MarkProcessed(msgID, time.Now()); err != nil {
-				return nil, fmt.Errorf("record processed Signal message: %w", err)
 			}
 		}
 		log.Printf("signal message accepted from %s message_id=%s chars=%d", redactSignalChatID(number), msgID, len([]rune(msg)))
@@ -623,7 +624,7 @@ func (g *signalGateway) recordSignalSentSync(ctx context.Context, env signalEnve
 		number = destinationNumber
 	}
 	rawText := strings.TrimSpace(sent.Message)
-	text := signalSentMessageText(sent)
+	text := g.signalSentMessageText(sent)
 	if number == "" || text == "" || !g.Allowed(number) {
 		return true, nil
 	}
@@ -847,21 +848,21 @@ func pruneRecentSignalSent(items []signalRecentSent, now time.Time) []signalRece
 	return out
 }
 
-func signalDataMessageText(msg *signalDataMessage) string {
+func (g *signalGateway) signalDataMessageText(msg *signalDataMessage) string {
 	if msg == nil {
 		return ""
 	}
-	return signalMessageTextWithQuote(msg.Message, msg.Quote)
+	return g.signalMessageTextWithQuote(msg.Message, msg.Quote, "signal.friend")
 }
 
-func signalSentMessageText(msg *signalSentMessage) string {
+func (g *signalGateway) signalSentMessageText(msg *signalSentMessage) string {
 	if msg == nil {
 		return ""
 	}
-	return signalMessageTextWithQuote(msg.Message, msg.Quote)
+	return g.signalMessageTextWithQuote(msg.Message, msg.Quote, "signal.owner_manual")
 }
 
-func signalMessageTextWithQuote(message string, quote *signalQuote) string {
+func (g *signalGateway) signalMessageTextWithQuote(message string, quote *signalQuote, actor string) string {
 	message = strings.TrimSpace(message)
 	if quote == nil {
 		return message
@@ -873,7 +874,18 @@ func signalMessageTextWithQuote(message string, quote *signalQuote) string {
 	if message == "" {
 		message = "(no text)"
 	}
-	return fmt.Sprintf("User replied to:\n\n%s\n\nwith:\n\n%s", quoted, message)
+	target := "signal.friend (the friend)"
+	author := strings.TrimSpace(quote.AuthorNumber)
+	if author == "" {
+		author = strings.TrimSpace(quote.Author)
+	}
+	if author == g.cfg.Account {
+		target = "signal.owner_manual (Vincent)"
+		if prefix := g.cfg.BotPrefix; prefix != "" && strings.HasPrefix(quoted, prefix) {
+			target = "signal.bot (v100)"
+		}
+	}
+	return fmt.Sprintf("%s replied to %s:\n\n%s\n\nwith:\n\n%s", actor, target, quoted, message)
 }
 
 func (g *signalGateway) buildSignalPrompt(_ string, update gatewaycore.Update) []acp.ContentBlock {
@@ -922,8 +934,14 @@ func (g *signalGateway) rememberSignalPromptManualMax(chatID string, manual []si
 	g.manualPrompt[chatID] = maxID
 }
 
-func (g *signalGateway) afterSignalPrompt(_ string, update gatewaycore.Update) {
+func (g *signalGateway) afterSignalPrompt(_ string, update gatewaycore.Update) error {
+	if g.state != nil && strings.TrimSpace(update.MessageID) != "" {
+		if _, err := g.state.MarkProcessed(update.MessageID, time.Now()); err != nil {
+			return fmt.Errorf("record processed Signal message: %w", err)
+		}
+	}
 	g.clearDeliveredManualContext(update.ChatID)
+	return nil
 }
 
 func (g *signalGateway) clearDeliveredManualContext(chatID string) {
@@ -972,7 +990,11 @@ func (g *signalGateway) SendFormattedText(ctx context.Context, chatID, source st
 	if g.cfg.MessageFormat == "signal_markdown" {
 		result = signalstyle.Render(source)
 	}
-	for _, chunk := range signalstyle.Chunk(result, signalChunkChars-signalstyle.UTF16Len(g.cfg.BotPrefix)) {
+	maxContent := signalChunkChars - signalstyle.UTF16Len(g.cfg.BotPrefix)
+	if maxContent <= 0 {
+		return fmt.Errorf("signal bot prefix leaves no room for message content")
+	}
+	for _, chunk := range signalstyle.Chunk(result, maxContent) {
 		if err := g.sendSignalResult(ctx, chatID, chunk); err != nil {
 			return err
 		}
@@ -1024,6 +1046,14 @@ func (g *signalGateway) sendSignalResult(ctx context.Context, chatID string, res
 		err = g.rpc.Call(ctx, "send", params, &sentResult)
 	}
 	if err != nil {
+		if g.state != nil {
+			var rpcErr *signalRPCError
+			if errors.As(err, &rpcErr) {
+				_ = g.state.AckOutbound(intent.ID)
+			} else if stateErr := g.state.MarkOutboundPossiblySent(intent.ID); stateErr != nil {
+				return fmt.Errorf("Signal send failed (%v) and ambiguous outcome could not be recorded: %w", err, stateErr)
+			}
+		}
 		return err
 	}
 	if g.state != nil {

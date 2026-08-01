@@ -239,6 +239,18 @@ message_format = "html"
 	}
 }
 
+func TestValidateSignalRejectsOversizedBotPrefix(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Signal.Enabled = true
+	cfg.Signal.Account = "+15145551234"
+	cfg.Signal.BotPrefix = strings.Repeat("🤖", 2000)
+	result := &ValidationResult{}
+	validateSignalConfig(result, cfg)
+	if !hasFinding(result, ValidationError, "bot_prefix must be shorter") {
+		t.Fatalf("missing bot prefix validation: %+v", result.Findings)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

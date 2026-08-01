@@ -238,7 +238,7 @@ func TestSignalPollIncludesQuotedReplyContext(t *testing.T) {
 		t.Fatalf("updates = %d, want 1", len(updates))
 	}
 	for _, want := range []string{
-		"User replied to:",
+		"signal.friend replied to signal.friend (the friend):",
 		"the earlier message",
 		"with:",
 		"yes, exactly",
@@ -423,7 +423,7 @@ func TestSignalPollRecordsQuotedSentSyncContext(t *testing.T) {
 		t.Fatalf("manual context = %#v, want one", manual)
 	}
 	for _, want := range []string{
-		"User replied to:",
+		"signal.owner_manual replied to signal.friend (the friend):",
 		"question I replied to",
 		"with:",
 		"manual reply from signal app",
@@ -431,6 +431,24 @@ func TestSignalPollRecordsQuotedSentSyncContext(t *testing.T) {
 		if !strings.Contains(manual[0].Text, want) {
 			t.Fatalf("manual quoted context missing %q: %q", want, manual[0].Text)
 		}
+	}
+}
+
+func TestSignalQuoteLabelsOwnerAndBotExplicitly(t *testing.T) {
+	gw := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234", BotPrefix: "🤖 "}}
+	owner := gw.signalDataMessageText(&signalDataMessage{Message: "gm london", Quote: &signalQuote{
+		AuthorNumber: "+15145551234",
+		Text:         "Im in London",
+	}})
+	if !strings.Contains(owner, "signal.friend replied to signal.owner_manual (Vincent):") {
+		t.Fatalf("owner quote context = %q", owner)
+	}
+	bot := gw.signalDataMessageText(&signalDataMessage{Message: "ok", Quote: &signalQuote{
+		AuthorNumber: "+15145551234",
+		Text:         "🤖 **news**",
+	}})
+	if !strings.Contains(bot, "signal.friend replied to signal.bot (v100):") {
+		t.Fatalf("bot quote context = %q", bot)
 	}
 }
 
@@ -657,6 +675,82 @@ func TestSignalSharedAccountResumesStoredRun(t *testing.T) {
 	}
 }
 
+func TestSignalSharedAccountDoesNotAckFailedPrompt(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: "+15145550000",
+		Timestamp:    json.Number("2001"),
+		DataMessage:  &signalDataMessage{Message: "try again after restart"},
+	}}}}
+	cli := &fakeSignalACPClient{promptErr: errors.New("provider unavailable")}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc, cli: cli, state: store,
+	}
+	updates, err := gw.Poll(context.Background())
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("Poll updates=%#v err=%v", updates, err)
+	}
+	if err := gw.gatewayCore().Handle(context.Background(), gw, updates[0]); err != nil {
+		t.Fatalf("Handle returned error while sending failure notice: %v", err)
+	}
+	if store.IsProcessed("2001") {
+		t.Fatal("failed prompt was acknowledged as processed")
+	}
+}
+
+func TestSignalControlSendFormatsAndTracesGatewaySystemMessage(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			MessageFormat:    "signal_markdown",
+			BotPrefix:        "🤖 ",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: rpc, cli: cli, state: store,
+	}
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gw.handleSignalControlConn(context.Background(), serverConn)
+	}()
+	if err := json.NewEncoder(clientConn).Encode(signalControlRequest{Action: "send", To: "+15145550000", Text: "**v100 est live**"}); err != nil {
+		t.Fatal(err)
+	}
+	var response signalControlResponse
+	if err := json.NewDecoder(clientConn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	_ = clientConn.Close()
+	<-done
+	if !response.OK || response.Error != "" {
+		t.Fatalf("control response = %#v", response)
+	}
+	params := rpc.calls[0].params.(map[string]any)
+	if params["message"] != "🤖 v100 est live" || len(params["textStyle"].([]string)) != 1 {
+		t.Fatalf("formatted control send = %#v", params)
+	}
+	if cli.lastAppend.Source != "signal.gateway_system" || cli.lastAppend.Role != "assistant" || cli.lastAppend.Content != "**v100 est live**" {
+		t.Fatalf("gateway system trace = %#v", cli.lastAppend)
+	}
+}
+
 func TestGatewaySignalCommandIncludesPromptSubcommand(t *testing.T) {
 	cfgPath := ""
 	cmd := gatewaySignalCmd(&cfgPath)
@@ -779,6 +873,43 @@ func TestSignalSendFormattedTextRetriesPlainOnExplicitUnsupportedStyle(t *testin
 	}
 	if !gw.styleDisabled {
 		t.Fatal("style fallback was not latched")
+	}
+}
+
+func TestSignalSendFormattedTextRejectsOversizedPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{cfg: signalRuntimeConfig{BotPrefix: strings.Repeat("x", signalChunkChars)}, rpc: rpc}
+	err := gw.SendFormattedText(context.Background(), "+15145550000", "hello")
+	if err == nil || !strings.Contains(err.Error(), "prefix") {
+		t.Fatalf("SendFormattedText error = %v", err)
+	}
+	if len(rpc.calls) != 0 {
+		t.Fatalf("oversized prefix attempted send: %#v", rpc.calls)
+	}
+}
+
+func TestSignalOutboundIntentDistinguishesRejectedAndAmbiguousSend(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedRPC := &fakeSignalRPC{callErrs: []error{&signalRPCError{Method: "send", Code: -32000, Message: "rejected"}}}
+	rejected := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234"}, rpc: rejectedRPC, state: store}
+	if err := rejected.SendFormattedText(context.Background(), "+15145550000", "not sent"); err == nil {
+		t.Fatal("rejected send returned nil error")
+	}
+	if got := store.PendingOutbound(); len(got) != 0 {
+		t.Fatalf("rejected send retained intent: %#v", got)
+	}
+
+	ambiguousRPC := &fakeSignalRPC{callErrs: []error{io.ErrUnexpectedEOF}}
+	ambiguous := &signalGateway{cfg: signalRuntimeConfig{Account: "+15145551234"}, rpc: ambiguousRPC, state: store}
+	if err := ambiguous.SendFormattedText(context.Background(), "+15145550000", "maybe sent"); err == nil {
+		t.Fatal("ambiguous send returned nil error")
+	}
+	got := store.PendingOutbound()
+	if len(got) != 1 || !got[0].PossiblySent || got[0].ConfirmedSent {
+		t.Fatalf("ambiguous intent = %#v", got)
 	}
 }
 

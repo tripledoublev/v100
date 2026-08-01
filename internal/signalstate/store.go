@@ -67,6 +67,8 @@ type OutboundIntent struct {
 	Text          string    `json:"text"`
 	ContentHash   string    `json:"content_hash"`
 	SentTimestamp int64     `json:"sent_timestamp,omitempty"`
+	PossiblySent  bool      `json:"possibly_sent,omitempty"`
+	ConfirmedSent bool      `json:"confirmed_sent,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -287,10 +289,30 @@ func (s *Store) MarkOutboundSent(id string, sentTimestamp int64) error {
 		if s.state.OutboundIntents[i].ID != id {
 			continue
 		}
-		if s.state.OutboundIntents[i].SentTimestamp == sentTimestamp {
+		if s.state.OutboundIntents[i].SentTimestamp == sentTimestamp && s.state.OutboundIntents[i].ConfirmedSent {
 			return nil
 		}
 		s.state.OutboundIntents[i].SentTimestamp = sentTimestamp
+		s.state.OutboundIntents[i].PossiblySent = true
+		s.state.OutboundIntents[i].ConfirmedSent = true
+		return s.saveLocked()
+	}
+	return nil
+}
+
+// MarkOutboundPossiblySent records an ambiguous transport outcome. It permits
+// later echo correlation without claiming that Signal confirmed delivery.
+func (s *Store) MarkOutboundPossiblySent(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.OutboundIntents {
+		if s.state.OutboundIntents[i].ID != id {
+			continue
+		}
+		if s.state.OutboundIntents[i].PossiblySent {
+			return nil
+		}
+		s.state.OutboundIntents[i].PossiblySent = true
 		return s.saveLocked()
 	}
 	return nil
@@ -310,7 +332,7 @@ func (s *Store) MatchEcho(chatID, text string, signalTimestamp int64, now time.T
 	defer s.mu.Unlock()
 	if signalTimestamp != 0 {
 		for _, intent := range s.state.OutboundIntents {
-			if intent.ChatID == chatID && intent.SentTimestamp == signalTimestamp {
+			if intent.ChatID == chatID && intent.ConfirmedSent && intent.SentTimestamp == signalTimestamp {
 				return intent, true, s.removeOutboundLocked(intent.ID)
 			}
 		}
@@ -318,6 +340,9 @@ func (s *Store) MatchEcho(chatID, text string, signalTimestamp int64, now time.T
 	hash := contentHash(text)
 	for _, intent := range s.state.OutboundIntents {
 		if intent.ChatID != chatID || intent.ContentHash != hash {
+			continue
+		}
+		if !intent.ConfirmedSent && !intent.PossiblySent {
 			continue
 		}
 		age := now.Sub(intent.CreatedAt)

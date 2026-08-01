@@ -78,6 +78,6 @@ type Config struct {
 	PrepareResume   func(chatID string, params *acp.SessionResumeParams) error
 	StreamSplitter  StreamSplitter
 	BuildPrompt     func(workspace string, update Update) []acp.ContentBlock
-	AfterPrompt     func(workspace string, update Update)
+	AfterPrompt     func(workspace string, update Update) error
 	VoiceSettings   func(chatID string) VoiceConfig
 }

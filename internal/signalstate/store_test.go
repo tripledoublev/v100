@@ -182,6 +182,12 @@ func TestMatchEchoTimestampFirstThenIdenticalTextFIFO(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := store.MarkOutboundPossiblySent("first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkOutboundPossiblySent("third"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.MarkOutboundSent("second", 222); err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +209,12 @@ func TestMatchEchoTimestampFirstThenIdenticalTextFIFO(t *testing.T) {
 	}
 	if _, ok, err := store.MatchEcho("chat", "old", 0, now.Add(6*time.Minute)); err != nil || ok {
 		t.Fatalf("expired fallback matched: %v, %v", ok, err)
+	}
+	if _, _, err := store.EnqueueOutbound(OutboundIntent{ID: "never-sent", ChatID: "chat", Text: "manual owner text", CreatedAt: now.Add(3 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.MatchEcho("chat", "manual owner text", 0, now.Add(4*time.Minute)); err != nil || ok {
+		t.Fatalf("unconfirmed intent swallowed owner message: %v, %v", ok, err)
 	}
 }
 

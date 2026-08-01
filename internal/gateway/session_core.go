@@ -180,6 +180,13 @@ func CoalesceUpdates(updates []Update) []Update {
 			out = append(out, update)
 			continue
 		}
+		// Externally identified events must remain distinct so each event keeps
+		// its own durable acknowledgement and trace correlation.
+		if strings.TrimSpace(update.ExternalEventID) != "" {
+			update.ChatID = chatID
+			out = append(out, update)
+			continue
+		}
 		idx, ok := byChat[chatID]
 		if !ok {
 			update.ChatID = chatID
@@ -272,7 +279,9 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 		}
 		return t.SendText(ctx, chatID, []string{fmt.Sprintf("v100 error: %v", err)})
 	}
-	c.afterPrompt(u)
+	if err := c.afterPrompt(u); err != nil {
+		return err
+	}
 	if c.cfg.StreamResponses {
 		if t != nil && !c.voiceConfig(chatID).Enabled {
 			if err := c.flushStream(ctx, t, state, true); err != nil {
@@ -724,10 +733,11 @@ func (c *Core) buildPrompt(u Update) []acp.ContentBlock {
 	return updatePrompt(c.cfg.Workspace, u)
 }
 
-func (c *Core) afterPrompt(u Update) {
+func (c *Core) afterPrompt(u Update) error {
 	if c.cfg.AfterPrompt != nil {
-		c.cfg.AfterPrompt(c.cfg.Workspace, u)
+		return c.cfg.AfterPrompt(c.cfg.Workspace, u)
 	}
+	return nil
 }
 
 func (c *Core) voiceConfig(chatID string) VoiceConfig {
