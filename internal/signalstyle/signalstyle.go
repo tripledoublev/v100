@@ -160,7 +160,7 @@ func (b *builder) renderChildren(parent ast.Node) {
 func (b *builder) render(n ast.Node) {
 	switch n := n.(type) {
 	case *ast.Text:
-		b.append(string(n.Text(b.source)))
+		b.append(string(n.Segment.Value(b.source)))
 		if n.HardLineBreak() || n.SoftLineBreak() {
 			b.append("\n")
 			if n.NextSibling() != nil {
@@ -181,7 +181,12 @@ func (b *builder) render(n ast.Node) {
 		b.styled(Monospace, func() { b.renderChildren(n) })
 	case *ast.FencedCodeBlock:
 		b.ensureBlockPrefix()
-		b.styled(Monospace, func() { b.append(string(n.Text(b.source))) })
+		b.styled(Monospace, func() {
+			for i := 0; i < n.Lines().Len(); i++ {
+				segment := n.Lines().At(i)
+				b.append(string(segment.Value(b.source)))
+			}
+		})
 		b.ensureNewline()
 	case *ast.CodeBlock:
 		b.ensureBlockPrefix()
