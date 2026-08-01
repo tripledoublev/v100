@@ -10,6 +10,11 @@ rpc_mode = "socket"
 profile = "signal-vincent"
 allowed_numbers = ["+1XXXXXXXXXX"]
 stream_responses = true
+conversation_mode = "shared_account"
+message_format = "signal_markdown"
+bot_prefix = "🤖 "
+# Optional. Default: ~/.v100/signal/<account-hash>.json
+state_path = ""
 
 [atproto]
 handle = "your-handle.bsky.social"
