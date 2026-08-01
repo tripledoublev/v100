@@ -19,6 +19,7 @@ import (
 	"github.com/tripledoublev/v100/internal/config"
 	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
 	"github.com/tripledoublev/v100/internal/signalstate"
+	"github.com/tripledoublev/v100/internal/signalstyle"
 )
 
 type fakeSignalRPC struct {
@@ -26,6 +27,7 @@ type fakeSignalRPC struct {
 	receives []signalReceiveEnvelope
 	err      error
 	callErrs []error
+	onCall   func(string)
 	calls    []signalRPCCall
 }
 
@@ -42,6 +44,7 @@ type fakeSignalACPClient struct {
 	lastPrompt acp.SessionPromptParams
 	lastAppend acp.SessionAppendContextParams
 	newErr     error
+	resumeErr  error
 	promptErr  error
 }
 
@@ -64,6 +67,9 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 			}
 		}
 	case acp.MethodSessionResume:
+		if f.resumeErr != nil {
+			return f.resumeErr
+		}
 		if p, ok := params.(acp.SessionResumeParams); ok {
 			f.mu.Lock()
 			f.lastResume = p
@@ -124,6 +130,9 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, signalRPCCall{method: method, params: params})
+	if f.onCall != nil {
+		f.onCall(method)
+	}
 	if len(f.callErrs) > 0 {
 		err := f.callErrs[0]
 		f.callErrs = f.callErrs[1:]
@@ -538,7 +547,9 @@ func TestSignalManualContextKeepsEntriesAddedDuringPrompt(t *testing.T) {
 		t.Fatalf("prompt = %#v, want first manual context", prompt)
 	}
 	gw.appendManualContext("+15145550000", signalManualContext{Text: "sent while prompt in flight"})
-	gw.afterSignalPrompt("", gatewaycore.Update{ChatID: "+15145550000"})
+	if err := gw.afterSignalPrompt("", gatewaycore.Update{ChatID: "+15145550000"}); err != nil {
+		t.Fatalf("afterSignalPrompt returned error: %v", err)
+	}
 
 	manual := gw.drainManualContext("+15145550000")
 	if len(manual) != 1 || manual[0].Text != "sent while prompt in flight" {
@@ -672,6 +683,36 @@ func TestSignalSharedAccountResumesStoredRun(t *testing.T) {
 	}
 	if state.RunID != "run-before-restart" || cli.lastResume.RunID != "run-before-restart" {
 		t.Fatalf("state=%#v resume=%#v", state, cli.lastResume)
+	}
+}
+
+func TestSignalSharedAccountReplacesMissingStoredRun(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetBinding("+15145550000", "missing-run", "signal-old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cli := &fakeSignalACPClient{resumeErr: fmt.Errorf("%d: session not found", acp.ErrSessionNotFound)}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{"+15145550000": {}},
+		},
+		rpc: &fakeSignalRPC{}, cli: cli, state: store,
+	}
+	state, err := gw.ensureSignalSession(context.Background(), "+15145550000")
+	if err != nil {
+		t.Fatalf("ensureSignalSession returned error: %v", err)
+	}
+	if state.RunID != "run-signal-test" {
+		t.Fatalf("fresh state = %#v", state)
+	}
+	binding, ok := store.Binding("+15145550000")
+	if !ok || binding.RunID != "run-signal-test" {
+		t.Fatalf("replacement binding = %#v ok=%v", binding, ok)
 	}
 }
 
@@ -885,6 +926,23 @@ func TestSignalSendFormattedTextRejectsOversizedPrefix(t *testing.T) {
 	}
 	if len(rpc.calls) != 0 {
 		t.Fatalf("oversized prefix attempted send: %#v", rpc.calls)
+	}
+}
+
+func TestSignalSendTextChunksAroundPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{cfg: signalRuntimeConfig{BotPrefix: "🤖 "}, rpc: rpc}
+	if err := gw.SendText(context.Background(), "+15145550000", []string{strings.Repeat("a", signalChunkChars)}); err != nil {
+		t.Fatalf("SendText returned error: %v", err)
+	}
+	if len(rpc.calls) != 2 {
+		t.Fatalf("send calls = %d, want 2", len(rpc.calls))
+	}
+	for _, call := range rpc.calls {
+		message := call.params.(map[string]any)["message"].(string)
+		if signalstyle.UTF16Len(message) > signalChunkChars {
+			t.Fatalf("prefixed chunk length = %d", signalstyle.UTF16Len(message))
+		}
 	}
 }
 

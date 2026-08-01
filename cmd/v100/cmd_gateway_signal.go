@@ -185,10 +185,6 @@ func gatewaySignalSendCmd(cfgPath *string) *cobra.Command {
 	return cmd
 }
 
-func runSignalGatewayPrompt(ctx context.Context, cfgPath *string, to, text string) error {
-	return runSignalGatewayControl(ctx, cfgPath, "prompt", to, text)
-}
-
 func runSignalGatewayControl(ctx context.Context, cfgPath *string, action, to, text string) error {
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
@@ -223,6 +219,9 @@ func runSignalGatewayControl(ctx context.Context, cfgPath *string, action, to, t
 			return fmt.Errorf("signal gateway control request failed")
 		}
 		return fmt.Errorf("signal gateway control request failed: %s", res.Error)
+	}
+	if strings.TrimSpace(res.Warning) != "" {
+		fmt.Fprintln(os.Stderr, "warning:", res.Warning)
 	}
 	return nil
 }
@@ -359,8 +358,9 @@ type signalControlRequest struct {
 }
 
 type signalControlResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Warning string `json:"warning,omitempty"`
 }
 
 func startSignalControlServer(ctx context.Context, gw *signalGateway) (func() error, error) {
@@ -465,10 +465,20 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 			}
 			if err == nil {
 				err = g.SendFormattedText(ctx, to, text)
+				var deliveredErr *signalDeliveredStateError
+				if errors.As(err, &deliveredErr) {
+					res.Warning = deliveredErr.Error()
+					err = nil
+				}
 			}
 			if err == nil && g.state != nil {
 				if _, appendErr := g.gatewayCore().AppendContext(ctx, to, "assistant", "signal.gateway_system", eventID, text); appendErr != nil {
-					err = fmt.Errorf("message was delivered but its trace append failed; do not retry automatically: %w", appendErr)
+					warning := fmt.Sprintf("message was delivered but its trace append failed; do not retry automatically: %v", appendErr)
+					if res.Warning != "" {
+						res.Warning += "; " + warning
+					} else {
+						res.Warning = warning
+					}
 				}
 			}
 		default:
@@ -696,12 +706,19 @@ func (g *signalGateway) ensureSignalSession(ctx context.Context, chatID string) 
 		if binding, ok := g.state.Binding(chatID); ok && strings.TrimSpace(binding.RunID) != "" {
 			state, err := core.ResumeSession(ctx, chatID, binding.RunID)
 			if err != nil {
-				return nil, err
+				if !isACPSessionNotFound(err) {
+					return nil, err
+				}
+				log.Printf("signal stored run missing for %s; starting a fresh session", redactSignalChatID(chatID))
+				if clearErr := g.state.DeleteBinding(chatID); clearErr != nil {
+					return nil, fmt.Errorf("clear stale Signal session binding: %w", clearErr)
+				}
+			} else {
+				if err := g.state.SetBinding(chatID, state.RunID, state.SessionID, time.Now()); err != nil {
+					return nil, fmt.Errorf("update resumed Signal binding: %w", err)
+				}
+				return state, nil
 			}
-			if err := g.state.SetBinding(chatID, state.RunID, state.SessionID, time.Now()); err != nil {
-				return nil, fmt.Errorf("update resumed Signal binding: %w", err)
-			}
-			return state, nil
 		}
 	}
 	state, err := core.GetOrCreateSession(ctx, chatID)
@@ -714,6 +731,10 @@ func (g *signalGateway) ensureSignalSession(ctx context.Context, chatID string) 
 		}
 	}
 	return state, nil
+}
+
+func isACPSessionNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), fmt.Sprintf("%d:", acp.ErrSessionNotFound))
 }
 
 func (g *signalGateway) flushPendingOwnerEvents(ctx context.Context) error {
@@ -971,13 +992,19 @@ func (g *signalGateway) clearDeliveredManualContext(chatID string) {
 }
 
 func (g *signalGateway) SendText(ctx context.Context, chatID string, chunks []string) error {
+	maxContent := signalChunkChars - signalstyle.UTF16Len(g.cfg.BotPrefix)
+	if maxContent <= 0 {
+		return fmt.Errorf("signal bot prefix leaves no room for message content")
+	}
 	for _, chunk := range chunks {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
 		}
-		if err := g.sendSignalResult(ctx, chatID, signalstyle.Result{Text: chunk}); err != nil {
-			return err
+		for _, part := range signalstyle.Chunk(signalstyle.Result{Text: chunk}, maxContent) {
+			if err := g.sendSignalResult(ctx, chatID, part); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1051,19 +1078,27 @@ func (g *signalGateway) sendSignalResult(ctx context.Context, chatID string, res
 			if errors.As(err, &rpcErr) {
 				_ = g.state.AckOutbound(intent.ID)
 			} else if stateErr := g.state.MarkOutboundPossiblySent(intent.ID); stateErr != nil {
-				return fmt.Errorf("Signal send failed (%v) and ambiguous outcome could not be recorded: %w", err, stateErr)
+				return fmt.Errorf("signal send failed (%v) and ambiguous outcome could not be recorded: %w", err, stateErr)
 			}
 		}
 		return err
 	}
+	g.rememberGatewaySent(chatID, result.Text)
 	if g.state != nil {
 		if err := g.state.MarkOutboundSent(intent.ID, signalTimestampInt64(sentResult.Timestamp)); err != nil {
-			return fmt.Errorf("record Signal outbound timestamp: %w", err)
+			return &signalDeliveredStateError{Err: fmt.Errorf("record Signal outbound timestamp: %w", err)}
 		}
 	}
-	g.rememberGatewaySent(chatID, result.Text)
 	return nil
 }
+
+type signalDeliveredStateError struct{ Err error }
+
+func (e *signalDeliveredStateError) Error() string {
+	return fmt.Sprintf("message was delivered but delivery state persistence failed; do not retry automatically: %v", e.Err)
+}
+
+func (e *signalDeliveredStateError) Unwrap() error { return e.Err }
 
 func isSignalTextStyleUnsupported(err error) bool {
 	var rpcErr *signalRPCError

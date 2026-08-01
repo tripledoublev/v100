@@ -28,6 +28,7 @@ type fakeACPClient struct {
 	lastReconf  acp.SessionReconfigureParams
 	lastClose   string
 	promptBlock chan struct{}
+	promptStop  string
 	onPrompt    func(context.Context)
 }
 
@@ -86,7 +87,10 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 			c.onPrompt(ctx)
 		}
 		if res, ok := out.(*acp.SessionPromptResult); ok {
-			res.StopReason = "end_turn"
+			res.StopReason = c.promptStop
+			if res.StopReason == "" {
+				res.StopReason = "end_turn"
+			}
 		}
 	case acp.MethodSessionReconfigure:
 		if p, ok := params.(acp.SessionReconfigureParams); ok {
@@ -127,6 +131,7 @@ type fakeTransport struct {
 	mu        sync.Mutex
 	polls     int
 	sent      map[string][]string
+	sendErr   error
 	voices    map[string][]string
 	typing    []string
 	reactions []string
@@ -184,7 +189,7 @@ func (t *fakeTransport) SendText(_ context.Context, chatID string, chunks []stri
 		t.sent = map[string][]string{}
 	}
 	t.sent[chatID] = append(t.sent[chatID], chunks...)
-	return nil
+	return t.sendErr
 }
 
 func (t *fakeTransport) SendVoice(_ context.Context, chatID, audioPath string) error {
@@ -726,6 +731,43 @@ func TestCoreBufferedResponseConcatenatesAndSplitsChunks(t *testing.T) {
 	if strings.Join(got, "|") != "abcd|ef" {
 		t.Fatalf("sent chunks = %v, want [abcd ef]", got)
 	}
+}
+
+func TestCoreAfterPromptRunsOnlyAfterAcceptedDeliveredTurn(t *testing.T) {
+	t.Run("refusal is not acknowledged", func(t *testing.T) {
+		acknowledged := 0
+		core := NewCore(Config{AfterPrompt: func(string, Update) error {
+			acknowledged++
+			return nil
+		}}, &fakeACPClient{promptStop: "refusal"})
+		if err := core.Handle(context.Background(), &fakeTransport{}, Update{ChatID: "42", Text: "hello"}); err != nil {
+			t.Fatalf("Handle returned error: %v", err)
+		}
+		if acknowledged != 0 {
+			t.Fatalf("refused prompt acknowledgements = %d", acknowledged)
+		}
+	})
+
+	t.Run("failed delivery is not acknowledged", func(t *testing.T) {
+		acknowledged := 0
+		cli := &fakeACPClient{}
+		core := NewCore(Config{AfterPrompt: func(string, Update) error {
+			acknowledged++
+			return nil
+		}}, cli)
+		cli.onPrompt = func(ctx context.Context) {
+			if err := core.HandleNotification(ctx, nil, sessionChunkNotification("gw-42", "reply")); err != nil {
+				t.Fatalf("HandleNotification returned error: %v", err)
+			}
+		}
+		err := core.Handle(context.Background(), &fakeTransport{sendErr: errors.New("Signal unavailable")}, Update{ChatID: "42", Text: "hello"})
+		if err == nil {
+			t.Fatal("Handle returned nil error for failed delivery")
+		}
+		if acknowledged != 0 {
+			t.Fatalf("failed delivery acknowledgements = %d", acknowledged)
+		}
+	})
 }
 
 func TestCorePrefersFormattedTransportForAssistantText(t *testing.T) {

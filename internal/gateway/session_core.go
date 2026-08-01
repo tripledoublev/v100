@@ -76,14 +76,15 @@ type Core struct {
 
 // Session tracks one chat's ACP session.
 type Session struct {
-	ChatID     string
-	SessionID  string
-	RunID      string
-	InFlight   bool
-	Output     strings.Builder
-	Stream     strings.Builder
-	LastStatus time.Time
-	mu         sync.Mutex
+	ChatID      string
+	SessionID   string
+	RunID       string
+	InFlight    bool
+	DeliveryErr error
+	Output      strings.Builder
+	Stream      strings.Builder
+	LastStatus  time.Time
+	mu          sync.Mutex
 }
 
 // SessionInfo is a snapshot of a chat session.
@@ -257,6 +258,7 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 	state.InFlight = true
 	state.Output.Reset()
 	state.Stream.Reset()
+	state.DeliveryErr = nil
 	state.mu.Unlock()
 
 	defer func() {
@@ -279,16 +281,19 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 		}
 		return t.SendText(ctx, chatID, []string{fmt.Sprintf("v100 error: %v", err)})
 	}
-	if err := c.afterPrompt(u); err != nil {
-		return err
-	}
 	if c.cfg.StreamResponses {
 		if t != nil && !c.voiceConfig(chatID).Enabled {
 			if err := c.flushStream(ctx, t, state, true); err != nil {
 				return err
 			}
 		}
-		if promptRes.StopReason != "" && promptRes.StopReason != "end_turn" && t != nil {
+		state.mu.Lock()
+		deliveryErr := state.DeliveryErr
+		state.mu.Unlock()
+		if deliveryErr != nil {
+			return deliveryErr
+		}
+		if !gatewayPromptCompleted(promptRes.StopReason) {
 			return nil
 		}
 		if t != nil && c.voiceConfig(chatID).Enabled {
@@ -298,22 +303,39 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 			state.mu.Unlock()
 			if response != "" {
 				textAlreadySent := normalizeVoiceReplyMode(c.voiceConfig(chatID).Mode) == VoiceReplyModeAudioText
-				return c.sendReply(ctx, t, chatID, response, textAlreadySent)
+				if err := c.sendReply(ctx, t, chatID, response, textAlreadySent); err != nil {
+					return err
+				}
 			}
 		}
-		return nil
+		return c.afterPrompt(u)
 	}
 	state.mu.Lock()
 	response := strings.TrimSpace(state.Output.String())
 	state.Output.Reset()
 	state.mu.Unlock()
-	if response == "" {
+	if !gatewayPromptCompleted(promptRes.StopReason) {
 		return nil
+	}
+	if response == "" {
+		return c.afterPrompt(u)
 	}
 	if t == nil {
-		return nil
+		return c.afterPrompt(u)
 	}
-	return c.sendReply(ctx, t, chatID, response, false)
+	if err := c.sendReply(ctx, t, chatID, response, false); err != nil {
+		return err
+	}
+	return c.afterPrompt(u)
+}
+
+func gatewayPromptCompleted(stopReason string) bool {
+	switch strings.TrimSpace(stopReason) {
+	case "", "end_turn", "max_tokens", "max_turn_requests":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetOrCreateSession returns the chat's ACP session, creating it when needed.
@@ -551,7 +573,13 @@ func (c *Core) HandleNotification(ctx context.Context, t Transport, note acp.Not
 			state.mu.Lock()
 			state.Stream.WriteString(update.Update.Content.Text)
 			state.mu.Unlock()
-			return c.flushStream(ctx, t, state, false)
+			err := c.flushStream(ctx, t, state, false)
+			if err != nil {
+				state.mu.Lock()
+				state.DeliveryErr = err
+				state.mu.Unlock()
+			}
+			return err
 		}
 		state.mu.Lock()
 		state.Output.WriteString(update.Update.Content.Text)
