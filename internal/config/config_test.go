@@ -46,6 +46,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Signal.RPCMode != "socket" || cfg.Signal.Socket != "/run/signal-cli.sock" {
 		t.Errorf("unexpected signal defaults: %+v", cfg.Signal)
 	}
+	if cfg.Signal.ConversationMode != "legacy" || cfg.Signal.MessageFormat != "plain" {
+		t.Errorf("unexpected signal compatibility defaults: %+v", cfg.Signal)
+	}
 	if cfg.Tools.Auth.GitHub.Mode != "disabled" {
 		t.Errorf("expected GitHub tool auth disabled by default, got %q", cfg.Tools.Auth.GitHub.Mode)
 	}

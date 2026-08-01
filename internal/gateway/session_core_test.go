@@ -110,6 +110,18 @@ type fakeTransport struct {
 	reactions []string
 }
 
+type fakeFormattedTransport struct {
+	*fakeTransport
+	formatted []string
+}
+
+func (t *fakeFormattedTransport) SendFormattedText(_ context.Context, chatID, text string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.formatted = append(t.formatted, chatID+":"+text)
+	return nil
+}
+
 func (t *fakeTransport) Name() string { return "fake" }
 
 func (t *fakeTransport) Poll(ctx context.Context) ([]Update, error) {
@@ -681,6 +693,43 @@ func TestCoreBufferedResponseConcatenatesAndSplitsChunks(t *testing.T) {
 	transport.mu.Unlock()
 	if strings.Join(got, "|") != "abcd|ef" {
 		t.Fatalf("sent chunks = %v, want [abcd ef]", got)
+	}
+}
+
+func TestCorePrefersFormattedTransportForAssistantText(t *testing.T) {
+	core := NewCore(Config{ChunkChars: 2}, &fakeACPClient{})
+	transport := &fakeFormattedTransport{fakeTransport: &fakeTransport{}}
+	if err := core.sendAssistantText(context.Background(), transport, "42", "**hello**"); err != nil {
+		t.Fatalf("sendAssistantText returned error: %v", err)
+	}
+	if got := strings.Join(transport.formatted, "|"); got != "42:**hello**" {
+		t.Fatalf("formatted sends = %q", got)
+	}
+	if len(transport.sent) != 0 {
+		t.Fatalf("plain sends = %#v, want none", transport.sent)
+	}
+}
+
+func TestCoreUsesConfiguredStreamSplitter(t *testing.T) {
+	called := false
+	core := NewCore(Config{StreamSplitter: func(buffer string, final bool) (string, string) {
+		called = true
+		if buffer != "partial" || final {
+			t.Fatalf("splitter args = %q, %v", buffer, final)
+		}
+		return "safe", "tail"
+	}}, &fakeACPClient{})
+	transport := &fakeTransport{}
+	state := &Session{ChatID: "42"}
+	state.Stream.WriteString("partial")
+	if err := core.flushStream(context.Background(), transport, state, false); err != nil {
+		t.Fatalf("flushStream returned error: %v", err)
+	}
+	if !called || state.Stream.String() != "tail" {
+		t.Fatalf("called=%v rest=%q", called, state.Stream.String())
+	}
+	if got := strings.Join(transport.sent["42"], "|"); got != "safe" {
+		t.Fatalf("sent = %q", got)
 	}
 }
 

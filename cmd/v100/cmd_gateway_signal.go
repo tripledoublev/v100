@@ -25,6 +25,8 @@ import (
 	"github.com/tripledoublev/v100/internal/config"
 	gatewaycore "github.com/tripledoublev/v100/internal/gateway"
 	"github.com/tripledoublev/v100/internal/providers"
+	"github.com/tripledoublev/v100/internal/signalstate"
+	"github.com/tripledoublev/v100/internal/signalstyle"
 )
 
 const (
@@ -39,23 +41,27 @@ const (
 )
 
 type signalRuntimeConfig struct {
-	Account         string
-	Socket          string
-	TCP             string
-	RPCMode         string
-	ControlSocket   string
-	RunDir          string
-	Workspace       string
-	StreamResponses bool
-	VoiceReplies    bool
-	VoiceReplyMode  string
-	StatusInterval  time.Duration
-	AllowedNumbers  map[string]struct{}
-	Provider        string
-	Profile         string
-	ChatProfiles    map[string]string
-	Profiles        map[string]config.GatewayProfile
-	PromptBaseDir   string
+	Account          string
+	Socket           string
+	TCP              string
+	RPCMode          string
+	ControlSocket    string
+	RunDir           string
+	Workspace        string
+	StreamResponses  bool
+	ConversationMode string
+	MessageFormat    string
+	BotPrefix        string
+	StatePath        string
+	VoiceReplies     bool
+	VoiceReplyMode   string
+	StatusInterval   time.Duration
+	AllowedNumbers   map[string]struct{}
+	Provider         string
+	Profile          string
+	ChatProfiles     map[string]string
+	Profiles         map[string]config.GatewayProfile
+	PromptBaseDir    string
 }
 
 type signalRPC interface {
@@ -79,12 +85,15 @@ type signalGateway struct {
 	cli       gatewaycore.ACPClient
 	core      *gatewaycore.Core
 	globalCfg *config.Config
+	state     *signalstate.Store
 
 	manualMu      sync.Mutex
 	manualContext map[string][]signalManualContext
 	manualPrompt  map[string]uint64
 	manualNextID  uint64
 	gatewaySent   map[string][]signalRecentSent
+	styleMu       sync.Mutex
+	styleDisabled bool
 }
 
 type signalManualContext struct {
@@ -107,6 +116,7 @@ func gatewaySignalCmd(cfgPath *string) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(gatewaySignalPromptCmd(cfgPath))
+	cmd.AddCommand(gatewaySignalSendCmd(cfgPath))
 	return cmd
 }
 
@@ -131,7 +141,7 @@ func gatewaySignalPromptCmd(cfgPath *string) *cobra.Command {
 			if text == "" {
 				return fmt.Errorf("message is required")
 			}
-			return runSignalGatewayPrompt(cmd.Context(), cfgPath, to, text)
+			return runSignalGatewayControl(cmd.Context(), cfgPath, "prompt", to, text)
 		},
 	}
 	cmd.Flags().StringVar(&to, "to", "", "Signal recipient phone number")
@@ -147,7 +157,39 @@ func runSignalGateway(ctx context.Context, cfgPath *string) error {
 	return gw.gatewayCore().Run(ctx, gw)
 }
 
+func gatewaySignalSendCmd(cfgPath *string) *cobra.Command {
+	var to string
+	cmd := &cobra.Command{
+		Use:   "send --to NUMBER [message]",
+		Short: "Send one deterministic Signal message through the running gateway",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			text := strings.TrimSpace(strings.Join(args, " "))
+			if text == "" {
+				b, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				text = strings.TrimSpace(string(b))
+			}
+			if strings.TrimSpace(to) == "" {
+				return fmt.Errorf("--to is required")
+			}
+			if text == "" {
+				return fmt.Errorf("message is required")
+			}
+			return runSignalGatewayControl(cmd.Context(), cfgPath, "send", to, text)
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "Signal recipient phone number")
+	return cmd
+}
+
 func runSignalGatewayPrompt(ctx context.Context, cfgPath *string, to, text string) error {
+	return runSignalGatewayControl(ctx, cfgPath, "prompt", to, text)
+}
+
+func runSignalGatewayControl(ctx context.Context, cfgPath *string, action, to, text string) error {
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
@@ -165,8 +207,9 @@ func runSignalGatewayPrompt(ctx context.Context, cfgPath *string, to, text strin
 		}
 	}
 	req := signalControlRequest{
-		To:   strings.TrimSpace(to),
-		Text: text,
+		Action: action,
+		To:     strings.TrimSpace(to),
+		Text:   text,
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return fmt.Errorf("send signal gateway control request: %w", err)
@@ -200,6 +243,14 @@ func setupSignalGateway(ctx context.Context, cfgPath *string) (*signalGateway, f
 		return nil, nil, err
 	}
 	gw := &signalGateway{ctx: ctx, cfg: normalized, rpc: rpc, globalCfg: cfg}
+	if normalized.ConversationMode == "shared_account" {
+		state, stateErr := signalstate.OpenDefault(normalized.StatePath)
+		if stateErr != nil {
+			_ = rpc.Close()
+			return nil, nil, fmt.Errorf("open Signal gateway state: %w", stateErr)
+		}
+		gw.state = state
+	}
 	proc, err := gatewaycore.StartACPProcess(ctx, gatewaycore.ACPProcessOptions{
 		ConfigPath:      *cfgPath,
 		Provider:        normalized.Provider,
@@ -248,28 +299,60 @@ func normalizeSignalConfig(cfg config.SignalConfig) signalRuntimeConfig {
 	if mode == "" {
 		mode = "socket"
 	}
+	conversationMode := normalizeSignalConversationMode(cfg.ConversationMode)
+	botPrefix := cfg.BotPrefix
+	if conversationMode == "shared_account" && botPrefix == "" {
+		botPrefix = "🤖 "
+	}
+	controlSocket := normalizeSignalControlSocket(cfg.ControlSocket, cfg.Account)
+	statePath := strings.TrimSpace(cfg.StatePath)
+	if statePath == "" {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Account)))
+		statePath = filepath.Join(config.UserDataDir(), "signal", hex.EncodeToString(sum[:8])+".json")
+	}
 	return signalRuntimeConfig{
-		Account:         strings.TrimSpace(cfg.Account),
-		Socket:          strings.TrimSpace(cfg.Socket),
-		TCP:             strings.TrimSpace(cfg.TCP),
-		RPCMode:         mode,
-		ControlSocket:   normalizeSignalControlSocket(cfg.ControlSocket, cfg.Account),
-		RunDir:          strings.TrimSpace(cfg.RunDir),
-		Workspace:       strings.TrimSpace(cfg.Workspace),
-		StreamResponses: cfg.StreamResponses,
-		VoiceReplies:    cfg.VoiceReplies,
-		VoiceReplyMode:  strings.TrimSpace(cfg.VoiceReplyMode),
-		StatusInterval:  statusInterval,
-		AllowedNumbers:  allowed,
-		Provider:        strings.TrimSpace(cfg.Provider),
-		Profile:         strings.TrimSpace(cfg.Profile),
-		ChatProfiles:    copyStringMap(cfg.ChatProfiles),
+		Account:          strings.TrimSpace(cfg.Account),
+		Socket:           strings.TrimSpace(cfg.Socket),
+		TCP:              strings.TrimSpace(cfg.TCP),
+		RPCMode:          mode,
+		ControlSocket:    controlSocket,
+		RunDir:           strings.TrimSpace(cfg.RunDir),
+		Workspace:        strings.TrimSpace(cfg.Workspace),
+		StreamResponses:  cfg.StreamResponses,
+		ConversationMode: conversationMode,
+		MessageFormat:    normalizeSignalMessageFormat(cfg.MessageFormat),
+		BotPrefix:        botPrefix,
+		StatePath:        statePath,
+		VoiceReplies:     cfg.VoiceReplies,
+		VoiceReplyMode:   strings.TrimSpace(cfg.VoiceReplyMode),
+		StatusInterval:   statusInterval,
+		AllowedNumbers:   allowed,
+		Provider:         strings.TrimSpace(cfg.Provider),
+		Profile:          strings.TrimSpace(cfg.Profile),
+		ChatProfiles:     copyStringMap(cfg.ChatProfiles),
 	}
 }
 
+func normalizeSignalConversationMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return "legacy"
+	}
+	return mode
+}
+
+func normalizeSignalMessageFormat(format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		return "plain"
+	}
+	return format
+}
+
 type signalControlRequest struct {
-	To   string `json:"to"`
-	Text string `json:"text"`
+	Action string `json:"action,omitempty"`
+	To     string `json:"to"`
+	Text   string `json:"text"`
 }
 
 type signalControlResponse struct {
@@ -360,11 +443,23 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 	case !g.Allowed(to):
 		res = signalControlResponse{Error: "recipient is not allowed"}
 	default:
-		err := g.gatewayCore().Handle(ctx, g, gatewaycore.Update{
-			ChatID:    to,
-			MessageID: fmt.Sprintf("terminal-%d", time.Now().UnixMilli()),
-			Text:      text,
-		})
+		action := strings.ToLower(strings.TrimSpace(req.Action))
+		if action == "" {
+			action = "prompt"
+		}
+		var err error
+		switch action {
+		case "prompt":
+			err = g.gatewayCore().Handle(ctx, g, gatewaycore.Update{
+				ChatID:    to,
+				MessageID: fmt.Sprintf("terminal-%d", time.Now().UnixMilli()),
+				Text:      text,
+			})
+		case "send":
+			err = g.SendFormattedText(ctx, to, text)
+		default:
+			err = fmt.Errorf("unsupported action %q", action)
+		}
 		if err != nil {
 			res = signalControlResponse{Error: err.Error()}
 		}
@@ -391,6 +486,10 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 	if g.core != nil {
 		return g.core
 	}
+	var streamSplitter gatewaycore.StreamSplitter
+	if g.cfg.MessageFormat == "signal_markdown" {
+		streamSplitter = signalstyle.SplitStream
+	}
 	g.core = gatewaycore.NewCore(gatewaycore.Config{
 		SessionIDPrefix: "signal-",
 		RunDir:          g.cfg.RunDir,
@@ -403,6 +502,7 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 		PollRetryMax:    signalPollRetryMax,
 		ChunkChars:      signalChunkChars,
 		BusyMessage:     signalBusyMessage,
+		StreamSplitter:  streamSplitter,
 		PrepareSession: func(chatID string, params *acp.SessionNewParams) error {
 			return gatewaycore.ApplyProfileToSessionNew(params, g.effectiveGatewayProfile(chatID), g.cfg.PromptBaseDir)
 		},
@@ -425,7 +525,11 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 	}
 	updates := make([]gatewaycore.Update, 0, len(envelopes))
 	for _, env := range envelopes {
-		if g.recordSignalSentSync(env.Envelope) {
+		handledSync, syncErr := g.recordSignalSentSync(env.Envelope)
+		if syncErr != nil {
+			return nil, syncErr
+		}
+		if handledSync {
 			continue
 		}
 		number := strings.TrimSpace(env.Envelope.Source)
@@ -479,9 +583,9 @@ func isSignalRPCClosedError(err error) bool {
 		errors.Is(err, syscall.ECONNRESET)
 }
 
-func (g *signalGateway) recordSignalSentSync(env signalEnvelope) bool {
+func (g *signalGateway) recordSignalSentSync(env signalEnvelope) (bool, error) {
 	if env.SyncMessage == nil || env.SyncMessage.SentMessage == nil {
-		return false
+		return false, nil
 	}
 	sent := env.SyncMessage.SentMessage
 	number := strings.TrimSpace(sent.Destination)
@@ -491,17 +595,26 @@ func (g *signalGateway) recordSignalSentSync(env signalEnvelope) bool {
 	rawText := strings.TrimSpace(sent.Message)
 	text := signalSentMessageText(sent)
 	if number == "" || text == "" || !g.Allowed(number) {
-		return true
+		return true, nil
+	}
+	if g.state != nil && rawText != "" {
+		_, matched, err := g.state.MatchEcho(number, rawText, signalTimestampInt64(sent.Timestamp), time.Now())
+		if err != nil {
+			return true, fmt.Errorf("match Signal sent echo: %w", err)
+		}
+		if matched {
+			return true, nil
+		}
 	}
 	if rawText != "" && g.consumeGatewaySent(number, rawText) {
-		return true
+		return true, nil
 	}
 	g.appendManualContext(number, signalManualContext{
 		Text:      text,
 		Timestamp: signalTimestampString(sent.Timestamp),
 	})
 	log.Printf("signal manual sent context recorded for %s chars=%d", redactSignalChatID(number), len([]rune(text)))
-	return true
+	return true, nil
 }
 
 func (g *signalGateway) appendManualContext(chatID string, entry signalManualContext) {
@@ -729,16 +842,92 @@ func (g *signalGateway) SendText(ctx context.Context, chatID string, chunks []st
 		if chunk == "" {
 			continue
 		}
-		if err := g.rpc.Call(ctx, "send", map[string]any{
-			"account":   g.cfg.Account,
-			"recipient": chatID,
-			"message":   chunk,
-		}, nil); err != nil {
+		if err := g.sendSignalResult(ctx, chatID, signalstyle.Result{Text: chunk}); err != nil {
 			return err
 		}
-		g.rememberGatewaySent(chatID, chunk)
 	}
 	return nil
+}
+
+// SendFormattedText renders a complete assistant fragment to Signal-native
+// style ranges before chunking. That keeps UTF-16 offsets correct per message.
+func (g *signalGateway) SendFormattedText(ctx context.Context, chatID, source string) error {
+	result := signalstyle.Result{Text: source}
+	if g.cfg.MessageFormat == "signal_markdown" {
+		result = signalstyle.Render(source)
+	}
+	for _, chunk := range signalstyle.Chunk(result, signalChunkChars-signalstyle.UTF16Len(g.cfg.BotPrefix)) {
+		if err := g.sendSignalResult(ctx, chatID, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *signalGateway) sendSignalResult(ctx context.Context, chatID string, result signalstyle.Result) error {
+	prefix := g.cfg.BotPrefix
+	if prefix != "" {
+		offset := signalstyle.UTF16Len(prefix)
+		result.Text = prefix + result.Text
+		for i := range result.Styles {
+			result.Styles[i].Start += offset
+		}
+	}
+	params := map[string]any{
+		"account":   g.cfg.Account,
+		"recipient": chatID,
+		"message":   result.Text,
+	}
+	var intent signalstate.OutboundIntent
+	if g.state != nil {
+		var err error
+		intent, _, err = g.state.EnqueueOutbound(signalstate.OutboundIntent{ChatID: chatID, Text: result.Text})
+		if err != nil {
+			return fmt.Errorf("persist Signal outbound intent: %w", err)
+		}
+	}
+	g.styleMu.Lock()
+	styleDisabled := g.styleDisabled
+	g.styleMu.Unlock()
+	if !styleDisabled && len(result.Styles) > 0 {
+		styles := make([]string, 0, len(result.Styles))
+		for _, style := range result.Styles {
+			styles = append(styles, style.String())
+		}
+		params["textStyle"] = styles
+	}
+	var sentResult struct {
+		Timestamp any `json:"timestamp"`
+	}
+	err := g.rpc.Call(ctx, "send", params, &sentResult)
+	if err != nil && params["textStyle"] != nil && isSignalTextStyleUnsupported(err) {
+		g.styleMu.Lock()
+		g.styleDisabled = true
+		g.styleMu.Unlock()
+		delete(params, "textStyle")
+		err = g.rpc.Call(ctx, "send", params, &sentResult)
+	}
+	if err != nil {
+		return err
+	}
+	if g.state != nil {
+		if err := g.state.MarkOutboundSent(intent.ID, signalTimestampInt64(sentResult.Timestamp)); err != nil {
+			return fmt.Errorf("record Signal outbound timestamp: %w", err)
+		}
+	}
+	g.rememberGatewaySent(chatID, result.Text)
+	return nil
+}
+
+func isSignalTextStyleUnsupported(err error) bool {
+	var rpcErr *signalRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	message := strings.ToLower(rpcErr.Message)
+	return rpcErr.Code == -32602 ||
+		(strings.Contains(message, "textstyle") &&
+			(strings.Contains(message, "unknown") || strings.Contains(message, "unsupported") || strings.Contains(message, "invalid")))
 }
 
 func (g *signalGateway) SendVoice(context.Context, string, string) error {
@@ -1124,6 +1313,12 @@ func signalTimestampString(timestamp any) string {
 	}
 }
 
+func signalTimestampInt64(timestamp any) int64 {
+	value := signalTimestampString(timestamp)
+	parsed, _ := strconv.ParseInt(value, 10, 64)
+	return parsed
+}
+
 func (c *signalJSONRPC) Call(ctx context.Context, method string, params any, out any) error {
 	if c == nil || c.conn == nil {
 		return fmt.Errorf("signal rpc client is not configured")
@@ -1170,13 +1365,26 @@ func (c *signalJSONRPC) Call(ctx context.Context, method string, params any, out
 			continue
 		}
 		if res.Error != nil {
-			return fmt.Errorf("signal rpc %s failed: %d: %s", method, res.Error.Code, res.Error.Message)
+			return &signalRPCError{Method: method, Code: res.Error.Code, Message: res.Error.Message}
 		}
 		if out == nil || len(res.Result) == 0 {
 			return nil
 		}
 		return json.Unmarshal(res.Result, out)
 	}
+}
+
+type signalRPCError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *signalRPCError) Error() string {
+	if e == nil {
+		return "signal rpc failed"
+	}
+	return fmt.Sprintf("signal rpc %s failed: %d: %s", e.Method, e.Code, e.Message)
 }
 
 func redactSignalAccountError(err error, account string) error {

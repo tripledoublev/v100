@@ -23,6 +23,7 @@ type fakeSignalRPC struct {
 	mu       sync.Mutex
 	receives []signalReceiveEnvelope
 	err      error
+	callErrs []error
 	calls    []signalRPCCall
 }
 
@@ -99,6 +100,11 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, signalRPCCall{method: method, params: params})
+	if len(f.callErrs) > 0 {
+		err := f.callErrs[0]
+		f.callErrs = f.callErrs[1:]
+		return err
+	}
 	return nil
 }
 
@@ -510,7 +516,7 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 	if err := gw.SendText(context.Background(), "+15145550000", []string{"gateway generated reply"}); err != nil {
 		t.Fatalf("SendText returned error: %v", err)
 	}
-	handled := gw.recordSignalSentSync(signalEnvelope{
+	handled, err := gw.recordSignalSentSync(signalEnvelope{
 		SyncMessage: &signalSyncMessage{
 			SentMessage: &signalSentMessage{
 				DestinationNumber: "+15145550000",
@@ -518,6 +524,9 @@ func TestSignalSentSyncMatchingGatewaySendIsNotManualContext(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("recordSignalSentSync returned error: %v", err)
+	}
 	if !handled {
 		t.Fatal("sent sync was not handled")
 	}
@@ -535,6 +544,13 @@ func TestGatewaySignalCommandIncludesPromptSubcommand(t *testing.T) {
 	}
 	if sub == nil || sub.Use != "prompt --to NUMBER [message]" {
 		t.Fatalf("prompt subcommand = %#v", sub)
+	}
+	send, _, err := cmd.Find([]string{"send"})
+	if err != nil {
+		t.Fatalf("Find(send) returned error: %v", err)
+	}
+	if send == nil || send.Use != "send --to NUMBER [message]" {
+		t.Fatalf("send subcommand = %#v", send)
 	}
 }
 
@@ -593,6 +609,54 @@ func TestSignalSendTextTypingAndReaction(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "send,send,sendTyping,sendReaction" {
 		t.Fatalf("methods = %v", got)
+	}
+}
+
+func TestSignalSendFormattedTextUsesNativeStylesAndPrefix(t *testing.T) {
+	rpc := &fakeSignalRPC{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:       "+15145551234",
+			MessageFormat: "signal_markdown",
+			BotPrefix:     "🤖 ",
+		},
+		rpc: rpc,
+	}
+	if err := gw.SendFormattedText(context.Background(), "+15145550000", "**hello**"); err != nil {
+		t.Fatalf("SendFormattedText returned error: %v", err)
+	}
+	params := rpc.calls[0].params.(map[string]any)
+	if params["message"] != "🤖 hello" {
+		t.Fatalf("message = %#v", params["message"])
+	}
+	styles, ok := params["textStyle"].([]string)
+	if !ok || len(styles) != 1 || styles[0] != "3:5:BOLD" {
+		t.Fatalf("textStyle = %#v", params["textStyle"])
+	}
+}
+
+func TestSignalSendFormattedTextRetriesPlainOnExplicitUnsupportedStyle(t *testing.T) {
+	rpc := &fakeSignalRPC{callErrs: []error{
+		&signalRPCError{Method: "send", Code: -32602, Message: "unknown field textStyle"},
+		nil,
+	}}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg:       signalRuntimeConfig{Account: "+15145551234", MessageFormat: "signal_markdown"},
+		rpc:       rpc,
+	}
+	if err := gw.SendFormattedText(context.Background(), "+15145550000", "**hello**"); err != nil {
+		t.Fatalf("SendFormattedText returned error: %v", err)
+	}
+	if len(rpc.calls) != 2 {
+		t.Fatalf("calls = %d, want style attempt plus plain retry", len(rpc.calls))
+	}
+	if _, ok := rpc.calls[1].params.(map[string]any)["textStyle"]; ok {
+		t.Fatalf("retry retained textStyle: %#v", rpc.calls[1].params)
+	}
+	if !gw.styleDisabled {
+		t.Fatal("style fallback was not latched")
 	}
 }
 

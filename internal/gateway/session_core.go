@@ -522,7 +522,11 @@ func (c *Core) flushStream(ctx context.Context, t Transport, state *Session, fin
 	}
 	state.mu.Lock()
 	buffer := state.Stream.String()
-	flush, rest := splitStreamFlush(buffer, final)
+	splitter := splitStreamFlush
+	if c.cfg.StreamSplitter != nil {
+		splitter = c.cfg.StreamSplitter
+	}
+	flush, rest := splitter(buffer, final)
 	if flush != "" {
 		state.Stream.Reset()
 		state.Stream.WriteString(rest)
@@ -532,7 +536,14 @@ func (c *Core) flushStream(ctx context.Context, t Transport, state *Session, fin
 	if flush == "" {
 		return nil
 	}
-	return t.SendText(ctx, state.ChatID, SplitText(flush, c.cfg.ChunkChars))
+	return c.sendAssistantText(ctx, t, state.ChatID, flush)
+}
+
+func (c *Core) sendAssistantText(ctx context.Context, t Transport, chatID, text string) error {
+	if formatted, ok := t.(FormattedTextTransport); ok {
+		return formatted.SendFormattedText(ctx, chatID, text)
+	}
+	return t.SendText(ctx, chatID, SplitText(text, c.cfg.ChunkChars))
 }
 
 func splitStreamFlush(buffer string, final bool) (flush, rest string) {
@@ -640,7 +651,7 @@ func (c *Core) sendReply(ctx context.Context, t Transport, chatID, text string, 
 		if textAlreadySent {
 			return nil
 		}
-		return t.SendText(ctx, chatID, SplitText(text, c.cfg.ChunkChars))
+		return c.sendAssistantText(ctx, t, chatID, text)
 	}
 	mode := normalizeVoiceReplyMode(voice.Mode)
 	audioPath, err := synthesizeReply(ctx, text)

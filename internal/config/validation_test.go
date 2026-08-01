@@ -212,6 +212,8 @@ enabled = true
 profile = "missing_signal"
 account = ""
 rpc_mode = "bogus"
+conversation_mode = "crowded_room"
+message_format = "html"
 
 [signal.chat_profiles]
 "+15145550000" = "missing_signal_chat"
@@ -225,6 +227,8 @@ rpc_mode = "bogus"
 		`unknown gateway profile "missing_signal_chat"`,
 		`signal gateway is enabled but account is empty`,
 		`unsupported signal rpc_mode "bogus"`,
+		`unsupported signal conversation_mode "crowded_room"`,
+		`unsupported signal message_format "html"`,
 		`unknown tool "not_a_tool"`,
 		`dangerous tool "sh" is not listed in tools`,
 		`system_prompt_path references missing file`,
