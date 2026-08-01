@@ -70,6 +70,6 @@ printf '%s\n' '**v100 was updated**' | v100 --config config.toml gateway signal 
 
 ## Reaction Mode & Web Search
 
-This profile is configured with `reaction_mode = "smart"`. The gateway will use a quick, cheap LLM call to pick an appropriate emoji from `reaction_emojis` (or default to 👍) while processing the incoming message, providing an immediate read receipt and emotional tone before the full text reply arrives.
+This profile is configured with `reaction_mode = "random"`. The gateway picks an emoji from `reaction_emojis` while processing the incoming message, providing an immediate read receipt and emotional tone before the full text reply arrives.
 
 Additionally, the `web_search` tool now uses Brave Search under the hood for faster, more relevant results when Vincent needs to check news or facts.

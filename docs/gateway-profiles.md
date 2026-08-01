@@ -106,6 +106,9 @@ context, processed Signal IDs, and outbound echo correlation live in the small
 atomic `state_path` file, allowing the ACP run to resume after a gateway
 restart. Completed conversation text remains in `trace.jsonl`, not in this
 operational state file.
+Ambiguous transport failures are retained only for sent-echo correlation; v100
+does not blindly replay them after restart because doing so could duplicate a
+message that Signal accepted before the connection dropped.
 
 `message_format = "signal_markdown"` renders conservative Markdown as Signal's
 native bold, italic, strike, spoiler, and monospace ranges. Streaming waits for
