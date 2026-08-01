@@ -133,6 +133,38 @@ func ApplyProfileToSessionNew(params *acp.SessionNewParams, runtime ProfileRunti
 	return nil
 }
 
+// ApplyProfileToSessionResume copies the same profile restrictions used for a
+// new session into ACP resume params, including explicit zero budgets.
+func ApplyProfileToSessionResume(params *acp.SessionResumeParams, runtime ProfileRuntime, promptBaseDir string) error {
+	if params == nil || (!runtime.OK && strings.TrimSpace(runtime.Name) == "") {
+		return nil
+	}
+	var fresh acp.SessionNewParams
+	if err := ApplyProfileToSessionNew(&fresh, runtime, promptBaseDir); err != nil {
+		return err
+	}
+	params.Provider = fresh.Provider
+	params.Model = fresh.Model
+	params.Solver = fresh.Solver
+	params.Tools = fresh.Tools
+	params.Dangerous = fresh.Dangerous
+	params.SystemPrompt = fresh.SystemPrompt
+	params.NetworkTier = fresh.NetworkTier
+	if fresh.BudgetStepsSet {
+		value := fresh.BudgetSteps
+		params.BudgetSteps = &value
+	}
+	if fresh.BudgetTokensSet {
+		value := fresh.BudgetTokens
+		params.BudgetTokens = &value
+	}
+	if fresh.BudgetCostSet {
+		value := fresh.BudgetCostUSD
+		params.BudgetCostUSD = &value
+	}
+	return nil
+}
+
 // ReconfigureParams builds ACP session/reconfigure params for a runtime command.
 func ReconfigureParams(sessionID string, command Command) (acp.SessionReconfigureParams, bool) {
 	value := strings.TrimSpace(command.Arg)

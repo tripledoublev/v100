@@ -9,11 +9,14 @@ import (
 
 // Update is a normalized inbound message from a chat transport.
 type Update struct {
-	ChatID    string
-	MessageID string
-	Text      string
-	Images    []ImageAttachment
-	Audio     *AudioAttachment
+	ChatID          string
+	MessageID       string
+	Text            string
+	Source          string
+	ResponseSource  string
+	ExternalEventID string
+	Images          []ImageAttachment
+	Audio           *AudioAttachment
 }
 
 // ImageAttachment is a transport-normalized image payload.
@@ -72,6 +75,7 @@ type Config struct {
 	ChunkChars      int
 	BusyMessage     string
 	PrepareSession  func(chatID string, params *acp.SessionNewParams) error
+	PrepareResume   func(chatID string, params *acp.SessionResumeParams) error
 	StreamSplitter  StreamSplitter
 	BuildPrompt     func(workspace string, update Update) []acp.ContentBlock
 	AfterPrompt     func(workspace string, update Update)

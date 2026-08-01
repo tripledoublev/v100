@@ -22,7 +22,9 @@ type fakeACPClient struct {
 
 	mu          sync.Mutex
 	lastNew     acp.SessionNewParams
+	lastResume  acp.SessionResumeParams
 	lastPrompt  acp.SessionPromptParams
+	lastAppend  acp.SessionAppendContextParams
 	lastReconf  acp.SessionReconfigureParams
 	lastClose   string
 	promptBlock chan struct{}
@@ -44,6 +46,26 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 				res.SessionID = p.SessionID
 			} else {
 				res.SessionID = "session"
+			}
+			res.RunID = "run-new"
+		}
+	case acp.MethodSessionResume:
+		if p, ok := params.(acp.SessionResumeParams); ok {
+			c.mu.Lock()
+			c.lastResume = p
+			c.mu.Unlock()
+			if res, ok := out.(*acp.SessionResumeResult); ok {
+				res.SessionID = p.SessionID
+				res.RunID = p.RunID
+			}
+		}
+	case acp.MethodSessionAppendContext:
+		if p, ok := params.(acp.SessionAppendContextParams); ok {
+			c.mu.Lock()
+			c.lastAppend = p
+			c.mu.Unlock()
+			if res, ok := out.(*acp.SessionAppendContextResult); ok {
+				res.Appended = true
 			}
 		}
 	case acp.MethodSessionPrompt:
@@ -818,6 +840,43 @@ func TestCorePrepareSessionHookMutatesSessionNewParams(t *testing.T) {
 	}
 }
 
+func TestCoreResumeSessionAndAppendContext(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	steps := 0
+	core := NewCore(Config{
+		SessionIDPrefix: "signal-",
+		RunDir:          "/tmp/runs",
+		Workspace:       "/tmp/work",
+		PrepareResume: func(chatID string, params *acp.SessionResumeParams) error {
+			if chatID != "42" {
+				t.Fatalf("prepare chatID = %q", chatID)
+			}
+			params.Tools = []string{"news_fetch"}
+			params.Dangerous = []string{}
+			params.BudgetSteps = &steps
+			return nil
+		},
+	}, cli)
+	state, err := core.ResumeSession(ctx, "42", "run-existing")
+	if err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+	if state.SessionID != "signal-42" || state.RunID != "run-existing" || cli.newCount.Load() != 0 {
+		t.Fatalf("resumed state = %#v new calls=%d", state, cli.newCount.Load())
+	}
+	if cli.lastResume.CWD != "/tmp/work" || cli.lastResume.RunDir != "/tmp/runs" || cli.lastResume.BudgetSteps == nil || *cli.lastResume.BudgetSteps != 0 {
+		t.Fatalf("resume params = %#v", cli.lastResume)
+	}
+	res, err := core.AppendContext(ctx, "42", "assistant", "signal.owner_manual", "owner-1", "manual reply")
+	if err != nil || !res.Appended {
+		t.Fatalf("AppendContext result=%#v err=%v", res, err)
+	}
+	if cli.lastAppend.SessionID != "signal-42" || cli.lastAppend.Source != "signal.owner_manual" || cli.lastAppend.ExternalEventID != "owner-1" {
+		t.Fatalf("append params = %#v", cli.lastAppend)
+	}
+}
+
 func TestCoreBuildPromptHookOverridesDefaultPrompt(t *testing.T) {
 	ctx := context.Background()
 	cli := &fakeACPClient{}
@@ -830,13 +889,16 @@ func TestCoreBuildPromptHookOverridesDefaultPrompt(t *testing.T) {
 		},
 	}, cli)
 	transport := &fakeTransport{}
-	if err := core.Handle(ctx, transport, Update{ChatID: "42", Text: "hello"}); err != nil {
+	if err := core.Handle(ctx, transport, Update{ChatID: "42", Text: "hello", Source: "signal.friend", ResponseSource: "signal.bot", ExternalEventID: "friend-1"}); err != nil {
 		t.Fatalf("Handle returned error: %v", err)
 	}
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
 	if len(cli.lastPrompt.Prompt) != 1 || cli.lastPrompt.Prompt[0].Text != "custom prompt" {
 		t.Fatalf("prompt = %#v", cli.lastPrompt.Prompt)
+	}
+	if cli.lastPrompt.Source != "signal.friend" || cli.lastPrompt.ResponseSource != "signal.bot" || cli.lastPrompt.ExternalEventID != "friend-1" {
+		t.Fatalf("prompt metadata = %#v", cli.lastPrompt)
 	}
 }
 

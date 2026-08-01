@@ -134,6 +134,47 @@ func TestApplyProfileToSessionNewPreservesExplicitZeroBudget(t *testing.T) {
 	}
 }
 
+func TestApplyProfileToSessionResumeMatchesNewRestrictions(t *testing.T) {
+	params := acp.SessionResumeParams{RunID: "run-1"}
+	err := ApplyProfileToSessionResume(&params, ProfileRuntime{
+		Name: "restored",
+		OK:   true,
+		Profile: config.GatewayProfile{
+			Provider:        "glm",
+			Model:           "glm-4.6",
+			Solver:          "react",
+			Tools:           []string{"news_fetch"},
+			Dangerous:       []string{},
+			SystemPrompt:    "restored prompt",
+			NetworkTier:     "research",
+			BudgetSteps:     0,
+			BudgetStepsSet:  true,
+			BudgetTokens:    1000000,
+			BudgetTokensSet: true,
+			BudgetCostUSD:   0,
+			BudgetCostSet:   true,
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("ApplyProfileToSessionResume returned error: %v", err)
+	}
+	if params.RunID != "run-1" {
+		t.Fatalf("run ID changed: %#v", params)
+	}
+	if params.Provider != "glm" || params.Model != "glm-4.6" || params.Solver != "react" {
+		t.Fatalf("runtime = %#v", params)
+	}
+	if strings.Join(params.Tools, ",") != "news_fetch" || params.Dangerous == nil || len(params.Dangerous) != 0 {
+		t.Fatalf("tool restrictions = %#v", params)
+	}
+	if params.SystemPrompt != "restored prompt" || params.NetworkTier != "research" {
+		t.Fatalf("prompt/network = %#v", params)
+	}
+	if params.BudgetSteps == nil || *params.BudgetSteps != 0 || params.BudgetTokens == nil || *params.BudgetTokens != 1000000 || params.BudgetCostUSD == nil || *params.BudgetCostUSD != 0 {
+		t.Fatalf("budgets = %#v", params)
+	}
+}
+
 func TestApplyProfileToSessionNewRejectsNegativeBudgets(t *testing.T) {
 	tests := []struct {
 		name    string

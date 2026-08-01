@@ -78,6 +78,7 @@ type Core struct {
 type Session struct {
 	ChatID     string
 	SessionID  string
+	RunID      string
 	InFlight   bool
 	Output     strings.Builder
 	Stream     strings.Builder
@@ -89,6 +90,7 @@ type Session struct {
 type SessionInfo struct {
 	ChatID     string
 	SessionID  string
+	RunID      string
 	InFlight   bool
 	LastStatus time.Time
 }
@@ -190,6 +192,15 @@ func CoalesceUpdates(updates []Update) []Update {
 		if strings.TrimSpace(update.MessageID) != "" {
 			existing.MessageID = update.MessageID
 		}
+		if strings.TrimSpace(update.Source) != "" {
+			existing.Source = update.Source
+		}
+		if strings.TrimSpace(update.ResponseSource) != "" {
+			existing.ResponseSource = update.ResponseSource
+		}
+		if strings.TrimSpace(update.ExternalEventID) != "" {
+			existing.ExternalEventID = update.ExternalEventID
+		}
 		existing.Images = append(existing.Images, update.Images...)
 		if update.Audio != nil {
 			existing.Audio = update.Audio
@@ -250,8 +261,11 @@ func (c *Core) Handle(ctx context.Context, t Transport, u Update) error {
 	prompt := c.buildPrompt(u)
 	var promptRes acp.SessionPromptResult
 	if err := c.cli.Call(ctx, acp.MethodSessionPrompt, acp.SessionPromptParams{
-		SessionID: state.SessionID,
-		Prompt:    prompt,
+		SessionID:       state.SessionID,
+		Prompt:          prompt,
+		Source:          u.Source,
+		ResponseSource:  u.ResponseSource,
+		ExternalEventID: u.ExternalEventID,
 	}, &promptRes); err != nil {
 		if t == nil {
 			return err
@@ -324,12 +338,101 @@ func (c *Core) GetOrCreateSession(ctx context.Context, chatID string) (*Session,
 	if strings.TrimSpace(res.SessionID) != "" {
 		sessionID = strings.TrimSpace(res.SessionID)
 	}
-	state := &Session{ChatID: chatID, SessionID: sessionID}
+	runID := strings.TrimSpace(res.RunID)
+	if runID == "" {
+		runID = sessionID
+	}
+	state := &Session{ChatID: chatID, SessionID: sessionID, RunID: runID}
 	c.sessionsMu.Lock()
 	c.sessionsByChat[chatID] = state
 	c.sessionsByAcpID[sessionID] = state
 	c.sessionsMu.Unlock()
 	return state, nil
+}
+
+// ResumeSession restores an ACP run and binds it to a chat after a gateway
+// restart. The PrepareResume hook can reapply per-chat profile restrictions.
+func (c *Core) ResumeSession(ctx context.Context, chatID, runID string) (*Session, error) {
+	if c == nil || c.cli == nil {
+		return nil, fmt.Errorf("gateway core is not configured")
+	}
+	chatID = strings.TrimSpace(chatID)
+	runID = strings.TrimSpace(runID)
+	if chatID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	if runID == "" {
+		return nil, fmt.Errorf("run id is required")
+	}
+	c.sessionsMu.RLock()
+	existing := c.sessionsByChat[chatID]
+	c.sessionsMu.RUnlock()
+	if existing != nil {
+		existing.mu.Lock()
+		existingRunID := existing.RunID
+		existing.mu.Unlock()
+		if existingRunID == runID {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("chat %s already has an ACP session", chatID)
+	}
+
+	params := acp.SessionResumeParams{
+		SessionID: c.cfg.SessionIDPrefix + chatID,
+		RunID:     runID,
+		RunDir:    c.cfg.RunDir,
+		CWD:       c.cfg.Workspace,
+	}
+	if c.cfg.PrepareResume != nil {
+		if err := c.cfg.PrepareResume(chatID, &params); err != nil {
+			return nil, err
+		}
+	}
+	var res acp.SessionResumeResult
+	if err := c.cli.Call(ctx, acp.MethodSessionResume, params, &res); err != nil {
+		return nil, fmt.Errorf("resume acp session: %w", err)
+	}
+	sessionID := strings.TrimSpace(res.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(params.SessionID)
+	}
+	resumedRunID := strings.TrimSpace(res.RunID)
+	if resumedRunID == "" {
+		resumedRunID = runID
+	}
+	state := &Session{ChatID: chatID, SessionID: sessionID, RunID: resumedRunID}
+	c.sessionsMu.Lock()
+	c.sessionsByChat[chatID] = state
+	c.sessionsByAcpID[sessionID] = state
+	c.sessionsMu.Unlock()
+	return state, nil
+}
+
+// AppendContext adds an externally sourced message to a chat's ACP history
+// without invoking the model.
+func (c *Core) AppendContext(ctx context.Context, chatID, role, source, externalEventID, content string) (acp.SessionAppendContextResult, error) {
+	if c == nil || c.cli == nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("gateway core is not configured")
+	}
+	state, err := c.GetOrCreateSession(ctx, chatID)
+	if err != nil {
+		return acp.SessionAppendContextResult{}, err
+	}
+	state.mu.Lock()
+	sessionID := state.SessionID
+	state.mu.Unlock()
+	params := acp.SessionAppendContextParams{
+		SessionID:       sessionID,
+		Role:            role,
+		Source:          source,
+		ExternalEventID: externalEventID,
+		Content:         content,
+	}
+	var res acp.SessionAppendContextResult
+	if err := c.cli.Call(ctx, acp.MethodSessionAppendContext, params, &res); err != nil {
+		return acp.SessionAppendContextResult{}, fmt.Errorf("append acp context: %w", err)
+	}
+	return res, nil
 }
 
 // SessionInfo returns a snapshot of the chat session when one exists.
@@ -349,6 +452,7 @@ func (c *Core) SessionInfo(chatID string) (SessionInfo, bool) {
 	return SessionInfo{
 		ChatID:     state.ChatID,
 		SessionID:  state.SessionID,
+		RunID:      state.RunID,
 		InFlight:   state.InFlight,
 		LastStatus: state.LastStatus,
 	}, true
