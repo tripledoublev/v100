@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,6 +13,42 @@ import (
 
 	"github.com/tripledoublev/v100/internal/acp"
 )
+
+// fatalPollError marks a transport poll error that cannot recover through
+// retrying the same transport instance. Keep the marker private so callers use
+// FatalPoll and IsFatalPoll instead of depending on its representation.
+type fatalPollError struct {
+	Err error
+}
+
+func (e fatalPollError) Error() string {
+	if e.Err == nil {
+		return "fatal gateway poll error"
+	}
+	return e.Err.Error()
+}
+
+func (e fatalPollError) Unwrap() error { return e.Err }
+func (e fatalPollError) fatalPoll()    {}
+
+type fatalPollMarker interface {
+	error
+	fatalPoll()
+}
+
+// FatalPoll wraps err so Core.Run returns it instead of backing off and retrying.
+func FatalPoll(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fatalPollError{Err: err}
+}
+
+// IsFatalPoll reports whether err asks Core.Run to stop polling and return.
+func IsFatalPoll(err error) bool {
+	var fatal fatalPollMarker
+	return errors.As(err, &fatal)
+}
 
 const (
 	defaultChunkChars     = 3900
@@ -98,6 +135,9 @@ func (c *Core) Run(ctx context.Context, t Transport) error {
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if IsFatalPoll(err) {
+				return err
 			}
 			log.Printf("%s gateway poll error: %v", t.Name(), err)
 			select {

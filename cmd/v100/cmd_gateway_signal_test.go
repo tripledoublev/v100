@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/tripledoublev/v100/internal/acp"
@@ -17,6 +22,7 @@ import (
 type fakeSignalRPC struct {
 	mu       sync.Mutex
 	receives []signalReceiveEnvelope
+	err      error
 	calls    []signalRPCCall
 }
 
@@ -81,6 +87,9 @@ func (f *fakeSignalACPClient) Call(_ context.Context, method string, params any,
 func (f *fakeSignalRPC) Receive(context.Context) ([]signalReceiveEnvelope, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := append([]signalReceiveEnvelope(nil), f.receives...)
 	f.receives = nil
 	return out, nil
@@ -94,6 +103,49 @@ func (f *fakeSignalRPC) Call(_ context.Context, method string, params any, _ any
 }
 
 func (f *fakeSignalRPC) Close() error { return nil }
+
+func TestSignalPollReturnsFatalErrorWhenRPCCloses(t *testing.T) {
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg:       signalRuntimeConfig{AllowedNumbers: map[string]struct{}{"+15145550000": {}}},
+		rpc:       &fakeSignalRPC{err: io.EOF},
+	}
+
+	_, err := gw.Poll(context.Background())
+	if err == nil {
+		t.Fatal("Poll returned nil error")
+	}
+	if !gatewaycore.IsFatalPoll(err) {
+		t.Fatalf("Poll error = %v, want fatal poll error", err)
+	}
+}
+
+func TestIsSignalRPCClosedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "EOF", err: io.EOF, want: true},
+		{name: "wrapped EOF", err: fmt.Errorf("receive: %w", io.EOF), want: true},
+		{name: "unexpected EOF", err: io.ErrUnexpectedEOF, want: true},
+		{name: "closed pipe", err: io.ErrClosedPipe, want: true},
+		{name: "closed connection", err: net.ErrClosed, want: true},
+		{name: "closed file", err: os.ErrClosed, want: true},
+		{name: "EPIPE", err: syscall.EPIPE, want: true},
+		{name: "wrapped EPIPE", err: fmt.Errorf("write: %w", syscall.EPIPE), want: true},
+		{name: "connection reset", err: syscall.ECONNRESET, want: true},
+		{name: "ordinary", err: errors.New("temporary receive failure"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSignalRPCClosedError(tt.err); got != tt.want {
+				t.Fatalf("isSignalRPCClosedError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestSignalPollConvertsAllowedReceiveToGatewayUpdate(t *testing.T) {
 	rpc := &fakeSignalRPC{receives: []signalReceiveEnvelope{{

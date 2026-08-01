@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,9 +96,11 @@ func (c *fakeACPClient) Call(ctx context.Context, method string, params any, out
 }
 
 type fakeTransport struct {
-	allowed map[string]bool
-	batches [][]Update
-	cancel  context.CancelFunc
+	allowed  map[string]bool
+	batches  [][]Update
+	pollErr  error
+	pollErrs []error
+	cancel   context.CancelFunc
 
 	mu        sync.Mutex
 	polls     int
@@ -113,6 +116,19 @@ func (t *fakeTransport) Poll(ctx context.Context) ([]Update, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.polls++
+	if len(t.pollErrs) > 0 {
+		err := t.pollErrs[0]
+		t.pollErrs = t.pollErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if t.pollErr != nil {
+		if t.cancel != nil {
+			t.cancel()
+		}
+		return nil, t.pollErr
+	}
 	if len(t.batches) == 0 {
 		if t.cancel != nil {
 			t.cancel()
@@ -182,6 +198,61 @@ func TestCoreCreatesAndReusesSessionPerChat(t *testing.T) {
 	}
 	if got := cli.newCount.Load(); got != 1 {
 		t.Fatalf("session/new count = %d, want 1", got)
+	}
+}
+
+func TestCoreRunReturnsFatalPollError(t *testing.T) {
+	ctx := context.Background()
+	cli := &fakeACPClient{}
+	core := NewCore(Config{PollRetryBase: time.Millisecond, PollRetryMax: time.Millisecond}, cli)
+	cause := errors.New("transport closed")
+	transport := &fakeTransport{pollErr: FatalPoll(cause)}
+
+	err := core.Run(ctx, transport)
+	if err == nil {
+		t.Fatal("Run returned nil error")
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("Run error = %v, want cause %v", err, cause)
+	}
+	transport.mu.Lock()
+	polls := transport.polls
+	transport.mu.Unlock()
+	if polls != 1 {
+		t.Fatalf("poll count = %d, want 1", polls)
+	}
+}
+
+func TestCoreRunRetriesOrdinaryPollError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cli := &fakeACPClient{}
+	core := NewCore(Config{PollRetryBase: time.Millisecond, PollRetryMax: time.Millisecond}, cli)
+	transport := &fakeTransport{
+		cancel:   cancel,
+		pollErrs: []error{errors.New("temporary receive failure")},
+		batches: [][]Update{{
+			{ChatID: "42", MessageID: "1", Text: "hello"},
+		}},
+	}
+
+	if err := core.Run(ctx, transport); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	transport.mu.Lock()
+	polls := transport.polls
+	transport.mu.Unlock()
+	if polls != 2 {
+		t.Fatalf("poll count = %d, want 2", polls)
+	}
+}
+
+func TestCoreRunCancellationWinsOverFatalPoll(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	core := NewCore(Config{}, &fakeACPClient{})
+	transport := &fakeTransport{cancel: cancel, pollErr: FatalPoll(errors.New("transport closed"))}
+
+	if err := core.Run(ctx, transport); err != nil {
+		t.Fatalf("Run returned error after cancellation: %v", err)
 	}
 }
 

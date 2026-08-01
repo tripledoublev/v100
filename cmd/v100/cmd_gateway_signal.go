@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -416,6 +418,9 @@ func (g *signalGateway) gatewayCore() *gatewaycore.Core {
 func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) {
 	envelopes, err := g.rpc.Receive(ctx)
 	if err != nil {
+		if isSignalRPCClosedError(err) {
+			return nil, gatewaycore.FatalPoll(err)
+		}
 		return nil, err
 	}
 	updates := make([]gatewaycore.Update, 0, len(envelopes))
@@ -459,6 +464,19 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 		})
 	}
 	return updates, nil
+}
+
+func isSignalRPCClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET)
 }
 
 func (g *signalGateway) recordSignalSentSync(env signalEnvelope) bool {
