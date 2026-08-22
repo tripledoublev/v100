@@ -74,7 +74,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.radioErr = msg.err
 			m.StatusMode = i18n.StatusError
 			m.statusMode = m.StatusMode.String()
-			m.statusLine = "download failed"
+			m.statusLine = "download failed: " + msg.err
 		} else {
 			m.radioErr = ""
 			m.StatusMode = i18n.StatusIdle
