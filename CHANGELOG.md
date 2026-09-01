@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.15 — 2026-09-01
+
+**MiniMax Vision Correction + GLM Default Model Bump**
+
+### Fixes
+
+- Corrected v0.3.14's MiniMax vision fix, which overcorrected to `Images: false` for every MiniMax model. MiniMax-M3 does support vision — only the M2.x coding-plan family (M2.5/M2.7) is text-only. `Capabilities()` now gates on the configured model, mirroring the existing GLM vision-model detection.
+- Also found: the Signal gateway's per-profile config doesn't inherit provider definitions from the main `config.toml` — each gateway config is loaded standalone and only merges against built-in defaults. Deploy-side, not a code fix, but worth knowing if a `vision_fallback_provider` (or any named provider profile) silently resolves to the wrong model.
+
+### Chores
+
+- Bumped the built-in GLM default model from `GLM-5.1` to `GLM-5.3`.
+
 ## v0.3.14 — 2026-09-01
 
 **MiniMax Vision Capability Fix**
