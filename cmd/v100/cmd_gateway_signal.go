@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -968,7 +969,7 @@ func (g *signalGateway) buildSignalPrompt(_ string, update gatewaycore.Update) [
 	manual := g.peekManualContext(update.ChatID)
 	g.rememberSignalPromptManualMax(update.ChatID, manual)
 	if len(manual) == 0 {
-		return []acp.ContentBlock{{Type: "text", Text: text}}
+		return signalPromptWithImages(text, update.Images)
 	}
 	var b strings.Builder
 	b.WriteString("Context: the account owner manually sent these Signal messages in this chat since your last turn. Treat them as already-sent human messages from this same account. Do not reply to these context messages directly.\n")
@@ -983,7 +984,30 @@ func (g *signalGateway) buildSignalPrompt(_ string, update gatewaycore.Update) [
 		b.WriteString("\nLatest incoming message:\n")
 		b.WriteString(text)
 	}
-	return []acp.ContentBlock{{Type: "text", Text: strings.TrimSpace(b.String())}}
+	return signalPromptWithImages(strings.TrimSpace(b.String()), update.Images)
+}
+
+// signalPromptWithImages builds the ACP content blocks for a Signal turn,
+// attaching any image attachments alongside the text block. Mirrors the
+// generic gateway.updatePrompt image handling so Signal doesn't silently
+// drop images the way buildSignalPrompt used to.
+func signalPromptWithImages(text string, images []gatewaycore.ImageAttachment) []acp.ContentBlock {
+	blocks := []acp.ContentBlock{{Type: "text", Text: text}}
+	for _, img := range images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mimeType := strings.TrimSpace(img.MIMEType)
+		if mimeType == "" {
+			mimeType = "image/jpeg"
+		}
+		blocks = append(blocks, acp.ContentBlock{
+			Type:     "image",
+			Data:     base64.StdEncoding.EncodeToString(img.Data),
+			MimeType: mimeType,
+		})
+	}
+	return blocks
 }
 
 func (g *signalGateway) rememberSignalPromptManualMax(chatID string, manual []signalManualContext) {
