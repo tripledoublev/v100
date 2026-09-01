@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.11 — 2026-09-01
+
+**Signal Image Fix**
+
+### Fixes
+
+- Fixed Signal's custom prompt builder silently dropping image attachments before they reached the model — v0.3.10 wired image parsing into the transport layer, but Signal's `buildSignalPrompt` (used for manual owner-context injection) only ever emitted a text content block, so images never left the gateway process. The model was responding from text-only history and hallucinating plausible image descriptions instead of actually seeing attachments.
+
 ## v0.3.10 — 2026-08-31
 
 **Signal Image Attachments and Vision Fallback**
