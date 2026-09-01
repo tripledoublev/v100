@@ -251,6 +251,20 @@ func (l *Loop) Step(ctx context.Context, userInput string) error {
 	return l.StepWithImages(ctx, userInput, nil)
 }
 
+// historyHasImages reports whether any prior message in the conversation
+// still carries image attachments. A provider lacking vision support must
+// keep routing through the vision fallback for as long as those images stay
+// in history — otherwise a later text-only turn replays the old image bytes
+// straight into a provider that rejects non-text content blocks.
+func (l *Loop) historyHasImages() bool {
+	for _, m := range l.Messages {
+		if len(m.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // StepWithImages processes a single user input and optional image attachments.
 func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []providers.ImageAttachment) error {
 	return l.StepWithImagesMetadata(ctx, userInput, images, ConversationTurnMetadata{})
@@ -259,7 +273,7 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 // StepWithImagesMetadata processes a user turn while preserving its external
 // source and correlation ID in user and model-response trace events.
 func (l *Loop) StepWithImagesMetadata(ctx context.Context, userInput string, images []providers.ImageAttachment, metadata ConversationTurnMetadata) error {
-	if len(images) > 0 && !l.Provider.Capabilities().Images {
+	if (len(images) > 0 || l.historyHasImages()) && !l.Provider.Capabilities().Images {
 		if l.VisionProvider == nil {
 			return fmt.Errorf("provider %q does not support image attachments", l.Provider.Name())
 		}
