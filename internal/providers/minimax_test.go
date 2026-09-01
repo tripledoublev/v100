@@ -111,6 +111,28 @@ func TestMiniMaxCapabilities(t *testing.T) {
 	}
 }
 
+func TestIsMiniMaxVisionModel(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"MiniMax-M3", true},
+		{"minimax-m3", true},
+		{"  MiniMax-M3  ", true},
+		{"MiniMax-M3-vision", true},
+		{"MiniMax-M30", false},
+		{"MiniMax-M2.7", false},
+		{"MiniMax-M2.7-highspeed", false},
+		{"MiniMax-M2.5", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isMiniMaxVisionModel(tc.model); got != tc.want {
+			t.Errorf("isMiniMaxVisionModel(%q) = %v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestMiniMaxMetadata(t *testing.T) {
 	dir := t.TempDir()
 	tokenPath := filepath.Join(dir, "minimax_auth.json")
