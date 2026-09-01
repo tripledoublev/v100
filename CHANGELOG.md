@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.12 — 2026-09-01
+
+**Signal Attachment Path Fix**
+
+### Fixes
+
+- Fixed `signalImageAttachments` reading attachments by bare ID; signal-cli stores downloaded attachments as `<id>.<ext>` (e.g. `.jpg`), so every read failed silently and images never reached the v0.3.11 prompt fix at all. Now falls back to a glob for `<id>.*` when the bare-id read fails.
+
 ## v0.3.11 — 2026-09-01
 
 **Signal Image Fix**
