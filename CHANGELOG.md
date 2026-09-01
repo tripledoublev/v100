@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.14 — 2026-09-01
+
+**MiniMax Vision Capability Fix**
+
+### Fixes
+
+- Fixed `MiniMaxProvider.Capabilities()` unconditionally reporting `Images: true`. MiniMax's coding-plan models (`MiniMax-M2.7`/`M2.5` family) don't actually accept image input, so a `vision_fallback_provider = "minimax"` config silently routed real image bytes to a model that can't see them — the model hallucinated a description instead of erroring. Now reports `Images: false`, so a misconfigured vision fallback fails loudly instead of silently degrading.
+
 ## v0.3.13 — 2026-09-01
 
 **Vision Fallback Routing Fix**
