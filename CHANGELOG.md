@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.13 — 2026-09-01
+
+**Vision Fallback Routing Fix**
+
+### Fixes
+
+- Fixed `Loop.StepWithImagesMetadata` only checking the *current turn's* images to decide whether to route through the configured vision fallback provider. Once an image entered conversation history, it stayed on the message (`Message.Images`) indefinitely — so a later text-only turn replayed the old image straight to the main (non-vision) provider, which rejected it with `messages.content.type is invalid, allowed values: ['text']`. Now the loop also checks history for lingering images and keeps routing through the vision fallback for as long as they're present.
+
 ## v0.3.12 — 2026-09-01
 
 **Signal Attachment Path Fix**
