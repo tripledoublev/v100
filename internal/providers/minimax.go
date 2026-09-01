@@ -54,13 +54,17 @@ func NewMiniMaxProvider(tokenPath, defaultModel string) (*MiniMaxProvider, error
 func (p *MiniMaxProvider) Name() string { return "minimax" }
 
 func (p *MiniMaxProvider) Capabilities() Capabilities {
-	// None of MiniMax's published coding-plan models (M2.x) accept image
-	// input — see Models() below. Claiming Images:true here let
-	// vision_fallback_provider = "minimax" silently accept image turns the
-	// model can't actually see, so it hallucinated a description instead of
-	// erroring. Report the real capability until MiniMax ships a vision
-	// model this provider can detect and route to.
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: false}
+	// MiniMax's M2.x coding-plan models (M2.5/M2.7) are text/agentic only.
+	// Claiming Images:true unconditionally let vision_fallback_provider =
+	// "minimax" silently accept image turns on an M2.x model that can't
+	// actually see them, so it hallucinated a description instead of
+	// erroring. M3 does support vision, so gate on the configured model.
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: isMiniMaxVisionModel(p.defaultModel)}
+}
+
+func isMiniMaxVisionModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return m == "minimax-m3" || strings.HasPrefix(m, "minimax-m3-")
 }
 
 // accessToken returns a valid access token, refreshing if expired.
@@ -309,7 +313,7 @@ func (p *MiniMaxProvider) Metadata(ctx context.Context, model string) (ModelMeta
 
 func (p *MiniMaxProvider) Models() []ModelInfo {
 	return []ModelInfo{
-		{Name: "MiniMax-M3", Description: "latest — MiniMax M3"},
+		{Name: "MiniMax-M3", Description: "latest — MiniMax M3, vision-capable"},
 		{Name: "MiniMax-M2.7", Description: "powerful — self-evolving, agent/coding"},
 		{Name: "MiniMax-M2.7-highspeed", Description: "fast — high speed variant"},
 		{Name: "MiniMax-M2.5", Description: "standard — SOTA coding + agents"},
