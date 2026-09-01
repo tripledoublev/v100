@@ -98,6 +98,9 @@ func TestMiniMaxCapabilities(t *testing.T) {
 	if !caps.Streaming {
 		t.Error("expected Streaming=true")
 	}
+	if caps.Images {
+		t.Error("expected Images=false: MiniMax's coding-plan models don't accept image input")
+	}
 }
 
 func TestMiniMaxMetadata(t *testing.T) {
