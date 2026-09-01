@@ -17,13 +17,20 @@ import (
 
 // mockProvider is a test double for providers.Provider.
 type mockProvider struct {
-	responses []providers.CompleteResponse
-	calls     int
+	responses     []providers.CompleteResponse
+	calls         int
+	name          string
+	imagesCapable bool
 }
 
-func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	return "mock"
+}
 func (m *mockProvider) Capabilities() providers.Capabilities {
-	return providers.Capabilities{ToolCalls: true}
+	return providers.Capabilities{ToolCalls: true, Images: m.imagesCapable}
 }
 func (m *mockProvider) Complete(_ context.Context, _ providers.CompleteRequest) (providers.CompleteResponse, error) {
 	if m.calls >= len(m.responses) {
@@ -637,6 +644,53 @@ func TestLoopStepWithImagesRejectsUnsupportedProvider(t *testing.T) {
 	}
 	if prov.calls != 0 {
 		t.Fatalf("provider should not have been called, got %d calls", prov.calls)
+	}
+}
+
+// TestLoopStepRoutesLaterTextTurnThroughVisionFallback covers the regression
+// from #277: once an image has entered history, a later text-only turn must
+// keep routing through the vision fallback, since the old image bytes are
+// still replayed to the provider from history.
+func TestLoopStepRoutesLaterTextTurnThroughVisionFallback(t *testing.T) {
+	mainProv := &mockProvider{
+		name: "no-vision",
+		responses: []providers.CompleteResponse{
+			{AssistantText: "should not be called"},
+		},
+	}
+	visionProv := &mockProvider{
+		name:          "vision",
+		imagesCapable: true,
+		responses: []providers.CompleteResponse{
+			{AssistantText: "I see the image"},
+			{AssistantText: "still routing through vision"},
+		},
+	}
+	loop, trace := newTestLoop(t, mainProv, []string{"fs_read"})
+	defer func() { _ = trace.Close() }()
+	loop.VisionProvider = visionProv
+
+	if err := loop.StepWithImages(context.Background(), "look at this", []providers.ImageAttachment{{
+		MIMEType: "image/png",
+		Data:     []byte("fake-image"),
+	}}); err != nil {
+		t.Fatalf("image turn failed: %v", err)
+	}
+	if visionProv.calls != 1 {
+		t.Fatalf("expected vision provider to be called once, got %d", visionProv.calls)
+	}
+	if mainProv.calls != 0 {
+		t.Fatalf("expected main provider not to be called, got %d", mainProv.calls)
+	}
+
+	if err := loop.Step(context.Background(), "and now a follow-up with no new image"); err != nil {
+		t.Fatalf("follow-up turn failed: %v", err)
+	}
+	if visionProv.calls != 2 {
+		t.Fatalf("expected follow-up turn to still route through vision provider, got %d calls", visionProv.calls)
+	}
+	if mainProv.calls != 0 {
+		t.Fatalf("expected main provider still not to be called (old image still in history), got %d calls", mainProv.calls)
 	}
 }
 
