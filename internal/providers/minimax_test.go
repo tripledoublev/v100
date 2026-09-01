@@ -98,8 +98,16 @@ func TestMiniMaxCapabilities(t *testing.T) {
 	if !caps.Streaming {
 		t.Error("expected Streaming=true")
 	}
-	if caps.Images {
-		t.Error("expected Images=false: MiniMax's coding-plan models don't accept image input")
+	if !caps.Images {
+		t.Error("expected Images=true for the default model (MiniMax-M3, which is vision-capable)")
+	}
+
+	m27, err := NewMiniMaxProvider(tokenPath, "MiniMax-M2.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m27.Capabilities().Images {
+		t.Error("expected Images=false for MiniMax-M2.7: coding-plan models don't accept image input")
 	}
 }
 
