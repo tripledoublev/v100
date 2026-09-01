@@ -257,31 +257,32 @@ type AgentConfig struct {
 
 // DefaultsConfig holds run-level defaults.
 type DefaultsConfig struct {
-	Provider              string   `toml:"provider"`
-	SmartProvider         string   `toml:"smart_provider"` // for router solver
-	SubProvider           string   `toml:"sub_provider"`   // for rlm solver
-	CheapProvider         string   `toml:"cheap_provider"` // for router solver
-	Solver                string   `toml:"solver"`         // react | plan_execute | router | dual_channel
-	MaxReplans            int      `toml:"max_replans"`
-	ConfirmTools          string   `toml:"confirm_tools"` // always | dangerous | never
-	BudgetSteps           int      `toml:"budget_steps"`
-	BudgetTokens          int      `toml:"budget_tokens"`
-	BudgetCostUSD         float64  `toml:"budget_cost_usd"`
-	ToolTimeoutMS         int      `toml:"tool_timeout_ms"`
-	MaxToolCallsPerStep   int      `toml:"max_tool_calls_per_step"`
-	MemoryMode            string   `toml:"memory_mode"`
-	MemoryMaxTokens       int      `toml:"memory_max_tokens"`
-	ContextLimit          int      `toml:"context_limit"`
-	Temperature           *float64 `toml:"temperature"`
-	TopP                  *float64 `toml:"top_p"`
-	TopK                  *int     `toml:"top_k"`
-	MaxTokens             int      `toml:"max_tokens"`
-	Seed                  *int     `toml:"seed"`
-	MaxToolResultChars    int      `toml:"max_tool_result_chars"`
-	CompressProtectRecent int      `toml:"compress_protect_recent"`
-	CompressProvider      string   `toml:"compress_provider"`
-	MirrorToolResults     bool     `toml:"mirror_tool_results"`
-	StaleToolElideSteps   int      `toml:"stale_tool_elide_steps"`
+	Provider               string   `toml:"provider"`
+	SmartProvider          string   `toml:"smart_provider"` // for router solver
+	SubProvider            string   `toml:"sub_provider"`   // for rlm solver
+	CheapProvider          string   `toml:"cheap_provider"` // for router solver
+	Solver                 string   `toml:"solver"`         // react | plan_execute | router | dual_channel
+	MaxReplans             int      `toml:"max_replans"`
+	ConfirmTools           string   `toml:"confirm_tools"` // always | dangerous | never
+	BudgetSteps            int      `toml:"budget_steps"`
+	BudgetTokens           int      `toml:"budget_tokens"`
+	BudgetCostUSD          float64  `toml:"budget_cost_usd"`
+	ToolTimeoutMS          int      `toml:"tool_timeout_ms"`
+	MaxToolCallsPerStep    int      `toml:"max_tool_calls_per_step"`
+	MemoryMode             string   `toml:"memory_mode"`
+	MemoryMaxTokens        int      `toml:"memory_max_tokens"`
+	ContextLimit           int      `toml:"context_limit"`
+	Temperature            *float64 `toml:"temperature"`
+	TopP                   *float64 `toml:"top_p"`
+	TopK                   *int     `toml:"top_k"`
+	MaxTokens              int      `toml:"max_tokens"`
+	Seed                   *int     `toml:"seed"`
+	MaxToolResultChars     int      `toml:"max_tool_result_chars"`
+	CompressProtectRecent  int      `toml:"compress_protect_recent"`
+	CompressProvider       string   `toml:"compress_provider"`
+	VisionFallbackProvider string   `toml:"vision_fallback_provider"`
+	MirrorToolResults      bool     `toml:"mirror_tool_results"`
+	StaleToolElideSteps    int      `toml:"stale_tool_elide_steps"`
 }
 
 // DefaultConfig returns a built-in baseline configuration.
@@ -569,6 +570,7 @@ context_limit = 80000        # estimated token threshold; compress history when 
 max_tool_result_chars = 20000 # hard truncation for tool results (0 = disabled)
 compress_protect_recent = 6   # recent messages protected from targeted compression
 compress_provider = "glm"     # provider for compression calls (empty = main provider for cloud runs)
+vision_fallback_provider = "" # provider to use for a turn with images when the active model lacks vision (empty = error instead)
 mirror_tool_results = false   # when true, predict tool outputs and log hallucination coefficients
 
 [ui]
@@ -1032,5 +1034,8 @@ func applyDefaultsConfig(dst *DefaultsConfig, defaults DefaultsConfig) {
 	}
 	if dst.CompressProvider == "" {
 		dst.CompressProvider = defaults.CompressProvider
+	}
+	if dst.VisionFallbackProvider == "" {
+		dst.VisionFallbackProvider = defaults.VisionFallbackProvider
 	}
 }

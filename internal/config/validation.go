@@ -297,6 +297,7 @@ func validateEffectiveConfig(result *ValidationResult, cfg *Config) {
 	checkProviderReference(result, cfg, "defaults.sub_provider", cfg.Defaults.SubProvider, false)
 	checkProviderReference(result, cfg, "defaults.cheap_provider", cfg.Defaults.CheapProvider, false)
 	checkProviderReference(result, cfg, "defaults.compress_provider", cfg.Defaults.CompressProvider, false)
+	checkProviderReference(result, cfg, "defaults.vision_fallback_provider", cfg.Defaults.VisionFallbackProvider, false)
 	checkProviderReference(result, cfg, "wake.provider", cfg.Wake.Provider, false)
 	checkProviderReference(result, cfg, "embedding.provider", cfg.Embedding.Provider, false)
 

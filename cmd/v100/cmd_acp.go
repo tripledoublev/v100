@@ -312,7 +312,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 		if cfg != nil {
 			s.applyProviderOverride(cfg)
 			if prov, err := buildProvider(cfg, cfg.Defaults.Provider); err == nil {
-				res.AgentCapabilities.PromptCapabilities.Image = prov.Capabilities().Images
+				res.AgentCapabilities.PromptCapabilities.Image = prov.Capabilities().Images || buildVisionProvider(cfg) != nil
 			}
 		}
 		s.mu.Lock()
@@ -416,6 +416,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			Model:            comp.Model,
 			EmbedProvider:    comp.EmbedProvider,
 			CompressProvider: buildCompressProvider(cfg),
+			VisionProvider:   buildVisionProvider(cfg),
 			Tools:            comp.Registry,
 			Policy:           comp.Policy,
 			Trace:            comp.Trace,
@@ -821,6 +822,7 @@ func (s *acpServer) reconfigureSession(params acp.SessionReconfigureParams) (acp
 	session.loop.Model = model
 	session.loop.Solver = solver
 	session.loop.CompressProvider = buildCompressProvider(cfg)
+	session.loop.VisionProvider = buildVisionProvider(cfg)
 	session.loop.ModelMetadata = providers.ModelMetadata{}
 
 	return acp.SessionReconfigureResult{
@@ -1251,6 +1253,7 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 		Provider:         prov,
 		Model:            model,
 		CompressProvider: buildCompressProvider(cfg),
+		VisionProvider:   buildVisionProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,
 		Trace:            trace,

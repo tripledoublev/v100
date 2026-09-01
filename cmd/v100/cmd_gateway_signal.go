@@ -575,8 +575,15 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			rawMsg = strings.TrimSpace(env.Envelope.DataMessage.Message)
 			msg = g.signalDataMessageText(env.Envelope.DataMessage)
 		}
-		if rawMsg == "" && msg == "" {
+		var images []gatewaycore.ImageAttachment
+		if env.Envelope.DataMessage != nil {
+			images = signalImageAttachments(env.Envelope.DataMessage)
+		}
+		if rawMsg == "" && msg == "" && len(images) == 0 {
 			continue
+		}
+		if msg == "" && len(images) > 0 {
+			msg = "User sent an image."
 		}
 		if command, ok := gatewaycore.ParseCommand(rawMsg); ok {
 			if err := g.handleSignalCommand(ctx, number, command); err != nil {
@@ -603,12 +610,59 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 			ChatID:          number,
 			MessageID:       msgID,
 			Text:            msg,
+			Images:          images,
 			Source:          signalSource(g.state != nil, "signal.friend"),
 			ResponseSource:  signalSource(g.state != nil, "signal.bot"),
 			ExternalEventID: signalExternalEventID(g.state != nil, "friend", msgID),
 		})
 	}
 	return updates, nil
+}
+
+// signalAttachmentsDir returns the directory signal-cli stores received
+// attachment files in, keyed by attachment ID.
+func signalAttachmentsDir() string {
+	if base := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); base != "" {
+		return filepath.Join(base, "signal-cli", "attachments")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "signal-cli", "attachments")
+}
+
+// signalImageAttachments reads any image attachments on a data message off
+// disk and converts them to gateway.ImageAttachment. Non-image attachments
+// (voice notes, files, etc.) are skipped; a missing or unreadable file is
+// logged and skipped rather than failing the whole message.
+func signalImageAttachments(msg *signalDataMessage) []gatewaycore.ImageAttachment {
+	if msg == nil || len(msg.Attachments) == 0 {
+		return nil
+	}
+	dir := signalAttachmentsDir()
+	var out []gatewaycore.ImageAttachment
+	for _, att := range msg.Attachments {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(att.ContentType)), "image/") {
+			continue
+		}
+		id := strings.TrimSpace(att.ID)
+		if id == "" || dir == "" {
+			continue
+		}
+		path := filepath.Join(dir, id)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("signal attachment read error id=%s: %v", id, err)
+			continue
+		}
+		out = append(out, gatewaycore.ImageAttachment{
+			MIMEType: att.ContentType,
+			Data:     data,
+			Path:     path,
+		})
+	}
+	return out
 }
 
 func isSignalRPCClosedError(err error) bool {
@@ -1399,8 +1453,16 @@ type signalEnvelope struct {
 }
 
 type signalDataMessage struct {
-	Message string       `json:"message"`
-	Quote   *signalQuote `json:"quote"`
+	Message     string             `json:"message"`
+	Quote       *signalQuote       `json:"quote"`
+	Attachments []signalAttachment `json:"attachments"`
+}
+
+type signalAttachment struct {
+	ID          string `json:"id"`
+	ContentType string `json:"contentType"`
+	Filename    string `json:"filename"`
+	Size        int64  `json:"size"`
 }
 
 type signalSyncMessage struct {

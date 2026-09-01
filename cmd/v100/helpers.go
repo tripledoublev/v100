@@ -1292,6 +1292,31 @@ func buildCompressProvider(cfg *config.Config) providers.Provider {
 	return cp
 }
 
+// buildVisionProvider resolves the configured vision fallback provider, gated
+// on it actually existing and actually supporting image attachments. A
+// misconfigured or non-vision fallback is dropped (nil) rather than wired in,
+// so a bad config falls back to the pre-existing hard error instead of
+// silently sending images to a model that can't see them.
+func buildVisionProvider(cfg *config.Config) providers.Provider {
+	name := strings.TrimSpace(cfg.Defaults.VisionFallbackProvider)
+	if name == "" {
+		return nil
+	}
+	if name == cfg.Defaults.Provider {
+		return nil // same as main provider; if it lacked vision, this would too
+	}
+	vp, err := buildProvider(cfg, name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "→ vision_fallback_provider %q unavailable: %v\n", name, err)
+		return nil
+	}
+	if !vp.Capabilities().Images {
+		fmt.Fprintf(os.Stderr, "→ vision_fallback_provider %q (model %q) does not support image attachments; ignoring\n", name, vp.Name())
+		return nil
+	}
+	return vp
+}
+
 func buildGenParams(cfg *config.Config, temperature, topP float64, topK, maxTokens, seed int, cmd *cobra.Command) providers.GenParams {
 	gp := providers.GenParams{}
 	// Apply config defaults first
