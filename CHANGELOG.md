@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.10 — 2026-08-31
+
+**Signal Image Attachments and Vision Fallback**
+
+### Features
+
+- Signal gateway now reads incoming image attachments from signal-cli's on-disk attachment store and forwards them to the model, matching existing Telegram behavior; previously incoming images were silently dropped.
+- Added an opt-in `defaults.vision_fallback_provider` config: a turn with images now falls back to a configured vision-capable provider instead of hard-erroring when the active model lacks vision support. The fallback is gated at wiring time — it's dropped unless the configured provider both resolves and reports vision capability — so a bad config degrades to the prior error instead of silently misrouting images.
+
 ## v0.3.9 — 2026-08-01
 
 **Signal Shared-Account Context and Styling**
