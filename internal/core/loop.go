@@ -35,6 +35,7 @@ type Loop struct {
 	Model            string             // current model override; if empty, provider uses its default
 	CompressProvider providers.Provider // cheap model for summarization; nil = use l.Provider
 	EmbedProvider    providers.Provider // dedicated embedding provider; nil = use l.Provider
+	VisionProvider   providers.Provider // used for a turn with images when l.Provider lacks vision; nil = error instead
 	Tools            *tools.Registry
 	Policy           *policy.Policy
 	Trace            *TraceWriter
@@ -259,7 +260,23 @@ func (l *Loop) StepWithImages(ctx context.Context, userInput string, images []pr
 // source and correlation ID in user and model-response trace events.
 func (l *Loop) StepWithImagesMetadata(ctx context.Context, userInput string, images []providers.ImageAttachment, metadata ConversationTurnMetadata) error {
 	if len(images) > 0 && !l.Provider.Capabilities().Images {
-		return fmt.Errorf("provider %q does not support image attachments", l.Provider.Name())
+		if l.VisionProvider == nil {
+			return fmt.Errorf("provider %q does not support image attachments", l.Provider.Name())
+		}
+		if !l.VisionProvider.Capabilities().Images {
+			return fmt.Errorf("provider %q does not support image attachments and configured vision fallback %q does not either", l.Provider.Name(), l.VisionProvider.Name())
+		}
+		original := l.Provider
+		originalModel := l.Model
+		originalMeta := l.ModelMetadata
+		l.Provider = l.VisionProvider
+		l.Model = ""
+		l.ModelMetadata = providers.ModelMetadata{}
+		defer func() {
+			l.Provider = original
+			l.Model = originalModel
+			l.ModelMetadata = originalMeta
+		}()
 	}
 	// Auto-discover metadata on first step if not set
 	if l.ModelMetadata.Model == "" {

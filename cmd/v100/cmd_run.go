@@ -343,6 +343,7 @@ func runWithCLI(cfg *config.Config, run *core.Run, prov providers.Provider, embe
 		Model:            model,
 		EmbedProvider:    embedProv,
 		CompressProvider: buildCompressProvider(cfg),
+		VisionProvider:   buildVisionProvider(cfg),
 		Tools:            reg,
 		Policy:           pol,
 		Trace:            trace,

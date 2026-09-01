@@ -21,6 +21,7 @@ type sessionSelection struct {
 	Provider         providers.Provider
 	Solver           core.Solver
 	CompressProvider providers.Provider
+	VisionProvider   providers.Provider
 }
 
 func parseInteractiveModeCommand(input string) (mode string, rest string, ok bool) {
@@ -66,6 +67,7 @@ func buildSessionSelection(cfg *config.Config, mode string) (sessionSelection, e
 			Provider:         prov,
 			Solver:           solver,
 			CompressProvider: buildCompressProvider(cfg),
+			VisionProvider:   buildVisionProvider(cfg),
 		}, nil
 	case "/local":
 		localName := resolveLocalProviderName(cfg)
@@ -98,6 +100,7 @@ func buildSingleProviderSelection(cfg *config.Config, providerName, label string
 		Provider:         prov,
 		Solver:           &core.ReactSolver{},
 		CompressProvider: buildCompressProvider(cfg),
+		VisionProvider:   buildVisionProvider(cfg),
 	}, nil
 }
 
@@ -137,6 +140,7 @@ func applyInteractiveMode(ctx context.Context, cfg *config.Config, loop *core.Lo
 	loop.Model = selection.Model
 	loop.Solver = selection.Solver
 	loop.CompressProvider = selection.CompressProvider
+	loop.VisionProvider = selection.VisionProvider
 	if meta, err := selection.Provider.Metadata(ctx, selection.Model); err == nil {
 		loop.ModelMetadata = meta
 	}
