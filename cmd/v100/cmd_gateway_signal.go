@@ -654,6 +654,14 @@ func signalImageAttachments(msg *signalDataMessage) []gatewaycore.ImageAttachmen
 		path := filepath.Join(dir, id)
 		data, err := os.ReadFile(path)
 		if err != nil {
+			// signal-cli stores attachments with a content-type extension
+			// appended (e.g. "<id>.jpg"), not the bare ID; fall back to a glob.
+			if matches, globErr := filepath.Glob(filepath.Join(dir, id+".*")); globErr == nil && len(matches) > 0 {
+				path = matches[0]
+				data, err = os.ReadFile(path)
+			}
+		}
+		if err != nil {
 			log.Printf("signal attachment read error id=%s: %v", id, err)
 			continue
 		}
