@@ -54,7 +54,13 @@ func NewMiniMaxProvider(tokenPath, defaultModel string) (*MiniMaxProvider, error
 func (p *MiniMaxProvider) Name() string { return "minimax" }
 
 func (p *MiniMaxProvider) Capabilities() Capabilities {
-	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: true}
+	// None of MiniMax's published coding-plan models (M2.x) accept image
+	// input — see Models() below. Claiming Images:true here let
+	// vision_fallback_provider = "minimax" silently accept image turns the
+	// model can't actually see, so it hallucinated a description instead of
+	// erroring. Report the real capability until MiniMax ships a vision
+	// model this provider can detect and route to.
+	return Capabilities{ToolCalls: true, JSONMode: false, Streaming: true, Images: false}
 }
 
 // accessToken returns a valid access token, refreshing if expired.
