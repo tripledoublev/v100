@@ -966,3 +966,81 @@ func TestSanitizeLiveMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyHistoryWindow(t *testing.T) {
+	tests := []struct {
+		name              string
+		messageCount      int
+		maxWindow         int
+		wantRemaining     int
+		wantDropped       int
+	}{
+		{
+			name:          "unlimited window (0)",
+			messageCount:  100,
+			maxWindow:     0,
+			wantRemaining: 100,
+			wantDropped:   0,
+		},
+		{
+			name:          "window larger than history",
+			messageCount:  50,
+			maxWindow:     100,
+			wantRemaining: 50,
+			wantDropped:   0,
+		},
+		{
+			name:          "window equals history",
+			messageCount:  50,
+			maxWindow:     50,
+			wantRemaining: 50,
+			wantDropped:   0,
+		},
+		{
+			name:          "window smaller than history",
+			messageCount:  100,
+			maxWindow:     20,
+			wantRemaining: 20,
+			wantDropped:   80,
+		},
+		{
+			name:          "empty history",
+			messageCount:  0,
+			maxWindow:     10,
+			wantRemaining: 0,
+			wantDropped:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := &core.Loop{
+				Messages: makeTestMessages(tt.messageCount),
+			}
+
+			dropped := l.ApplyHistoryWindow(tt.maxWindow)
+
+			if dropped != tt.wantDropped {
+				t.Errorf("dropped: got %d, want %d", dropped, tt.wantDropped)
+			}
+			if len(l.Messages) != tt.wantRemaining {
+				t.Errorf("remaining: got %d, want %d", len(l.Messages), tt.wantRemaining)
+			}
+		})
+	}
+}
+
+func makeTestMessages(count int) []providers.Message {
+	msgs := make([]providers.Message, count)
+	for i := 0; i < count; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs[i] = providers.Message{
+			Role:    role,
+			Content: "message " + string(rune(i)),
+		}
+	}
+	return msgs
+}

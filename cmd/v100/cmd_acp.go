@@ -217,18 +217,19 @@ func cloneACPConfig(cfg *config.Config) *config.Config {
 }
 
 type acpSession struct {
-	comp         *RunComponents
-	loop         *core.Loop
-	cancel       context.CancelFunc
-	activeCtx    context.Context
-	promptActive bool
-	mu           sync.Mutex
-	closing      bool
-	closeReason  string
-	runStarted   bool
-	prompts      []acp.SuggestedPrompt
-	cleanupDone  chan struct{}
-	cleanupOnce  sync.Once
+	comp                 *RunComponents
+	loop                 *core.Loop
+	cancel               context.CancelFunc
+	activeCtx            context.Context
+	promptActive         bool
+	mu                   sync.Mutex
+	closing              bool
+	closeReason          string
+	runStarted           bool
+	prompts              []acp.SuggestedPrompt
+	cleanupDone          chan struct{}
+	cleanupOnce          sync.Once
+	maxHistoryMessages   int // 0 = unlimited
 }
 
 func (s *acpServer) serve() error {
@@ -447,9 +448,10 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			s.sessions = make(map[string]*acpSession)
 		}
 		s.sessions[sessionID] = &acpSession{
-			comp:    comp,
-			loop:    loop,
-			prompts: copySuggestedPrompts(s.suggestedPrompts),
+			comp:                 comp,
+			loop:                 loop,
+			prompts:              copySuggestedPrompts(s.suggestedPrompts),
+			maxHistoryMessages:   params.MaxHistoryMessages,
 		}
 		s.mu.Unlock()
 
@@ -1470,6 +1472,11 @@ func (s *acpServer) runPrompt(session *acpSession, sessionID string, prompt stri
 			},
 		})
 		return "refusal"
+	}
+
+	// Apply message history window if configured
+	if session.maxHistoryMessages > 0 {
+		session.loop.ApplyHistoryWindow(session.maxHistoryMessages)
 	}
 
 	err = session.loop.StepWithImagesMetadata(ctx, prompt, images, turnMetadata)

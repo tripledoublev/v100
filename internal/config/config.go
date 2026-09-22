@@ -96,25 +96,26 @@ type GatewayConfig struct {
 
 // GatewayProfile constrains provider/runtime settings for a gateway chat.
 type GatewayProfile struct {
-	Tools            []string `toml:"tools"`
-	Dangerous        []string `toml:"dangerous"`
-	AllowedCommands  []string `toml:"allowed_commands"`
-	Provider         string   `toml:"provider"`
-	Model            string   `toml:"model"`
-	Solver           string   `toml:"solver"`
-	SystemPrompt     string   `toml:"system_prompt"`
-	SystemPromptPath string   `toml:"system_prompt_path"`
-	NetworkTier      string   `toml:"network_tier"`
-	BudgetSteps      int      `toml:"budget_steps"`
-	BudgetTokens     int      `toml:"budget_tokens"`
-	BudgetCostUSD    float64  `toml:"budget_cost_usd"`
-	BudgetStepsSet   bool     `toml:"-"`
-	BudgetTokensSet  bool     `toml:"-"`
-	BudgetCostSet    bool     `toml:"-"`
-	VoiceReplies     *bool    `toml:"voice_replies"`
-	VoiceReplyMode   string   `toml:"voice_reply_mode"`
-	ReactionMode     string   `toml:"reaction_mode"`
-	ReactionEmojis   []string `toml:"reaction_emojis"`
+	Tools               []string `toml:"tools"`
+	Dangerous           []string `toml:"dangerous"`
+	AllowedCommands     []string `toml:"allowed_commands"`
+	Provider            string   `toml:"provider"`
+	Model               string   `toml:"model"`
+	Solver              string   `toml:"solver"`
+	SystemPrompt        string   `toml:"system_prompt"`
+	SystemPromptPath    string   `toml:"system_prompt_path"`
+	NetworkTier         string   `toml:"network_tier"`
+	BudgetSteps         int      `toml:"budget_steps"`
+	BudgetTokens        int      `toml:"budget_tokens"`
+	BudgetCostUSD       float64  `toml:"budget_cost_usd"`
+	BudgetStepsSet      bool     `toml:"-"`
+	BudgetTokensSet     bool     `toml:"-"`
+	BudgetCostSet       bool     `toml:"-"`
+	MaxHistoryMessages  int      `toml:"max_history_messages"` // 0 = unlimited, >0 = sliding window
+	VoiceReplies        *bool    `toml:"voice_replies"`
+	VoiceReplyMode      string   `toml:"voice_reply_mode"`
+	ReactionMode        string   `toml:"reaction_mode"`
+	ReactionEmojis      []string `toml:"reaction_emojis"`
 }
 
 // UpdateConfig defines auto-update behavior.
