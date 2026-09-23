@@ -1333,3 +1333,55 @@ func containsString(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestSignalControlPromptResumesPersistedSession(t *testing.T) {
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const chat = "+15145550000"
+	if err := store.SetBinding(chat, "run-persisted", "signal-"+chat, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{chat: {}},
+		},
+		rpc: &fakeSignalRPC{}, cli: cli, state: store,
+	}
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gw.handleSignalControlConn(context.Background(), serverConn)
+	}()
+	if err := json.NewEncoder(clientConn).Encode(signalControlRequest{Action: "prompt", To: chat, Text: "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	var response signalControlResponse
+	if err := json.NewDecoder(clientConn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	_ = clientConn.Close()
+	<-done
+	if !response.OK {
+		t.Fatalf("control response = %#v", response)
+	}
+	cli.mu.Lock()
+	defer cli.mu.Unlock()
+	for _, method := range cli.calls {
+		if method == acp.MethodSessionNew {
+			t.Fatalf("control prompt opened a fresh session; calls = %v", cli.calls)
+		}
+	}
+	if cli.lastResume.RunID != "run-persisted" {
+		t.Fatalf("resumed run = %q, want run-persisted (calls = %v)", cli.lastResume.RunID, cli.calls)
+	}
+	if cli.lastPrompt.SessionID == "" {
+		t.Fatalf("prompt was not delivered; calls = %v", cli.calls)
+	}
+}
