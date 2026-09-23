@@ -59,6 +59,21 @@ func CommandAllowed(profile config.GatewayProfile, hasProfile bool, command stri
 	return false
 }
 
+// MatchTrigger applies a profile's trigger_prefix to an incoming message. It
+// reports whether the message should prompt the agent and returns the text
+// with the prefix removed. Without a profile or prefix every message triggers.
+func MatchTrigger(profile config.GatewayProfile, hasProfile bool, text string) (string, bool) {
+	prefix := strings.TrimSpace(profile.TriggerPrefix)
+	if !hasProfile || prefix == "" {
+		return text, true
+	}
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, prefix) {
+		return text, false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)), true
+}
+
 // NormalizeCommandName returns the lowercase bare command name without a slash.
 func NormalizeCommandName(command string) string {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(command)), "/")

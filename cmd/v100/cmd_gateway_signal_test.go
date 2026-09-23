@@ -1385,3 +1385,90 @@ func TestSignalControlPromptResumesPersistedSession(t *testing.T) {
 		t.Fatalf("prompt was not delivered; calls = %v", cli.calls)
 	}
 }
+
+func TestSignalTriggerPrefixGatesPromptsAndKeepsSilentContext(t *testing.T) {
+	ctx := context.Background()
+	store, err := signalstate.OpenDefault(filepath.Join(t.TempDir(), "signal-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const friend = "+15145550000"
+	rpc := &fakeSignalRPC{}
+	cli := &fakeSignalACPClient{}
+	gw := &signalGateway{
+		ctx:       ctx,
+		globalCfg: config.DefaultConfig(),
+		cfg: signalRuntimeConfig{
+			Account:          "+15145551234",
+			ConversationMode: "shared_account",
+			AllowedNumbers:   map[string]struct{}{friend: {}},
+			Profile:          "gated",
+			Profiles: map[string]config.GatewayProfile{
+				"gated": {TriggerPrefix: "!", ReactionMode: "random", ReactionEmojis: []string{"👍"}, AllowedCommands: []string{"help"}},
+			},
+			ChatProfiles: map[string]string{},
+		},
+		rpc: rpc, cli: cli, state: store,
+	}
+	receive := func(ts, text string) []gatewaycore.Update {
+		t.Helper()
+		rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+			SourceNumber: friend,
+			Timestamp:    json.Number(ts),
+			DataMessage:  &signalDataMessage{Message: text},
+		}}}
+		updates, err := gw.Poll(ctx)
+		if err != nil {
+			t.Fatalf("Poll(%q) error: %v", text, err)
+		}
+		return updates
+	}
+
+	// Untriggered chatter: no prompt, no reaction, but recorded as context.
+	if updates := receive("2001", "mon screenshot de Services"); len(updates) != 0 {
+		t.Fatalf("untriggered message produced updates: %#v", updates)
+	}
+	time.Sleep(50 * time.Millisecond) // reactions run in a goroutine
+	rpc.mu.Lock()
+	for _, call := range rpc.calls {
+		if call.method == "sendReaction" {
+			t.Fatalf("untriggered message got a reaction: %#v", rpc.calls)
+		}
+	}
+	rpc.mu.Unlock()
+	if cli.lastAppend.Role != "user" || cli.lastAppend.Source != "signal.friend" ||
+		cli.lastAppend.ExternalEventID != "signal-friend-2001" || cli.lastAppend.Content != "mon screenshot de Services" {
+		t.Fatalf("silent context append = %#v", cli.lastAppend)
+	}
+	if !store.IsProcessed("2001") {
+		t.Fatal("untriggered message should be marked processed")
+	}
+	if updates := receive("2001", "mon screenshot de Services"); len(updates) != 0 {
+		t.Fatalf("redelivered untriggered message produced updates: %#v", updates)
+	}
+
+	// Triggered request: prompt with the prefix stripped.
+	updates := receive("2002", "! optimise la section Services")
+	if len(updates) != 1 || updates[0].Text != "optimise la section Services" || updates[0].Source != "signal.friend" {
+		t.Fatalf("triggered updates = %#v", updates)
+	}
+
+	// A bare prefix replying to a message invokes the agent on the quote.
+	rpc.receives = []signalReceiveEnvelope{{Envelope: signalEnvelope{
+		SourceNumber: friend,
+		Timestamp:    json.Number("2004"),
+		DataMessage:  &signalDataMessage{Message: "!", Quote: &signalQuote{AuthorNumber: friend, Text: "change le titre du site"}},
+	}}}
+	quoted, err := gw.Poll(ctx)
+	if err != nil || len(quoted) != 1 || !strings.Contains(quoted[0].Text, "change le titre du site") {
+		t.Fatalf("bare-prefix quoted reply updates=%#v err=%v", quoted, err)
+	}
+
+	// Slash commands keep working without the prefix.
+	if updates := receive("2003", "/help"); len(updates) != 0 {
+		t.Fatalf("command produced updates: %#v", updates)
+	}
+	if cli.lastAppend.ExternalEventID == "signal-friend-2003" {
+		t.Fatal("command must not be recorded as silent context")
+	}
+}
