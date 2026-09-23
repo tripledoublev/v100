@@ -1146,3 +1146,31 @@ func (s *fakeACPSession) Run(context.Context, executor.RunRequest) (executor.Res
 func (s *fakeACPSession) Workspace() string { return "" }
 
 var _ executor.Session = (*fakeACPSession)(nil)
+
+func TestACPConfirmFnApprovesOnlySessionAllowlist(t *testing.T) {
+	confirm := acpConfirmFn(false, []string{"fs_write", " patch_apply ", "git_push"})
+	for tool, want := range map[string]bool{
+		"fs_write":    true,
+		"patch_apply": true,
+		"sh":          false,
+		"git_commit":  false,
+		"git_push":    false, // never auto-approved, even when allowlisted
+	} {
+		if got := confirm(tool, "{}"); got != want {
+			t.Errorf("confirm(%q) = %v, want %v", tool, got, want)
+		}
+	}
+	if acpConfirmFn(false, nil)("fs_write", "{}") {
+		t.Error("nil allowlist must deny dangerous tools")
+	}
+}
+
+func TestACPConfirmFnYoloApprovesAllButGitPush(t *testing.T) {
+	confirm := acpConfirmFn(true, nil)
+	if !confirm("sh", "{}") {
+		t.Error("yolo should approve sh")
+	}
+	if confirm("git_push", "{}") {
+		t.Error("yolo must not approve git_push")
+	}
+}
