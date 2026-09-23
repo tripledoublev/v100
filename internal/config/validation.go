@@ -392,6 +392,11 @@ func validateGatewayProfiles(result *ValidationResult, cfg *Config) {
 		default:
 			result.Add(ValidationError, path, fmt.Sprintf("invalid reaction_mode %q", profile.ReactionMode))
 		}
+		if prefix := profile.TriggerPrefix; prefix != "" {
+			if strings.TrimSpace(prefix) == "" || strings.HasPrefix(strings.TrimSpace(prefix), "/") {
+				result.Add(ValidationError, path+".trigger_prefix", fmt.Sprintf("invalid trigger_prefix %q; use a non-blank prefix that does not start with /", prefix))
+			}
+		}
 	}
 }
 

@@ -233,3 +233,29 @@ func TestReconfigureParamsMapsRuntimeCommands(t *testing.T) {
 		t.Fatal("expected missing value to fail")
 	}
 }
+
+func TestMatchTrigger(t *testing.T) {
+	gated := config.GatewayProfile{TriggerPrefix: "!"}
+	for _, tc := range []struct {
+		name       string
+		profile    config.GatewayProfile
+		hasProfile bool
+		in         string
+		want       string
+		wantOK     bool
+	}{
+		{"no profile passes everything", gated, false, "salut", "salut", true},
+		{"empty prefix passes everything", config.GatewayProfile{}, true, "salut", "salut", true},
+		{"missing prefix is gated", gated, true, "salut", "salut", false},
+		{"prefix is stripped", gated, true, "!fais la PR", "fais la PR", true},
+		{"leading space and gap", gated, true, "  !  fais la PR ", "fais la PR", true},
+		{"prefix alone triggers with empty text", gated, true, "!", "", true},
+		{"prefix mid-message is gated", gated, true, "wow !", "wow !", false},
+		{"multi-char prefix", config.GatewayProfile{TriggerPrefix: "v100:"}, true, "v100: go", "go", true},
+	} {
+		got, ok := MatchTrigger(tc.profile, tc.hasProfile, tc.in)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("%s: MatchTrigger(%q) = (%q, %v), want (%q, %v)", tc.name, tc.in, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}

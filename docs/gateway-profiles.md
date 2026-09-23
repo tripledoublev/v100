@@ -55,6 +55,23 @@ and starts a fresh one with the selected profile sandbox. `/reset` closes and
 drops the cached ACP session; the next normal message recreates it with the same
 profile settings.
 
+## Trigger prefix (Signal)
+
+Set `trigger_prefix` to make the agent answer only on demand:
+
+```toml
+[gateway.profiles.jsroy-pr]
+trigger_prefix = "!"
+```
+
+Only messages that start with the prefix are sent to the agent, with the prefix
+stripped (`!fais la PR` becomes `fais la PR`). Other messages from the chat get
+no reply and no reaction. In `shared_account` mode they are still recorded in
+the session history as silent context, so a later `!` request can refer back to
+them. Images from untriggered messages are recorded only as a placeholder.
+Slash commands work without the prefix. A reply that is just `!` invokes the
+agent on the quoted message.
+
 `v100 doctor` validates profile references, unknown tool names, invalid
 network tiers, missing prompt files, and dangerous tools that are not included
 in the profile `tools` list.
