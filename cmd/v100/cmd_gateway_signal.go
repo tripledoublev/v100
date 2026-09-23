@@ -454,6 +454,15 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 		var err error
 		switch action {
 		case "prompt":
+			// Rebind the chat's persisted run first; otherwise a prompt that
+			// arrives before any Signal traffic after a restart opens a fresh,
+			// history-less session and the chat stays on it.
+			if g.state != nil {
+				_, err = g.ensureSignalSession(ctx, to)
+			}
+			if err != nil {
+				break
+			}
 			err = g.gatewayCore().Handle(ctx, g, gatewaycore.Update{
 				ChatID:    to,
 				MessageID: fmt.Sprintf("terminal-%d", time.Now().UnixMilli()),
