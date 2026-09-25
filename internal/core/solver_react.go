@@ -450,7 +450,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 		stopToolsTriggered := false
 		if !watchdogInjected && !watchdogsDisabled(l) {
-			if msg, reason, action, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
+			if msg, reason, action, ok := synthesisWatchdogMessageWithLimit(inspectionToolLimit(l), toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
 				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
 					Action:  hookActionTraceName(action),
 					Message: msg,
@@ -534,15 +534,37 @@ func isInspectionTool(name string) bool {
 }
 
 func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
+	return synthesisWatchdogMessageWithLimit(inspectionWatchdogToolThreshold, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly)
+}
+
+// inspectionToolLimit returns the policy's inspection watchdog threshold,
+// falling back to the built-in default.
+func inspectionToolLimit(l *Loop) int {
+	if l != nil && l.Policy != nil && l.Policy.InspectionToolLimit > 0 {
+		return l.Policy.InspectionToolLimit
+	}
+	return inspectionWatchdogToolThreshold
+}
+
+func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
+	if inspectionLimit <= 0 {
+		inspectionLimit = inspectionWatchdogToolThreshold
+	}
 	if inspectionOnly &&
-		toolCallsUsed >= inspectionWatchdogToolThreshold &&
+		toolCallsUsed >= inspectionLimit &&
 		modelCalls >= inspectionWatchdogModelThreshold {
 		return "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Tool use is now DISABLED for the remainder of this step. Stop exploring, synthesize what you already know, and provide your final answer.", "inspection_watchdog", HookStopTools, true
 	}
 
+	// Keep the read-heavy watchdog proportional so raising the inspection
+	// limit is not undone by the lower read-heavy tool threshold.
+	readHeavyTools := readHeavyWatchdogToolThreshold
+	if inspectionLimit > inspectionWatchdogToolThreshold {
+		readHeavyTools = inspectionLimit * readHeavyWatchdogToolThreshold / inspectionWatchdogToolThreshold
+	}
 	if modelCalls < readHeavyWatchdogModelThreshold ||
 		stepTokensUsed < readHeavyWatchdogTokenThreshold ||
-		inspectionToolCalls < readHeavyWatchdogToolThreshold {
+		inspectionToolCalls < readHeavyTools {
 		return "", "", HookContinue, false
 	}
 	if toolCallsUsed == 0 || inspectionToolCalls*5 < toolCallsUsed*4 {

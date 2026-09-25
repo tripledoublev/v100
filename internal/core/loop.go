@@ -1146,17 +1146,37 @@ func (l *Loop) SanitizeLiveMessages() bool {
 	return modified
 }
 
-// ApplyHistoryWindow trims l.Messages to keep only the most recent maxMessages.
-// Conversation messages (user/assistant) are preferred over system messages.
-// Returns the number of messages dropped.
+// ApplyHistoryWindow trims l.Messages to roughly the most recent maxMessages.
+// Leading system messages (the system prompt, resume summary) are always kept
+// and do not count toward the window. The kept tail starts at a user message
+// so a tool result is never separated from the assistant tool call that
+// produced it. Returns the number of messages dropped.
 func (l *Loop) ApplyHistoryWindow(maxMessages int) int {
-	if maxMessages <= 0 || len(l.Messages) <= maxMessages {
+	if maxMessages <= 0 {
 		return 0
 	}
-
-	dropped := len(l.Messages) - maxMessages
-	l.Messages = l.Messages[dropped:]
-	return dropped
+	head := 0
+	for head < len(l.Messages) && l.Messages[head].Role == "system" {
+		head++
+	}
+	body := l.Messages[head:]
+	if len(body) <= maxMessages {
+		return 0
+	}
+	start := len(body) - maxMessages
+	for start < len(body) && body[start].Role != "user" {
+		start++
+	}
+	if start >= len(body) {
+		// No user message inside the window; keep it unchanged rather than
+		// sending a tail that begins mid tool exchange.
+		return 0
+	}
+	kept := make([]providers.Message, 0, head+len(body)-start)
+	kept = append(kept, l.Messages[:head]...)
+	kept = append(kept, body[start:]...)
+	l.Messages = kept
+	return start
 }
 
 func (l *Loop) memoryReferenceMessageForStep(stepID string, consume bool) (string, bool) {

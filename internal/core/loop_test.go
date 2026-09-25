@@ -969,11 +969,11 @@ func TestSanitizeLiveMessages(t *testing.T) {
 
 func TestApplyHistoryWindow(t *testing.T) {
 	tests := []struct {
-		name              string
-		messageCount      int
-		maxWindow         int
-		wantRemaining     int
-		wantDropped       int
+		name          string
+		messageCount  int
+		maxWindow     int
+		wantRemaining int
+		wantDropped   int
 	}{
 		{
 			name:          "unlimited window (0)",
@@ -1000,8 +1000,8 @@ func TestApplyHistoryWindow(t *testing.T) {
 			name:          "window smaller than history",
 			messageCount:  100,
 			maxWindow:     20,
-			wantRemaining: 20,
-			wantDropped:   80,
+			wantRemaining: 19, // index 80 is an assistant turn; window starts at next user
+			wantDropped:   81,
 		},
 		{
 			name:          "empty history",
@@ -1027,6 +1027,52 @@ func TestApplyHistoryWindow(t *testing.T) {
 				t.Errorf("remaining: got %d, want %d", len(l.Messages), tt.wantRemaining)
 			}
 		})
+	}
+}
+
+func TestApplyHistoryWindowKeepsSystemAndToolPairs(t *testing.T) {
+	l := &core.Loop{Messages: []providers.Message{
+		{Role: "system", Content: "system prompt"},
+		{Role: "system", Content: "resume summary"},
+		{Role: "user", Content: "old question"},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "read the file"},
+		{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: "c1", Name: "fs_read"}}},
+		{Role: "tool", ToolCallID: "c1", Content: "file contents"},
+		{Role: "assistant", Content: "done"},
+		{Role: "user", Content: "latest"},
+	}}
+
+	// A window of 4 would start at the tool result; it must advance to the
+	// next user message instead of orphaning the result.
+	dropped := l.ApplyHistoryWindow(4)
+	if dropped != 6 {
+		t.Fatalf("dropped = %d, want 6", dropped)
+	}
+	want := []string{"system prompt", "resume summary", "latest"}
+	if len(l.Messages) != len(want) {
+		t.Fatalf("len = %d, want %d: %+v", len(l.Messages), len(want), l.Messages)
+	}
+	for i, content := range want {
+		if l.Messages[i].Content != content {
+			t.Fatalf("msg[%d] = %q, want %q", i, l.Messages[i].Content, content)
+		}
+	}
+
+	// A window that starts on a user message keeps the full tool exchange.
+	l.Messages = append([]providers.Message{{Role: "system", Content: "sys"}},
+		providers.Message{Role: "user", Content: "q1"},
+		providers.Message{Role: "assistant", Content: "a1"},
+		providers.Message{Role: "user", Content: "q2"},
+		providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: "c2", Name: "fs_read"}}},
+		providers.Message{Role: "tool", ToolCallID: "c2", Content: "out"},
+		providers.Message{Role: "assistant", Content: "a2"},
+	)
+	if dropped := l.ApplyHistoryWindow(4); dropped != 2 {
+		t.Fatalf("dropped = %d, want 2", dropped)
+	}
+	if l.Messages[0].Role != "system" || l.Messages[1].Content != "q2" || len(l.Messages) != 5 {
+		t.Fatalf("unexpected window: %+v", l.Messages)
 	}
 }
 

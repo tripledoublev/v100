@@ -132,6 +132,21 @@ func applyACPSessionNewOverrides(cfg *config.Config, params acp.SessionNewParams
 			return acpStatus(acp.ErrInvalidSessionConfig, "unsupported network_tier %q", params.NetworkTier)
 		}
 	}
+	if params.MaxToolCalls < 0 {
+		return acpStatus(acp.ErrInvalidSessionConfig, "max_tool_calls_per_step must be >= 0")
+	}
+	if params.MaxToolCalls > 0 {
+		cfg.Defaults.MaxToolCallsPerStep = params.MaxToolCalls
+	}
+	if params.InspectionLimit < 0 {
+		return acpStatus(acp.ErrInvalidSessionConfig, "inspection_tool_limit must be >= 0")
+	}
+	if params.InspectionLimit > 0 {
+		cfg.Defaults.InspectionToolLimit = params.InspectionLimit
+	}
+	if params.MaxHistoryMessages < 0 {
+		return acpStatus(acp.ErrInvalidSessionConfig, "max_history_messages must be >= 0")
+	}
 	if params.BudgetStepsSet || params.BudgetSteps > 0 {
 		if params.BudgetSteps < 0 {
 			return acpStatus(acp.ErrInvalidSessionConfig, "budget_steps must be >= 0")
@@ -175,6 +190,10 @@ func acpResumeOverrides(params acp.SessionResumeParams) acp.SessionNewParams {
 		Dangerous:    params.Dangerous,
 		SystemPrompt: params.SystemPrompt,
 		NetworkTier:  params.NetworkTier,
+
+		MaxHistoryMessages: params.MaxHistoryMessages,
+		MaxToolCalls:       params.MaxToolCalls,
+		InspectionLimit:    params.InspectionLimit,
 	}
 	if params.BudgetSteps != nil {
 		overrides.BudgetSteps = *params.BudgetSteps
@@ -217,19 +236,19 @@ func cloneACPConfig(cfg *config.Config) *config.Config {
 }
 
 type acpSession struct {
-	comp                 *RunComponents
-	loop                 *core.Loop
-	cancel               context.CancelFunc
-	activeCtx            context.Context
-	promptActive         bool
-	mu                   sync.Mutex
-	closing              bool
-	closeReason          string
-	runStarted           bool
-	prompts              []acp.SuggestedPrompt
-	cleanupDone          chan struct{}
-	cleanupOnce          sync.Once
-	maxHistoryMessages   int // 0 = unlimited
+	comp               *RunComponents
+	loop               *core.Loop
+	cancel             context.CancelFunc
+	activeCtx          context.Context
+	promptActive       bool
+	mu                 sync.Mutex
+	closing            bool
+	closeReason        string
+	runStarted         bool
+	prompts            []acp.SuggestedPrompt
+	cleanupDone        chan struct{}
+	cleanupOnce        sync.Once
+	maxHistoryMessages int // 0 = unlimited
 }
 
 func (s *acpServer) serve() error {
@@ -448,10 +467,10 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			s.sessions = make(map[string]*acpSession)
 		}
 		s.sessions[sessionID] = &acpSession{
-			comp:                 comp,
-			loop:                 loop,
-			prompts:              copySuggestedPrompts(s.suggestedPrompts),
-			maxHistoryMessages:   params.MaxHistoryMessages,
+			comp:               comp,
+			loop:               loop,
+			prompts:            copySuggestedPrompts(s.suggestedPrompts),
+			maxHistoryMessages: params.MaxHistoryMessages,
 		}
 		s.mu.Unlock()
 
@@ -1286,9 +1305,10 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 		s.sessions = make(map[string]*acpSession)
 	}
 	s.sessions[sessionID] = &acpSession{
-		comp:    comp,
-		loop:    loop,
-		prompts: copySuggestedPrompts(s.suggestedPrompts),
+		comp:               comp,
+		loop:               loop,
+		prompts:            copySuggestedPrompts(s.suggestedPrompts),
+		maxHistoryMessages: params.MaxHistoryMessages,
 	}
 	s.mu.Unlock()
 

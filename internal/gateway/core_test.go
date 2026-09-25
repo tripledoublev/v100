@@ -233,3 +233,35 @@ func TestReconfigureParamsMapsRuntimeCommands(t *testing.T) {
 		t.Fatal("expected missing value to fail")
 	}
 }
+
+func TestApplyProfileCopiesHistoryAndToolLimits(t *testing.T) {
+	runtime := ProfileRuntime{
+		Name: "pr",
+		OK:   true,
+		Profile: config.GatewayProfile{
+			MaxHistoryMessages:  40,
+			MaxToolCallsPerStep: 60,
+			InspectionToolLimit: 24,
+		},
+	}
+	var fresh acp.SessionNewParams
+	if err := ApplyProfileToSessionNew(&fresh, runtime, ""); err != nil {
+		t.Fatalf("ApplyProfileToSessionNew returned error: %v", err)
+	}
+	if fresh.MaxHistoryMessages != 40 || fresh.MaxToolCalls != 60 || fresh.InspectionLimit != 24 {
+		t.Fatalf("new params = %#v", fresh)
+	}
+
+	resume := acp.SessionResumeParams{RunID: "run-1"}
+	if err := ApplyProfileToSessionResume(&resume, runtime, ""); err != nil {
+		t.Fatalf("ApplyProfileToSessionResume returned error: %v", err)
+	}
+	if resume.MaxHistoryMessages != 40 || resume.MaxToolCalls != 60 || resume.InspectionLimit != 24 {
+		t.Fatalf("resume params = %#v", resume)
+	}
+
+	runtime.Profile.InspectionToolLimit = -1
+	if err := ApplyProfileToSessionNew(&fresh, runtime, ""); err == nil {
+		t.Fatal("expected negative inspection_tool_limit to be rejected")
+	}
+}

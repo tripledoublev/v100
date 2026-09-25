@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tripledoublev/v100/internal/policy"
+)
 
 func TestSynthesisWatchdogMessageReadHeavy(t *testing.T) {
 	msg, reason, action, ok := synthesisWatchdogMessage(
@@ -151,5 +155,30 @@ func TestSynthesisWatchdogMessageReadHeavyWithMixedTools(t *testing.T) {
 	}
 	if action != HookStopTools {
 		t.Fatalf("action = %v, want HookStopTools", action)
+	}
+}
+
+func TestSynthesisWatchdogRespectsInspectionLimit(t *testing.T) {
+	// 8 inspection-only calls trip the default watchdog.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(0, 8, 8, 9, 1000, true); !ok || reason != "inspection_watchdog" {
+		t.Fatalf("default limit: ok=%v reason=%q", ok, reason)
+	}
+	// A raised limit lets the same step continue, including past the
+	// read-heavy tool threshold when step tokens are high.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 8, 8, 9, 50000, true); ok {
+		t.Fatalf("raised limit fired early: %q", reason)
+	}
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 24, 24, 25, 1000, true); !ok || reason != "inspection_watchdog" {
+		t.Fatalf("raised limit at threshold: ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestInspectionToolLimitFromPolicy(t *testing.T) {
+	if got := inspectionToolLimit(nil); got != inspectionWatchdogToolThreshold {
+		t.Fatalf("nil loop = %d", got)
+	}
+	l := &Loop{Policy: &policy.Policy{InspectionToolLimit: 30}}
+	if got := inspectionToolLimit(l); got != 30 {
+		t.Fatalf("policy limit = %d", got)
 	}
 }

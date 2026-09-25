@@ -112,6 +112,8 @@ type GatewayProfile struct {
 	BudgetTokensSet     bool     `toml:"-"`
 	BudgetCostSet       bool     `toml:"-"`
 	MaxHistoryMessages  int      `toml:"max_history_messages"` // 0 = unlimited, >0 = sliding window
+	MaxToolCallsPerStep int      `toml:"max_tool_calls_per_step"`
+	InspectionToolLimit int      `toml:"inspection_tool_limit"` // inspection-only tool calls before the watchdog stops tools (0 = default)
 	VoiceReplies        *bool    `toml:"voice_replies"`
 	VoiceReplyMode      string   `toml:"voice_reply_mode"`
 	ReactionMode        string   `toml:"reaction_mode"`
@@ -270,6 +272,7 @@ type DefaultsConfig struct {
 	BudgetCostUSD          float64  `toml:"budget_cost_usd"`
 	ToolTimeoutMS          int      `toml:"tool_timeout_ms"`
 	MaxToolCallsPerStep    int      `toml:"max_tool_calls_per_step"`
+	InspectionToolLimit    int      `toml:"inspection_tool_limit"` // 0 = built-in default
 	MemoryMode             string   `toml:"memory_mode"`
 	MemoryMaxTokens        int      `toml:"memory_max_tokens"`
 	ContextLimit           int      `toml:"context_limit"`
