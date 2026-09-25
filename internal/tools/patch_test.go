@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,5 +134,42 @@ func TestPatchApplyFailureIncludesSaferEditGuidance(t *testing.T) {
 		if !strings.Contains(res.Output, want) {
 			t.Fatalf("patch failure output missing %q in %q", want, res.Output)
 		}
+	}
+}
+
+func TestPatchApplyWithFuzzLeavesNoOrigBackup(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("BSD patch backup behavior differs")
+	}
+	sourceDir := t.TempDir()
+	// The hunk header claims line 1 but the context sits at line 4, so GNU
+	// patch applies it with an offset, which used to leave target.txt.orig.
+	content := "x\ny\nz\na\nb\nc\n"
+	if err := os.WriteFile(filepath.Join(sourceDir, "target.txt"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := startHostSession(t, sourceDir)
+	sandboxDir := session.Workspace()
+	call := tools.ToolCallContext{
+		WorkspaceDir: sourceDir,
+		Session:      session,
+		Mapper:       core.NewPathMapper(sourceDir, sandboxDir),
+	}
+	args, err := json.Marshal(map[string]any{
+		"diff":  "--- a/target.txt\n+++ b/target.txt\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n",
+		"strip": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := tools.PatchApply().Exec(context.Background(), call, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || !strings.Contains(res.Output, "offset") {
+		t.Fatalf("expected an offset apply, got ok=%v output=%q", res.OK, res.Output)
+	}
+	if _, err := os.Stat(filepath.Join(sandboxDir, "target.txt.orig")); !os.IsNotExist(err) {
+		t.Fatalf("patch left a .orig backup (stat err=%v)", err)
 	}
 }

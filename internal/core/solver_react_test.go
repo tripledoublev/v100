@@ -160,15 +160,15 @@ func TestSynthesisWatchdogMessageReadHeavyWithMixedTools(t *testing.T) {
 
 func TestSynthesisWatchdogRespectsInspectionLimit(t *testing.T) {
 	// 8 inspection-only calls trip the default watchdog.
-	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(0, 8, 8, 9, 1000, true); !ok || reason != "inspection_watchdog" {
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(0, 8, 8, 9, 1000, true, false); !ok || reason != "inspection_watchdog" {
 		t.Fatalf("default limit: ok=%v reason=%q", ok, reason)
 	}
 	// A raised limit lets the same step continue, including past the
 	// read-heavy tool threshold when step tokens are high.
-	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 8, 8, 9, 50000, true); ok {
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 8, 8, 9, 50000, true, false); ok {
 		t.Fatalf("raised limit fired early: %q", reason)
 	}
-	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 24, 24, 25, 1000, true); !ok || reason != "inspection_watchdog" {
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 24, 24, 25, 1000, true, false); !ok || reason != "inspection_watchdog" {
 		t.Fatalf("raised limit at threshold: ok=%v reason=%q", ok, reason)
 	}
 }
@@ -180,5 +180,25 @@ func TestInspectionToolLimitFromPolicy(t *testing.T) {
 	l := &Loop{Policy: &policy.Policy{InspectionToolLimit: 30}}
 	if got := inspectionToolLimit(l); got != 30 {
 		t.Fatalf("policy limit = %d", got)
+	}
+}
+
+func TestReadHeavyWatchdogSkipsAfterEdit(t *testing.T) {
+	// The 2026-09-25 jsroy run: 18 of 19 calls were reads, ~71k step tokens,
+	// with one patch_apply already applied. Before the edit this trips the
+	// read-heavy watchdog; after it, reads are verification.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 19, 18, 12, 71600, false, false); !ok || reason != "read_heavy_watchdog" {
+		t.Fatalf("without edit: ok=%v reason=%q", ok, reason)
+	}
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 19, 18, 12, 71600, false, true); ok {
+		t.Fatalf("after edit fired: %q", reason)
+	}
+	for _, name := range []string{"patch_apply", "fs_write", "fs_mkdir"} {
+		if !isEditTool(name) {
+			t.Fatalf("%s should be an edit tool", name)
+		}
+	}
+	if isEditTool("fs_read") {
+		t.Fatal("fs_read is not an edit tool")
 	}
 }

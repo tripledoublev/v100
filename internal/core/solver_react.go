@@ -77,6 +77,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	var terminalErr error
 	inspectionOnly := true
 	inspectionToolCalls := 0
+	editedThisStep := false
 	stepTokensUsed := 0
 	stepOutputTokens := 0
 	watchdogInjected := false
@@ -359,6 +360,9 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			} else {
 				inspectionOnly = false
 			}
+			if isEditTool(tc.Name) {
+				editedThisStep = true
+			}
 			if toolCallsUsed >= maxToolCalls {
 				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
 					Error: fmt.Sprintf("max tool calls per step reached (%d)", maxToolCalls),
@@ -450,7 +454,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 		stopToolsTriggered := false
 		if !watchdogInjected && !watchdogsDisabled(l) {
-			if msg, reason, action, ok := synthesisWatchdogMessageWithLimit(inspectionToolLimit(l), toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
+			if msg, reason, action, ok := synthesisWatchdogMessageWithLimit(inspectionToolLimit(l), toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly, editedThisStep); ok {
 				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
 					Action:  hookActionTraceName(action),
 					Message: msg,
@@ -534,7 +538,18 @@ func isInspectionTool(name string) bool {
 }
 
 func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
-	return synthesisWatchdogMessageWithLimit(inspectionWatchdogToolThreshold, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly)
+	return synthesisWatchdogMessageWithLimit(inspectionWatchdogToolThreshold, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly, false)
+}
+
+// isEditTool reports tools that change workspace files. Once one has run in a
+// step, follow-up reads are verification, not runaway exploration.
+func isEditTool(name string) bool {
+	switch name {
+	case "patch_apply", "fs_write", "fs_mkdir":
+		return true
+	default:
+		return false
+	}
 }
 
 // inspectionToolLimit returns the policy's inspection watchdog threshold,
@@ -546,7 +561,7 @@ func inspectionToolLimit(l *Loop) int {
 	return inspectionWatchdogToolThreshold
 }
 
-func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
+func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly, edited bool) (string, string, HookAction, bool) {
 	if inspectionLimit <= 0 {
 		inspectionLimit = inspectionWatchdogToolThreshold
 	}
@@ -562,7 +577,8 @@ func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectio
 	if inspectionLimit > inspectionWatchdogToolThreshold {
 		readHeavyTools = inspectionLimit * readHeavyWatchdogToolThreshold / inspectionWatchdogToolThreshold
 	}
-	if modelCalls < readHeavyWatchdogModelThreshold ||
+	if edited ||
+		modelCalls < readHeavyWatchdogModelThreshold ||
 		stepTokensUsed < readHeavyWatchdogTokenThreshold ||
 		inspectionToolCalls < readHeavyTools {
 		return "", "", HookContinue, false

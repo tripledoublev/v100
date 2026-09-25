@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -66,13 +67,13 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 
 	pArg := fmt.Sprintf("-p%d", strip)
 	if call.Session != nil {
-		res, err := runPatchInSession(ctx, call, a.Diff, []string{pArg, "--batch", "--forward"}, false)
+		res, err := runPatchInSession(ctx, call, a.Diff, patchArgs(pArg), false)
 		dur := time.Since(start).Milliseconds()
 		if err != nil {
 			return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + err.Error(), DurationMS: dur}), nil
 		}
 		if res.ExitCode != 0 {
-			retry, retryErr := runPatchInSession(ctx, call, a.Diff, []string{pArg, "--batch", "--forward", "-l"}, true)
+			retry, retryErr := runPatchInSession(ctx, call, a.Diff, patchArgs(pArg, "-l"), true)
 			if retryErr != nil {
 				return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + retryErr.Error(), DurationMS: dur}), nil
 			}
@@ -98,13 +99,13 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 		return sanitizeToolResult(call, ToolResult{OK: true, Output: res.Stdout, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}), nil
 	}
 
-	res, err := runPatchOnHost(ctx, call, a.Diff, []string{pArg, "--batch", "--forward"}, false)
+	res, err := runPatchOnHost(ctx, call, a.Diff, patchArgs(pArg), false)
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
 		return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + err.Error(), DurationMS: dur}), nil
 	}
 	if res.ExitCode != 0 {
-		retry, retryErr := runPatchOnHost(ctx, call, a.Diff, []string{pArg, "--batch", "--forward", "-l"}, true)
+		retry, retryErr := runPatchOnHost(ctx, call, a.Diff, patchArgs(pArg, "-l"), true)
 		if retryErr != nil {
 			return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + retryErr.Error(), DurationMS: dur}), nil
 		}
@@ -128,6 +129,18 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 		}), nil
 	}
 	return sanitizeToolResult(call, ToolResult{OK: true, Output: res.Stdout, Stdout: res.Stdout, Stderr: res.Stderr, DurationMS: dur}), nil
+}
+
+// patchArgs builds the patch(1) arguments. GNU patch writes <file>.orig
+// backups whenever a hunk applies with fuzz or offset; those stray files end
+// up in commits and PRs, so they are disabled. BSD patch on macOS hosts may
+// not accept the flag, so it is only passed elsewhere.
+func patchArgs(pArg string, extra ...string) []string {
+	args := []string{pArg, "--batch", "--forward"}
+	if runtime.GOOS != "darwin" {
+		args = append(args, "--no-backup-if-mismatch")
+	}
+	return append(args, extra...)
 }
 
 func runPatchInSession(ctx context.Context, call ToolCallContext, diff string, args []string, emit bool) (executor.Result, error) {
