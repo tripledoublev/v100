@@ -454,6 +454,15 @@ func (g *signalGateway) handleSignalControlConn(ctx context.Context, conn net.Co
 		var err error
 		switch action {
 		case "prompt":
+			// Rebind the chat's persisted run first; otherwise a prompt that
+			// arrives before any Signal traffic after a restart opens a fresh,
+			// history-less session and the chat stays on it.
+			if g.state != nil {
+				_, err = g.ensureSignalSession(ctx, to)
+			}
+			if err != nil {
+				break
+			}
 			err = g.gatewayCore().Handle(ctx, g, gatewaycore.Update{
 				ChatID:    to,
 				MessageID: fmt.Sprintf("terminal-%d", time.Now().UnixMilli()),
@@ -572,9 +581,20 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 		}
 		rawMsg := ""
 		msg := ""
-		if env.Envelope.DataMessage != nil {
-			rawMsg = strings.TrimSpace(env.Envelope.DataMessage.Message)
-			msg = g.signalDataMessageText(env.Envelope.DataMessage)
+		triggered := true
+		if dm := env.Envelope.DataMessage; dm != nil {
+			rawMsg = strings.TrimSpace(dm.Message)
+			if !isSignalCommand(rawMsg) {
+				profile := g.effectiveGatewayProfile(number)
+				var stripped string
+				if stripped, triggered = gatewaycore.MatchTrigger(profile.Profile, profile.OK, rawMsg); triggered && stripped != rawMsg {
+					trimmedDM := *dm
+					trimmedDM.Message = stripped
+					dm = &trimmedDM
+					rawMsg = stripped
+				}
+			}
+			msg = g.signalDataMessageText(dm)
 		}
 		var images []gatewaycore.ImageAttachment
 		if env.Envelope.DataMessage != nil {
@@ -601,6 +621,10 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 				return nil, err
 			}
 		}
+		if !triggered {
+			g.recordSignalSilentContext(ctx, number, msgID, msg)
+			continue
+		}
 		log.Printf("signal message accepted from %s message_id=%s chars=%d", redactSignalChatID(number), msgID, len([]rune(msg)))
 		go func(cID, mID, text string) {
 			if emoji := g.chooseReaction(ctx, cID, text); emoji != "" {
@@ -618,6 +642,29 @@ func (g *signalGateway) Poll(ctx context.Context) ([]gatewaycore.Update, error) 
 		})
 	}
 	return updates, nil
+}
+
+func isSignalCommand(text string) bool {
+	_, ok := gatewaycore.ParseCommand(text)
+	return ok
+}
+
+// recordSignalSilentContext stores a message that did not match the chat's
+// trigger_prefix in the agent's history without prompting, reacting or
+// replying, so a later triggered request can refer back to it. Legacy mode
+// has no persisted session, so such messages are simply dropped there.
+func (g *signalGateway) recordSignalSilentContext(ctx context.Context, chatID, msgID, text string) {
+	log.Printf("signal message from %s message_id=%s kept as silent context (no trigger prefix)", redactSignalChatID(chatID), msgID)
+	if g.state == nil || msgID == "" {
+		return
+	}
+	if _, err := g.gatewayCore().AppendContext(ctx, chatID, "user", "signal.friend", signalExternalEventID(true, "friend", msgID), text); err != nil {
+		log.Printf("signal silent context append failed for %s: %v", redactSignalChatID(chatID), err)
+		return
+	}
+	if _, err := g.state.MarkProcessed(msgID, time.Now()); err != nil {
+		log.Printf("signal silent context mark processed failed for %s: %v", redactSignalChatID(chatID), err)
+	}
 }
 
 // signalAttachmentsDir returns the directory signal-cli stores received

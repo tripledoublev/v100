@@ -181,6 +181,23 @@ func acpSessionNetworkTier(cfg *config.Config, params acp.SessionNewParams) stri
 	return loopNetworkTier(cfg)
 }
 
+// acpConfirmFn returns the tool-approval callback for an ACP session. ACP has
+// no interactive approver, so dangerous tools are denied unless the server runs
+// with --yolo or the client allowlisted them for this session (gateway profiles
+// send their `dangerous` list this way). git_push is never auto-approved.
+func acpConfirmFn(yolo bool, sessionDangerous []string) core.ConfirmFn {
+	if yolo {
+		return buildConfirmFn("never")
+	}
+	allowed := make(map[string]bool, len(sessionDangerous))
+	for _, name := range sessionDangerous {
+		allowed[strings.TrimSpace(name)] = true
+	}
+	return func(toolName, _ string) bool {
+		return toolName != "git_push" && allowed[toolName]
+	}
+}
+
 func acpResumeOverrides(params acp.SessionResumeParams) acp.SessionNewParams {
 	overrides := acp.SessionNewParams{
 		Provider:     params.Provider,
@@ -418,14 +435,7 @@ func (s *acpServer) handleRequest(req acp.Request) {
 			sessionID = comp.Run.ID
 		}
 
-		confirmMode := cfg.Defaults.ConfirmTools
-		if s.yolo {
-			confirmMode = "never"
-		}
-		confirmFn := buildConfirmFn(confirmMode)
-		if !s.yolo {
-			confirmFn = func(toolName, _ string) bool { return false }
-		}
+		confirmFn := acpConfirmFn(s.yolo, params.Dangerous)
 
 		outputFn := acp.NewTranslator(s.conn, sessionID)
 		registerAgentTool(cfg, comp.Registry, comp.Trace, comp.Budget, &outputFn, confirmFn, comp.Workspace, cfg.Defaults.MaxToolCallsPerStep, comp.Session, comp.Mapper, comp.ToolEnv, comp.RedactToolOutput)
@@ -1236,14 +1246,7 @@ func (s *acpServer) resumeSession(params acp.SessionResumeParams) (acp.SessionRe
 	run.Dir = sandboxWorkspace
 
 	toolEnv, redactToolOutput := buildToolRuntime(cfg)
-	confirmMode := cfg.Defaults.ConfirmTools
-	if s.yolo {
-		confirmMode = "never"
-	}
-	confirmFn := buildConfirmFn(confirmMode)
-	if !s.yolo {
-		confirmFn = func(toolName, _ string) bool { return false }
-	}
+	confirmFn := acpConfirmFn(s.yolo, params.Dangerous)
 	outputFn := acp.NewTranslator(s.conn, sessionID)
 	registerAgentTool(cfg, reg, trace, budget, &outputFn, confirmFn, sandboxWorkspace, cfg.Defaults.MaxToolCallsPerStep, execSession, mapper, toolEnv, redactToolOutput)
 

@@ -118,6 +118,9 @@ type GatewayProfile struct {
 	VoiceReplyMode      string   `toml:"voice_reply_mode"`
 	ReactionMode        string   `toml:"reaction_mode"`
 	ReactionEmojis      []string `toml:"reaction_emojis"`
+	// TriggerPrefix, when set (e.g. "!"), makes the agent reply only to
+	// messages starting with it; other messages are kept as silent context.
+	TriggerPrefix string `toml:"trigger_prefix"`
 }
 
 // UpdateConfig defines auto-update behavior.

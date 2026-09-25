@@ -269,3 +269,21 @@ func hasFinding(result *ValidationResult, severity ValidationSeverity, needle st
 	}
 	return false
 }
+
+func TestValidateGatewayProfileTriggerPrefix(t *testing.T) {
+	for prefix, wantErr := range map[string]bool{"": false, "!": false, "v100:": false, "   ": true, "/go": true} {
+		cfg := DefaultConfig()
+		cfg.Gateway.Profiles = map[string]GatewayProfile{"p": {TriggerPrefix: prefix}}
+		result := &ValidationResult{}
+		validateGatewayProfiles(result, cfg)
+		got := false
+		for _, issue := range result.Findings {
+			if strings.HasSuffix(issue.Path, ".trigger_prefix") {
+				got = true
+			}
+		}
+		if got != wantErr {
+			t.Errorf("trigger_prefix %q: validation error = %v, want %v (%#v)", prefix, got, wantErr, result.Findings)
+		}
+	}
+}
