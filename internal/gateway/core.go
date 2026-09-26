@@ -124,6 +124,18 @@ func ApplyProfileToSessionNew(params *acp.SessionNewParams, runtime ProfileRunti
 		params.SystemPrompt = string(data)
 	}
 	params.NetworkTier = strings.TrimSpace(profile.NetworkTier)
+	if profile.MaxHistoryMessages < 0 {
+		return fmt.Errorf("max_history_messages must be >= 0")
+	}
+	params.MaxHistoryMessages = profile.MaxHistoryMessages
+	if profile.MaxToolCallsPerStep < 0 {
+		return fmt.Errorf("max_tool_calls_per_step must be >= 0")
+	}
+	params.MaxToolCalls = profile.MaxToolCallsPerStep
+	if profile.InspectionToolLimit < 0 {
+		return fmt.Errorf("inspection_tool_limit must be >= 0")
+	}
+	params.InspectionLimit = profile.InspectionToolLimit
 	if profile.BudgetStepsSet || profile.BudgetSteps > 0 {
 		if profile.BudgetSteps < 0 {
 			return fmt.Errorf("budget_steps must be >= 0")
@@ -165,6 +177,9 @@ func ApplyProfileToSessionResume(params *acp.SessionResumeParams, runtime Profil
 	params.Dangerous = fresh.Dangerous
 	params.SystemPrompt = fresh.SystemPrompt
 	params.NetworkTier = fresh.NetworkTier
+	params.MaxHistoryMessages = fresh.MaxHistoryMessages
+	params.MaxToolCalls = fresh.MaxToolCalls
+	params.InspectionLimit = fresh.InspectionLimit
 	if fresh.BudgetStepsSet {
 		value := fresh.BudgetSteps
 		params.BudgetSteps = &value

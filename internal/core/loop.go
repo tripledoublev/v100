@@ -468,6 +468,7 @@ func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause err
 // execToolCall executes a single tool call and returns (denied, error).
 // denied is true when a dangerous tool was denied by the confirm function.
 func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.ToolCall) (bool, error) {
+	l.lastToolOK = false
 	rawArgs := string(tc.Args)
 	displayArgs := l.redactText(rawArgs)
 	// Emit tool.call event
@@ -1144,6 +1145,45 @@ func (l *Loop) SanitizeLiveMessages() bool {
 		l.Messages = out
 	}
 	return modified
+}
+
+// ApplyHistoryWindow trims l.Messages to roughly the most recent maxMessages.
+// Leading system messages (the system prompt, resume summary) are always kept
+// and do not count toward the window. The kept tail starts at a user message
+// so a tool result is never separated from the assistant tool call that
+// produced it. Returns the number of messages dropped.
+func (l *Loop) ApplyHistoryWindow(maxMessages int) int {
+	if maxMessages <= 0 {
+		return 0
+	}
+	head := 0
+	for head < len(l.Messages) && l.Messages[head].Role == "system" {
+		head++
+	}
+	body := l.Messages[head:]
+	if len(body) <= maxMessages {
+		return 0
+	}
+	start := len(body) - maxMessages
+	for start < len(body) && body[start].Role != "user" {
+		start++
+	}
+	if start >= len(body) {
+		// No user message inside the window (one long turn): keep that
+		// latest turn whole, from its user message, and drop older turns.
+		start = len(body) - maxMessages
+		for start > 0 && body[start].Role != "user" {
+			start--
+		}
+		if start == 0 {
+			return 0
+		}
+	}
+	kept := make([]providers.Message, 0, head+len(body)-start)
+	kept = append(kept, l.Messages[:head]...)
+	kept = append(kept, body[start:]...)
+	l.Messages = kept
+	return start
 }
 
 func (l *Loop) memoryReferenceMessageForStep(stepID string, consume bool) (string, bool) {

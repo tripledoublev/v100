@@ -966,3 +966,152 @@ func TestSanitizeLiveMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyHistoryWindow(t *testing.T) {
+	tests := []struct {
+		name          string
+		messageCount  int
+		maxWindow     int
+		wantRemaining int
+		wantDropped   int
+	}{
+		{
+			name:          "unlimited window (0)",
+			messageCount:  100,
+			maxWindow:     0,
+			wantRemaining: 100,
+			wantDropped:   0,
+		},
+		{
+			name:          "window larger than history",
+			messageCount:  50,
+			maxWindow:     100,
+			wantRemaining: 50,
+			wantDropped:   0,
+		},
+		{
+			name:          "window equals history",
+			messageCount:  50,
+			maxWindow:     50,
+			wantRemaining: 50,
+			wantDropped:   0,
+		},
+		{
+			name:          "window smaller than history",
+			messageCount:  100,
+			maxWindow:     20,
+			wantRemaining: 19, // index 80 is an assistant turn; window starts at next user
+			wantDropped:   81,
+		},
+		{
+			name:          "empty history",
+			messageCount:  0,
+			maxWindow:     10,
+			wantRemaining: 0,
+			wantDropped:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := &core.Loop{
+				Messages: makeTestMessages(tt.messageCount),
+			}
+
+			dropped := l.ApplyHistoryWindow(tt.maxWindow)
+
+			if dropped != tt.wantDropped {
+				t.Errorf("dropped: got %d, want %d", dropped, tt.wantDropped)
+			}
+			if len(l.Messages) != tt.wantRemaining {
+				t.Errorf("remaining: got %d, want %d", len(l.Messages), tt.wantRemaining)
+			}
+		})
+	}
+}
+
+func TestApplyHistoryWindowKeepsSystemAndToolPairs(t *testing.T) {
+	l := &core.Loop{Messages: []providers.Message{
+		{Role: "system", Content: "system prompt"},
+		{Role: "system", Content: "resume summary"},
+		{Role: "user", Content: "old question"},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "read the file"},
+		{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: "c1", Name: "fs_read"}}},
+		{Role: "tool", ToolCallID: "c1", Content: "file contents"},
+		{Role: "assistant", Content: "done"},
+		{Role: "user", Content: "latest"},
+	}}
+
+	// A window of 4 would start at the tool result; it must advance to the
+	// next user message instead of orphaning the result.
+	dropped := l.ApplyHistoryWindow(4)
+	if dropped != 6 {
+		t.Fatalf("dropped = %d, want 6", dropped)
+	}
+	want := []string{"system prompt", "resume summary", "latest"}
+	if len(l.Messages) != len(want) {
+		t.Fatalf("len = %d, want %d: %+v", len(l.Messages), len(want), l.Messages)
+	}
+	for i, content := range want {
+		if l.Messages[i].Content != content {
+			t.Fatalf("msg[%d] = %q, want %q", i, l.Messages[i].Content, content)
+		}
+	}
+
+	// A window that starts on a user message keeps the full tool exchange.
+	l.Messages = append([]providers.Message{{Role: "system", Content: "sys"}},
+		providers.Message{Role: "user", Content: "q1"},
+		providers.Message{Role: "assistant", Content: "a1"},
+		providers.Message{Role: "user", Content: "q2"},
+		providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: "c2", Name: "fs_read"}}},
+		providers.Message{Role: "tool", ToolCallID: "c2", Content: "out"},
+		providers.Message{Role: "assistant", Content: "a2"},
+	)
+	if dropped := l.ApplyHistoryWindow(4); dropped != 2 {
+		t.Fatalf("dropped = %d, want 2", dropped)
+	}
+	if l.Messages[0].Role != "system" || l.Messages[1].Content != "q2" || len(l.Messages) != 5 {
+		t.Fatalf("unexpected window: %+v", l.Messages)
+	}
+}
+
+func makeTestMessages(count int) []providers.Message {
+	msgs := make([]providers.Message, count)
+	for i := 0; i < count; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs[i] = providers.Message{
+			Role:    role,
+			Content: "message " + string(rune(i)),
+		}
+	}
+	return msgs
+}
+
+func TestApplyHistoryWindowKeepsLatestLongTurn(t *testing.T) {
+	// One user message followed by more tool traffic than the window: the
+	// latest turn is kept whole from its user message, older turns dropped.
+	msgs := []providers.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "old"},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "big task"},
+	}
+	for i := 0; i < 6; i++ {
+		id := string(rune('a' + i))
+		msgs = append(msgs,
+			providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: id, Name: "fs_read"}}},
+			providers.Message{Role: "tool", ToolCallID: id, Content: "out"},
+		)
+	}
+	l := &core.Loop{Messages: msgs}
+	if dropped := l.ApplyHistoryWindow(4); dropped != 2 {
+		t.Fatalf("dropped = %d, want 2", dropped)
+	}
+	if l.Messages[0].Content != "sys" || l.Messages[1].Content != "big task" || len(l.Messages) != 14 {
+		t.Fatalf("unexpected window (len %d): %+v", len(l.Messages), l.Messages[:2])
+	}
+}

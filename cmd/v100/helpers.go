@@ -1242,6 +1242,9 @@ func loadPolicy(cfg *config.Config, name string) *policy.Policy {
 	if cfg.Defaults.MaxToolCallsPerStep > 0 {
 		p.MaxToolCallsPerStep = cfg.Defaults.MaxToolCallsPerStep
 	}
+	if cfg.Defaults.InspectionToolLimit > 0 {
+		p.InspectionToolLimit = cfg.Defaults.InspectionToolLimit
+	}
 	if cfg.Defaults.MaxToolResultChars > 0 {
 		p.MaxToolResultChars = cfg.Defaults.MaxToolResultChars
 	}

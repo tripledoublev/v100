@@ -96,25 +96,28 @@ type GatewayConfig struct {
 
 // GatewayProfile constrains provider/runtime settings for a gateway chat.
 type GatewayProfile struct {
-	Tools            []string `toml:"tools"`
-	Dangerous        []string `toml:"dangerous"`
-	AllowedCommands  []string `toml:"allowed_commands"`
-	Provider         string   `toml:"provider"`
-	Model            string   `toml:"model"`
-	Solver           string   `toml:"solver"`
-	SystemPrompt     string   `toml:"system_prompt"`
-	SystemPromptPath string   `toml:"system_prompt_path"`
-	NetworkTier      string   `toml:"network_tier"`
-	BudgetSteps      int      `toml:"budget_steps"`
-	BudgetTokens     int      `toml:"budget_tokens"`
-	BudgetCostUSD    float64  `toml:"budget_cost_usd"`
-	BudgetStepsSet   bool     `toml:"-"`
-	BudgetTokensSet  bool     `toml:"-"`
-	BudgetCostSet    bool     `toml:"-"`
-	VoiceReplies     *bool    `toml:"voice_replies"`
-	VoiceReplyMode   string   `toml:"voice_reply_mode"`
-	ReactionMode     string   `toml:"reaction_mode"`
-	ReactionEmojis   []string `toml:"reaction_emojis"`
+	Tools               []string `toml:"tools"`
+	Dangerous           []string `toml:"dangerous"`
+	AllowedCommands     []string `toml:"allowed_commands"`
+	Provider            string   `toml:"provider"`
+	Model               string   `toml:"model"`
+	Solver              string   `toml:"solver"`
+	SystemPrompt        string   `toml:"system_prompt"`
+	SystemPromptPath    string   `toml:"system_prompt_path"`
+	NetworkTier         string   `toml:"network_tier"`
+	BudgetSteps         int      `toml:"budget_steps"`
+	BudgetTokens        int      `toml:"budget_tokens"`
+	BudgetCostUSD       float64  `toml:"budget_cost_usd"`
+	BudgetStepsSet      bool     `toml:"-"`
+	BudgetTokensSet     bool     `toml:"-"`
+	BudgetCostSet       bool     `toml:"-"`
+	MaxHistoryMessages  int      `toml:"max_history_messages"` // 0 = unlimited, >0 = sliding window
+	MaxToolCallsPerStep int      `toml:"max_tool_calls_per_step"`
+	InspectionToolLimit int      `toml:"inspection_tool_limit"` // inspection-only tool calls before the watchdog stops tools (0 = default)
+	VoiceReplies        *bool    `toml:"voice_replies"`
+	VoiceReplyMode      string   `toml:"voice_reply_mode"`
+	ReactionMode        string   `toml:"reaction_mode"`
+	ReactionEmojis      []string `toml:"reaction_emojis"`
 	// TriggerPrefix, when set (e.g. "!"), makes the agent reply only to
 	// messages starting with it; other messages are kept as silent context.
 	TriggerPrefix string `toml:"trigger_prefix"`
@@ -272,6 +275,7 @@ type DefaultsConfig struct {
 	BudgetCostUSD          float64  `toml:"budget_cost_usd"`
 	ToolTimeoutMS          int      `toml:"tool_timeout_ms"`
 	MaxToolCallsPerStep    int      `toml:"max_tool_calls_per_step"`
+	InspectionToolLimit    int      `toml:"inspection_tool_limit"` // 0 = built-in default
 	MemoryMode             string   `toml:"memory_mode"`
 	MemoryMaxTokens        int      `toml:"memory_max_tokens"`
 	ContextLimit           int      `toml:"context_limit"`

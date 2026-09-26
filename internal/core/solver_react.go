@@ -77,6 +77,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 	var terminalErr error
 	inspectionOnly := true
 	inspectionToolCalls := 0
+	editedThisStep := false
 	stepTokensUsed := 0
 	stepOutputTokens := 0
 	watchdogInjected := false
@@ -370,6 +371,11 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				return SolveResult{}, err
 			}
 			toolCallsUsed++
+			// Only an edit that actually ran and succeeded makes later
+			// reads verification; denied or failed edits do not count.
+			if isEditTool(tc.Name) && !denied && l.lastToolOK {
+				editedThisStep = true
+			}
 			if denied {
 				key := tc.Name + ":" + string(tc.Args)
 				denialCounts[key]++
@@ -450,7 +456,7 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 		}
 		stopToolsTriggered := false
 		if !watchdogInjected && !watchdogsDisabled(l) {
-			if msg, reason, action, ok := synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly); ok {
+			if msg, reason, action, ok := synthesisWatchdogMessageWithLimit(inspectionToolLimit(l), toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly, editedThisStep); ok {
 				_, _ = l.emit(EventHookIntervention, stepID, HookInterventionPayload{
 					Action:  hookActionTraceName(action),
 					Message: msg,
@@ -534,15 +540,50 @@ func isInspectionTool(name string) bool {
 }
 
 func synthesisWatchdogMessage(toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly bool) (string, string, HookAction, bool) {
+	return synthesisWatchdogMessageWithLimit(inspectionWatchdogToolThreshold, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed, inspectionOnly, false)
+}
+
+// isEditTool reports tools that change workspace files. Once one has run in a
+// step, follow-up reads are verification, not runaway exploration.
+func isEditTool(name string) bool {
+	switch name {
+	case "patch_apply", "fs_write", "fs_mkdir":
+		return true
+	default:
+		return false
+	}
+}
+
+// inspectionToolLimit returns the policy's inspection watchdog threshold,
+// falling back to the built-in default.
+func inspectionToolLimit(l *Loop) int {
+	if l != nil && l.Policy != nil && l.Policy.InspectionToolLimit > 0 {
+		return l.Policy.InspectionToolLimit
+	}
+	return inspectionWatchdogToolThreshold
+}
+
+func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectionToolCalls, modelCalls, stepTokensUsed int, inspectionOnly, edited bool) (string, string, HookAction, bool) {
+	if inspectionLimit <= 0 {
+		inspectionLimit = inspectionWatchdogToolThreshold
+	}
 	if inspectionOnly &&
-		toolCallsUsed >= inspectionWatchdogToolThreshold &&
+		toolCallsUsed >= inspectionLimit &&
 		modelCalls >= inspectionWatchdogModelThreshold {
 		return "System watchdog: you have spent too many tool calls on inspection-only exploration in this step. Tool use is now DISABLED for the remainder of this step. Stop exploring, synthesize what you already know, and provide your final answer.", "inspection_watchdog", HookStopTools, true
 	}
 
-	if modelCalls < readHeavyWatchdogModelThreshold ||
+	// Keep the read-heavy watchdog proportional so raising the inspection
+	// limit is not undone by the lower read-heavy tool threshold.
+	readHeavyTools := readHeavyWatchdogToolThreshold
+	if inspectionLimit > inspectionWatchdogToolThreshold {
+		// Same 6/8 ratio, divided first so huge limits cannot overflow.
+		readHeavyTools = inspectionLimit - inspectionLimit/4
+	}
+	if edited ||
+		modelCalls < readHeavyWatchdogModelThreshold ||
 		stepTokensUsed < readHeavyWatchdogTokenThreshold ||
-		inspectionToolCalls < readHeavyWatchdogToolThreshold {
+		inspectionToolCalls < readHeavyTools {
 		return "", "", HookContinue, false
 	}
 	if toolCallsUsed == 0 || inspectionToolCalls*5 < toolCallsUsed*4 {

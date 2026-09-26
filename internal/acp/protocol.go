@@ -175,52 +175,61 @@ type SessionCapabilities struct {
 }
 
 type SessionNewParams struct {
-	SessionID       string   `json:"sessionId,omitempty"`
-	CWD             string   `json:"cwd,omitempty"`
-	RunDir          string   `json:"runDir,omitempty"`
-	Provider        string   `json:"provider,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	Solver          string   `json:"solver,omitempty"`
-	Tools           []string `json:"tools"`
-	Dangerous       []string `json:"dangerous"`
-	SystemPrompt    string   `json:"system_prompt,omitempty"`
-	NetworkTier     string   `json:"network_tier,omitempty"`
-	BudgetSteps     int      `json:"budget_steps,omitempty"`
-	BudgetTokens    int      `json:"budget_tokens,omitempty"`
-	BudgetCostUSD   float64  `json:"budget_cost_usd,omitempty"`
-	BudgetStepsSet  bool     `json:"-"`
-	BudgetTokensSet bool     `json:"-"`
-	BudgetCostSet   bool     `json:"-"`
+	SessionID          string   `json:"sessionId,omitempty"`
+	CWD                string   `json:"cwd,omitempty"`
+	RunDir             string   `json:"runDir,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	Solver             string   `json:"solver,omitempty"`
+	Tools              []string `json:"tools"`
+	Dangerous          []string `json:"dangerous"`
+	SystemPrompt       string   `json:"system_prompt,omitempty"`
+	NetworkTier        string   `json:"network_tier,omitempty"`
+	BudgetSteps        int      `json:"budget_steps,omitempty"`
+	BudgetTokens       int      `json:"budget_tokens,omitempty"`
+	BudgetCostUSD      float64  `json:"budget_cost_usd,omitempty"`
+	MaxHistoryMessages int      `json:"max_history_messages,omitempty"` // 0 = unlimited
+	MaxToolCalls       int      `json:"max_tool_calls_per_step,omitempty"`
+	InspectionLimit    int      `json:"inspection_tool_limit,omitempty"`
+	BudgetStepsSet     bool     `json:"-"`
+	BudgetTokensSet    bool     `json:"-"`
+	BudgetCostSet      bool     `json:"-"`
 }
 
 type sessionNewParamsJSON struct {
-	SessionID     string   `json:"sessionId,omitempty"`
-	CWD           string   `json:"cwd,omitempty"`
-	RunDir        string   `json:"runDir,omitempty"`
-	Provider      string   `json:"provider,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	Solver        string   `json:"solver,omitempty"`
-	Tools         []string `json:"tools"`
-	Dangerous     []string `json:"dangerous"`
-	SystemPrompt  string   `json:"system_prompt,omitempty"`
-	NetworkTier   string   `json:"network_tier,omitempty"`
-	BudgetSteps   *int     `json:"budget_steps,omitempty"`
-	BudgetTokens  *int     `json:"budget_tokens,omitempty"`
-	BudgetCostUSD *float64 `json:"budget_cost_usd,omitempty"`
+	SessionID          string   `json:"sessionId,omitempty"`
+	CWD                string   `json:"cwd,omitempty"`
+	RunDir             string   `json:"runDir,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	Solver             string   `json:"solver,omitempty"`
+	Tools              []string `json:"tools"`
+	Dangerous          []string `json:"dangerous"`
+	SystemPrompt       string   `json:"system_prompt,omitempty"`
+	NetworkTier        string   `json:"network_tier,omitempty"`
+	BudgetSteps        *int     `json:"budget_steps,omitempty"`
+	BudgetTokens       *int     `json:"budget_tokens,omitempty"`
+	BudgetCostUSD      *float64 `json:"budget_cost_usd,omitempty"`
+	MaxHistoryMessages int      `json:"max_history_messages,omitempty"`
+	MaxToolCalls       int      `json:"max_tool_calls_per_step,omitempty"`
+	InspectionLimit    int      `json:"inspection_tool_limit,omitempty"`
 }
 
 func (p SessionNewParams) MarshalJSON() ([]byte, error) {
 	out := sessionNewParamsJSON{
-		SessionID:    p.SessionID,
-		CWD:          p.CWD,
-		RunDir:       p.RunDir,
-		Provider:     p.Provider,
-		Model:        p.Model,
-		Solver:       p.Solver,
-		Tools:        p.Tools,
-		Dangerous:    p.Dangerous,
-		SystemPrompt: p.SystemPrompt,
-		NetworkTier:  p.NetworkTier,
+		SessionID:          p.SessionID,
+		CWD:                p.CWD,
+		RunDir:             p.RunDir,
+		Provider:           p.Provider,
+		Model:              p.Model,
+		Solver:             p.Solver,
+		Tools:              p.Tools,
+		Dangerous:          p.Dangerous,
+		SystemPrompt:       p.SystemPrompt,
+		NetworkTier:        p.NetworkTier,
+		MaxHistoryMessages: p.MaxHistoryMessages,
+		MaxToolCalls:       p.MaxToolCalls,
+		InspectionLimit:    p.InspectionLimit,
 	}
 	if p.BudgetStepsSet || p.BudgetSteps != 0 {
 		v := p.BudgetSteps
@@ -253,6 +262,9 @@ func (p *SessionNewParams) UnmarshalJSON(data []byte) error {
 	p.Dangerous = in.Dangerous
 	p.SystemPrompt = in.SystemPrompt
 	p.NetworkTier = in.NetworkTier
+	p.MaxHistoryMessages = in.MaxHistoryMessages
+	p.MaxToolCalls = in.MaxToolCalls
+	p.InspectionLimit = in.InspectionLimit
 	if in.BudgetSteps != nil {
 		p.BudgetSteps = *in.BudgetSteps
 		p.BudgetStepsSet = true
@@ -312,6 +324,11 @@ type SessionResumeParams struct {
 	BudgetSteps   *int     `json:"budget_steps,omitempty"`
 	BudgetTokens  *int     `json:"budget_tokens,omitempty"`
 	BudgetCostUSD *float64 `json:"budget_cost_usd,omitempty"`
+	// MaxHistoryMessages keeps only the most recent N messages before each
+	// prompt (0 = unlimited).
+	MaxHistoryMessages int `json:"max_history_messages,omitempty"`
+	MaxToolCalls       int `json:"max_tool_calls_per_step,omitempty"`
+	InspectionLimit    int `json:"inspection_tool_limit,omitempty"`
 }
 
 type SessionResumeResult struct {

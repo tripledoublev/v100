@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.16 — 2026-09-26
+
+**Gateway History Window, Per-Profile Tool Limits + Signal Trigger Prefix**
+
+### Features
+
+- Gateway profiles can set `max_history_messages` to keep only the most recent messages before each prompt (#284). Leading system messages (system prompt, resume summary) are always kept, and the window always starts at a user message so a tool result is never separated from its tool call. The window now also applies to resumed sessions: previously only `session/new` accepted it, and no gateway sent it at all.
+- Gateway profiles can set `max_tool_calls_per_step` and `inspection_tool_limit` (#284). The inspection watchdog threshold, previously hard-coded at 8 read-only calls, is now configurable, and the read-heavy watchdog scales with it.
+- Signal gateway profiles can set `trigger_prefix` (e.g. `"!"`) so the agent only replies to messages that start with it (#286). Other messages are kept as silent context.
+
+### Fixes
+
+- The read-heavy watchdog no longer cuts a step off after a successful edit, where re-reading the file is verification (#284). It stopped a gateway run mid-fix, leaving a half-applied patch and no PR. Denied or failed edits don't count.
+- `patch_apply` no longer leaves `<file>.orig` backups when a hunk applies with an offset or fuzz (#284). They were being swept into commits and PRs.
+- Dangerous tools on a profile's allowlist are now approved in ACP sessions, and control-socket prompts resume the persisted Signal session (#285).
+
+### Upgrade notes
+
+- Per-session budgets accumulate over a gateway session's whole life. For long-lived chats, set `budget_steps = 0` and `budget_tokens = 0` on the profile, and bound each request with `max_tool_calls_per_step` instead.
+
 ## v0.3.15 — 2026-09-01
 
 **MiniMax Vision Correction + GLM Default Model Bump**

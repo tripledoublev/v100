@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tripledoublev/v100/internal/policy"
+)
 
 func TestSynthesisWatchdogMessageReadHeavy(t *testing.T) {
 	msg, reason, action, ok := synthesisWatchdogMessage(
@@ -151,5 +155,59 @@ func TestSynthesisWatchdogMessageReadHeavyWithMixedTools(t *testing.T) {
 	}
 	if action != HookStopTools {
 		t.Fatalf("action = %v, want HookStopTools", action)
+	}
+}
+
+func TestSynthesisWatchdogRespectsInspectionLimit(t *testing.T) {
+	// 8 inspection-only calls trip the default watchdog.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(0, 8, 8, 9, 1000, true, false); !ok || reason != "inspection_watchdog" {
+		t.Fatalf("default limit: ok=%v reason=%q", ok, reason)
+	}
+	// A raised limit lets the same step continue, including past the
+	// read-heavy tool threshold when step tokens are high.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 8, 8, 9, 50000, true, false); ok {
+		t.Fatalf("raised limit fired early: %q", reason)
+	}
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 24, 24, 25, 1000, true, false); !ok || reason != "inspection_watchdog" {
+		t.Fatalf("raised limit at threshold: ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestInspectionToolLimitFromPolicy(t *testing.T) {
+	if got := inspectionToolLimit(nil); got != inspectionWatchdogToolThreshold {
+		t.Fatalf("nil loop = %d", got)
+	}
+	l := &Loop{Policy: &policy.Policy{InspectionToolLimit: 30}}
+	if got := inspectionToolLimit(l); got != 30 {
+		t.Fatalf("policy limit = %d", got)
+	}
+}
+
+func TestReadHeavyWatchdogSkipsAfterEdit(t *testing.T) {
+	// The 2026-09-25 jsroy run: 18 of 19 calls were reads, ~71k step tokens,
+	// with one patch_apply already applied. Before the edit this trips the
+	// read-heavy watchdog; after it, reads are verification.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 19, 18, 12, 71600, false, false); !ok || reason != "read_heavy_watchdog" {
+		t.Fatalf("without edit: ok=%v reason=%q", ok, reason)
+	}
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(24, 19, 18, 12, 71600, false, true); ok {
+		t.Fatalf("after edit fired: %q", reason)
+	}
+	for _, name := range []string{"patch_apply", "fs_write", "fs_mkdir"} {
+		if !isEditTool(name) {
+			t.Fatalf("%s should be an edit tool", name)
+		}
+	}
+	if isEditTool("fs_read") {
+		t.Fatal("fs_read is not an edit tool")
+	}
+}
+
+func TestReadHeavyThresholdDoesNotOverflow(t *testing.T) {
+	huge := int(^uint(0) >> 1)
+	// With an enormous limit the read-heavy threshold must stay enormous,
+	// not wrap around to a tiny value that fires immediately.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(huge, 50, 50, 20, 500000, false, false); ok {
+		t.Fatalf("fired with huge limit: %q", reason)
 	}
 }
