@@ -1090,3 +1090,28 @@ func makeTestMessages(count int) []providers.Message {
 	}
 	return msgs
 }
+
+func TestApplyHistoryWindowKeepsLatestLongTurn(t *testing.T) {
+	// One user message followed by more tool traffic than the window: the
+	// latest turn is kept whole from its user message, older turns dropped.
+	msgs := []providers.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "old"},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "big task"},
+	}
+	for i := 0; i < 6; i++ {
+		id := string(rune('a' + i))
+		msgs = append(msgs,
+			providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{{ID: id, Name: "fs_read"}}},
+			providers.Message{Role: "tool", ToolCallID: id, Content: "out"},
+		)
+	}
+	l := &core.Loop{Messages: msgs}
+	if dropped := l.ApplyHistoryWindow(4); dropped != 2 {
+		t.Fatalf("dropped = %d, want 2", dropped)
+	}
+	if l.Messages[0].Content != "sys" || l.Messages[1].Content != "big task" || len(l.Messages) != 14 {
+		t.Fatalf("unexpected window (len %d): %+v", len(l.Messages), l.Messages[:2])
+	}
+}

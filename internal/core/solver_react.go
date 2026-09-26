@@ -360,9 +360,6 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 			} else {
 				inspectionOnly = false
 			}
-			if isEditTool(tc.Name) {
-				editedThisStep = true
-			}
 			if toolCallsUsed >= maxToolCalls {
 				_, _ = l.emit(EventRunError, stepID, RunErrorPayload{
 					Error: fmt.Sprintf("max tool calls per step reached (%d)", maxToolCalls),
@@ -374,6 +371,11 @@ func (s *ReactSolver) Solve(ctx context.Context, l *Loop, userInput string) (Sol
 				return SolveResult{}, err
 			}
 			toolCallsUsed++
+			// Only an edit that actually ran and succeeded makes later
+			// reads verification; denied or failed edits do not count.
+			if isEditTool(tc.Name) && !denied && l.lastToolOK {
+				editedThisStep = true
+			}
 			if denied {
 				key := tc.Name + ":" + string(tc.Args)
 				denialCounts[key]++
@@ -575,7 +577,8 @@ func synthesisWatchdogMessageWithLimit(inspectionLimit, toolCallsUsed, inspectio
 	// limit is not undone by the lower read-heavy tool threshold.
 	readHeavyTools := readHeavyWatchdogToolThreshold
 	if inspectionLimit > inspectionWatchdogToolThreshold {
-		readHeavyTools = inspectionLimit * readHeavyWatchdogToolThreshold / inspectionWatchdogToolThreshold
+		// Same 6/8 ratio, divided first so huge limits cannot overflow.
+		readHeavyTools = inspectionLimit - inspectionLimit/4
 	}
 	if edited ||
 		modelCalls < readHeavyWatchdogModelThreshold ||

@@ -563,3 +563,66 @@ func TestReactSolverCanDisableWatchdogForAutonomousRuns(t *testing.T) {
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+// runReadHeavyAfterEdit drives one ReAct step: an edit tool call, then enough
+// high-token reads to meet the read-heavy watchdog thresholds.
+func runReadHeavyAfterEdit(t *testing.T, edit providers.ToolCall, editTool tools.Tool) bool {
+	t.Helper()
+	usage := providers.Usage{InputTokens: 15000}
+	read := func(id string) providers.ToolCall {
+		return providers.ToolCall{ID: id, Name: "fs_list", Args: json.RawMessage(`{"path":"."}`)}
+	}
+	p := &MockProvider{
+		Responses: []providers.CompleteResponse{
+			{ToolCalls: []providers.ToolCall{edit}, Usage: usage},
+			{ToolCalls: []providers.ToolCall{read("r1"), read("r2"), read("r3")}, Usage: usage},
+			{ToolCalls: []providers.ToolCall{read("r4"), read("r5"), read("r6"), read("r7")}, Usage: usage},
+			{AssistantText: "done", Usage: usage},
+		},
+	}
+	reg := tools.NewRegistry([]string{"fs_list", editTool.Name()})
+	reg.Register(tools.FSList())
+	reg.Register(editTool)
+
+	runDir := t.TempDir()
+	trace, _ := OpenTrace(runDir + "/trace.jsonl")
+	defer func() { _ = trace.Close() }()
+	l := &Loop{
+		Run:       &Run{ID: "test-run", Dir: runDir},
+		Provider:  p,
+		Tools:     reg,
+		Trace:     trace,
+		Budget:    NewBudgetTracker(&Budget{MaxSteps: 10}),
+		Solver:    &ReactSolver{},
+		Mapper:    NewPathMapper(runDir, runDir),
+		ConfirmFn: func(string, string) bool { return true },
+	}
+	if _, err := l.Solver.Solve(context.Background(), l, "edit then verify"); err != nil {
+		t.Fatalf("Solve failed: %v", err)
+	}
+	events, err := ReadAll(runDir + "/trace.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == EventHookIntervention && strings.Contains(string(ev.Payload), "read_heavy_watchdog") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReactSolverReadHeavyWatchdogAfterSuccessfulEdit(t *testing.T) {
+	edit := providers.ToolCall{ID: "w1", Name: "fs_write", Args: json.RawMessage(`{"path":"note.txt","content":"x"}`)}
+	if runReadHeavyAfterEdit(t, edit, tools.FSWrite()) {
+		t.Fatal("read-heavy watchdog fired after a successful edit")
+	}
+}
+
+func TestReactSolverReadHeavyWatchdogAfterFailedEdit(t *testing.T) {
+	// A patch that cannot apply must not count as an edit.
+	edit := providers.ToolCall{ID: "p1", Name: "patch_apply", Args: json.RawMessage(`{"diff":"--- a/missing.txt\n+++ b/missing.txt\n@@ -1 +1 @@\n-a\n+b\n"}`)}
+	if !runReadHeavyAfterEdit(t, edit, tools.PatchApply()) {
+		t.Fatal("read-heavy watchdog did not fire after a failed edit")
+	}
+}

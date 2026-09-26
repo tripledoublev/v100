@@ -67,13 +67,13 @@ func (t *patchApplyTool) Exec(ctx context.Context, call ToolCallContext, args js
 
 	pArg := fmt.Sprintf("-p%d", strip)
 	if call.Session != nil {
-		res, err := runPatchInSession(ctx, call, a.Diff, patchArgs(pArg), false)
+		res, err := runPatchInSession(ctx, call, a.Diff, sessionPatchArgs(call, pArg), false)
 		dur := time.Since(start).Milliseconds()
 		if err != nil {
 			return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + err.Error(), DurationMS: dur}), nil
 		}
 		if res.ExitCode != 0 {
-			retry, retryErr := runPatchInSession(ctx, call, a.Diff, patchArgs(pArg, "-l"), true)
+			retry, retryErr := runPatchInSession(ctx, call, a.Diff, sessionPatchArgs(call, pArg, "-l"), true)
 			if retryErr != nil {
 				return sanitizeToolResult(call, ToolResult{OK: false, Output: "exec error: " + retryErr.Error(), DurationMS: dur}), nil
 			}
@@ -141,6 +141,17 @@ func patchArgs(pArg string, extra ...string) []string {
 		args = append(args, "--no-backup-if-mismatch")
 	}
 	return append(args, extra...)
+}
+
+// sessionPatchArgs is patchArgs for session execution: a docker session runs
+// GNU patch in a Linux container even on a darwin host.
+func sessionPatchArgs(call ToolCallContext, pArg string, extra ...string) []string {
+	args := patchArgs(pArg, extra...)
+	if runtime.GOOS == "darwin" && call.Session != nil && call.Session.Type() == "docker" {
+		n := len(args) - len(extra)
+		args = append(args[:n:n], append([]string{"--no-backup-if-mismatch"}, extra...)...)
+	}
+	return args
 }
 
 func runPatchInSession(ctx context.Context, call ToolCallContext, diff string, args []string, emit bool) (executor.Result, error) {

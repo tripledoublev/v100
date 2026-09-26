@@ -468,6 +468,7 @@ func (l *Loop) emitErrorAssistance(ctx context.Context, stepID string, cause err
 // execToolCall executes a single tool call and returns (denied, error).
 // denied is true when a dangerous tool was denied by the confirm function.
 func (l *Loop) execToolCall(ctx context.Context, stepID string, tc providers.ToolCall) (bool, error) {
+	l.lastToolOK = false
 	rawArgs := string(tc.Args)
 	displayArgs := l.redactText(rawArgs)
 	// Emit tool.call event
@@ -1168,9 +1169,15 @@ func (l *Loop) ApplyHistoryWindow(maxMessages int) int {
 		start++
 	}
 	if start >= len(body) {
-		// No user message inside the window; keep it unchanged rather than
-		// sending a tail that begins mid tool exchange.
-		return 0
+		// No user message inside the window (one long turn): keep that
+		// latest turn whole, from its user message, and drop older turns.
+		start = len(body) - maxMessages
+		for start > 0 && body[start].Role != "user" {
+			start--
+		}
+		if start == 0 {
+			return 0
+		}
 	}
 	kept := make([]providers.Message, 0, head+len(body)-start)
 	kept = append(kept, l.Messages[:head]...)

@@ -202,3 +202,12 @@ func TestReadHeavyWatchdogSkipsAfterEdit(t *testing.T) {
 		t.Fatal("fs_read is not an edit tool")
 	}
 }
+
+func TestReadHeavyThresholdDoesNotOverflow(t *testing.T) {
+	huge := int(^uint(0) >> 1)
+	// With an enormous limit the read-heavy threshold must stay enormous,
+	// not wrap around to a tiny value that fires immediately.
+	if _, reason, _, ok := synthesisWatchdogMessageWithLimit(huge, 50, 50, 20, 500000, false, false); ok {
+		t.Fatalf("fired with huge limit: %q", reason)
+	}
+}
