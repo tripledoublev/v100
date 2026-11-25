@@ -8,7 +8,7 @@ import (
 
 const (
 	glmBaseURL      = "https://api.z.ai/api/coding/paas/v4"
-	glmDefaultModel = "glm-5.3"
+	glmDefaultModel = "glm-5.4"
 )
 
 // GLMProvider implements Provider using Zhipu AI's OpenAI-compatible API.
@@ -100,7 +100,10 @@ func (p *GLMProvider) Models() []ModelInfo {
 		{Name: "glm-5v-turbo", Description: "vision — image/video/text multimodal coding"},
 		{Name: "glm-4.6v", Description: "vision — image/text multimodal reasoning"},
 		{Name: "glm-4.5v", Description: "vision — image/text multimodal reasoning"},
-		{Name: "glm-5.1", Description: "flagship — long-horizon agents"},
+		{Name: "glm-5.4", Description: "flagship — long-horizon agents"},
+		{Name: "glm-5.3", Description: "flagship — long-horizon agents"},
+		{Name: "glm-5.2", Description: "flagship — long-horizon agents"},
+		{Name: "glm-5.1", Description: "powerful — long-horizon agents"},
 		{Name: "glm-5", Description: "powerful — agentic + coding"},
 		{Name: "glm-4.7", Description: "standard — enhanced coding + reasoning"},
 		{Name: "glm-4.7-flashx", Description: "fast — lightweight, paid"},
